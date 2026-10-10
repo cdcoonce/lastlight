@@ -7,6 +7,7 @@ from pathlib import Path
 
 import image_factory as images
 import pytest
+
 from lastlight.privacy import Finding, load_allowlist, scan
 from lastlight.site import PRIVATE_SITE_SENTINEL
 
@@ -231,7 +232,8 @@ def test_every_other_path_is_scanned_normally(tmp_path: Path, relative: str) -> 
 
 
 def test_the_scanner_exemption_does_not_cover_image_metadata(tmp_path: Path) -> None:
-    relative = "tests/test_privacy_fixture.png"
+    # The name matches the exempt glob; the bytes are a PNG, which is recognised by content.
+    relative = "tests/test_privacy_fixture.py"
     plant(tmp_path, relative, images.png_with_text())
     assert [f.rule for f in findings_for(tmp_path, relative)] == ["P004"]
 

@@ -94,11 +94,26 @@ def test_a_missing_path_is_a_usage_error_not_a_pass(
     assert "nope.txt" in err
 
 
-def test_a_symlink_is_not_followed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_symlink_named_as_a_path_is_refused_not_silently_passed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     (tmp_path / "real.txt").write_text("at 17:42\n")
     (tmp_path / "link.txt").symlink_to(tmp_path / "real.txt")
-    code, out, _err = run(capsys, tmp_path, tmp_path / "link.txt")
-    assert (code, out) == (0, [])
+    code, out, err = run(capsys, tmp_path, tmp_path / "link.txt")
+    assert (code, out) == (2, [])
+    assert "symlink" in err
+
+
+def test_a_symlink_found_while_walking_a_directory_is_not_followed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "elsewhere").mkdir()
+    (tmp_path / "elsewhere" / "leak.txt").write_text("at 17:42\n")
+    (tmp_path / "out").mkdir()
+    (tmp_path / "out" / "ok.txt").write_text("fine\n")
+    (tmp_path / "out" / "link.txt").symlink_to(tmp_path / "elsewhere" / "leak.txt")
+    (tmp_path / "out" / "linkdir").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+    assert run(capsys, tmp_path, tmp_path / "out")[:2] == (0, [])
 
 
 # --- the allowlist option --------------------------------------------------------------------
@@ -194,6 +209,26 @@ def test_a_file_that_is_both_tracked_and_under_site_is_reported_once(
     (repo / "site" / "index.html").write_text("<p>seal 17:42</p>\n")
     git(repo, "add", "site/index.html")
     assert run(capsys, repo)[1] == ["site/index.html:1: P001: 17:42"]
+
+
+def test_a_tracked_symlink_is_not_followed(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    (repo / "target.txt").write_text("fine\n")
+    (repo / "outside.txt").write_text("at 17:42\n")
+    (repo / "link.txt").symlink_to(repo / "outside.txt")
+    git(repo, "add", "target.txt", "link.txt")
+    assert run(capsys, repo)[:2] == (0, [])
+
+
+def test_a_symlinked_site_directory_is_refused(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (repo / "ok.txt").write_text("fine\n")
+    git(repo, "add", "ok.txt")
+    (repo / "elsewhere").mkdir()
+    (repo / "site").symlink_to(repo / "elsewhere", target_is_directory=True)
+    code, out, err = run(capsys, repo)
+    assert (code, out) == (2, [])
+    assert "symlink" in err
 
 
 def test_a_tracked_file_deleted_from_the_working_tree_is_skipped(

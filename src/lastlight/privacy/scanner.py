@@ -2,12 +2,15 @@
 
 The default target is the repository's git-tracked files plus `site/` (the generated
 almanac), so the scan sees everything that is published. Explicit paths replace that default.
-Symlinks are never followed. A file the scanner cannot classify as an image is scanned as text
-unless it holds NUL bytes, in which case only the byte-level rules (P004, P005) apply.
+Symlinks are never followed: one found while walking is skipped (git stores only its link
+text), and one named as a PATH or as `site/` is refused so it cannot silently pass. A file that
+is not an image is scanned as text unless it holds NUL bytes without a UTF-16/32 byte-order
+mark, in which case only the byte-level rule P005 applies.
 """
 
 from __future__ import annotations
 
+import codecs
 import os
 import re
 import subprocess
@@ -101,7 +104,9 @@ def default_targets(root: Path) -> list[Path]:
         )
     tracked = [root / os.fsdecode(name) for name in listing.stdout.split(b"\0") if name]
     site = root / SITE_DIRECTORY
-    generated = list(_walk(site)) if site.is_dir() and not site.is_symlink() else []
+    if site.is_symlink():
+        raise ScanError(f"{SITE_DIRECTORY}/ is a symlink; the scan does not follow symlinks")
+    generated = list(_walk(site)) if site.is_dir() else []
     return _scannable([*tracked, *generated])
 
 
@@ -110,7 +115,7 @@ def expand(paths: Iterable[Path]) -> list[Path]:
     found: list[Path] = []
     for path in paths:
         if path.is_symlink():
-            continue
+            raise ScanError(f"refusing to follow the symlink {path}; pass its target instead")
         if path.is_dir():
             found.extend(_walk(path))
         elif path.is_file():
@@ -150,9 +155,27 @@ def scan_file(path: Path, display: str) -> list[Finding]:
     issues = image_issues(data, path.suffix)
     if issues is not None:
         findings += [Finding(display, 1, "P004", issue, issue) for issue in issues]
-    elif b"\x00" not in data[:_BINARY_PROBE]:
-        findings += _text_findings(data.decode("utf-8", errors="replace"), display)
+    else:
+        text = _decode_text(data)
+        if text is not None:
+            findings += _text_findings(text, display)
     return findings
+
+
+def _decode_text(data: bytes) -> str | None:
+    """The file as text, or None when it is binary (NUL bytes without a UTF-16/32 byte-order
+    mark). A UTF-16 file, such as a spreadsheet export, is full of NULs but is still text."""
+    for bom, encoding in (
+        (codecs.BOM_UTF32_LE, "utf-32"),
+        (codecs.BOM_UTF32_BE, "utf-32"),
+        (codecs.BOM_UTF16_LE, "utf-16"),
+        (codecs.BOM_UTF16_BE, "utf-16"),
+    ):
+        if data.startswith(bom):
+            return data.decode(encoding, errors="replace")
+    if b"\x00" in data[:_BINARY_PROBE]:
+        return None
+    return data.decode("utf-8", errors="replace")
 
 
 def _sentinel_findings(data: bytes, display: str) -> list[Finding]:

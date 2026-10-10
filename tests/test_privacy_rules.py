@@ -67,8 +67,10 @@ def test_p001_flags_each_clock_time_form(tmp_path: Path, leak: str) -> None:
 def test_p001_leak_is_one_finding_even_when_it_is_a_full_datetime(
     tmp_path: Path, leak: str
 ) -> None:
-    # A datetime is one leak, not a date-part finding plus a time-part finding.
-    assert len(scan_text(tmp_path, f"{leak}\n")) == 1
+    # A datetime is one leak, not a date-part finding plus a time-part finding, and the
+    # excerpt shows all of it.
+    (finding,) = scan_text(tmp_path, f"{leak}\n")
+    assert finding.excerpt == leak
 
 
 def test_p001_reports_the_line_and_the_matched_text(tmp_path: Path) -> None:
@@ -99,6 +101,7 @@ def test_p001_is_not_hidden_by_the_characters_around_it(tmp_path: Path, disguise
         "python 3.12.4 and uv 0.8.0",
         "values[10:20] and rows[1:30]",
         "frame[a, 1:30]",
+        "arr[10:20, 3] and df.iloc[5:12, :]",
         "the zone is UTC-07:00 all year",
         "offsets are written GMT+5:30 and utc-07:00",
         "sha256:0123456789abcdef0123456789abcdef",
@@ -283,6 +286,13 @@ def test_p003_does_not_pair_numbers_in_different_paragraphs(tmp_path: Path) -> N
     assert scan_text(tmp_path, "latitude 33.4484\n\nlater, the value -112.0740\n") == []
 
 
+def test_p003_pairs_numbers_up_to_40_characters_apart_and_no_further(tmp_path: Path) -> None:
+    near = "33.4484" + " " * 40 + "-112.0740\n"
+    far = "33.4484" + " " * 41 + "-112.0740\n"
+    assert rule_ids(scan_text(tmp_path, near, "near.txt")) == ["P003"]
+    assert scan_text(tmp_path, far, "far.txt") == []
+
+
 def test_p003_does_not_pair_numbers_separated_by_other_numbers(tmp_path: Path) -> None:
     assert scan_text(tmp_path, "33.4484, 12, -112.0740\n") == []
 
@@ -305,6 +315,24 @@ def test_p005_does_not_flag_the_site_file_environment_variable(tmp_path: Path) -
     # `LASTLIGHT_SITE_FILE` names where the private file lives; it is not private content.
     assert scan_text(tmp_path, "export LASTLIGHT_SITE_FILE=/etc/site.toml\n") == []
     assert scan_text(tmp_path, "LASTLIGHT_PRIVATE is a prefix only\n", "prefix.txt") == []
+
+
+# --- which files get the text rules ---------------------------------------------------------
+
+
+def test_text_rules_skip_binary_files_but_p005_still_reads_them(tmp_path: Path) -> None:
+    blob = b"\x00\x01 seal at 17:42 and 33.4484, -112.0740 \x02\x00"
+    assert scan_text(tmp_path, blob, "blob.bin") == []
+
+
+@pytest.mark.parametrize("encoding", ["utf-16", "utf-16-be", "utf-32"])
+def test_text_in_utf16_or_utf32_with_a_byte_order_mark_is_still_scanned(
+    tmp_path: Path, encoding: str
+) -> None:
+    # Spreadsheet exports are UTF-16: full of NUL bytes, but text all the same.
+    data = "\ufeffseal at 17:42\n".encode(encoding)
+    assert b"\x00" in data
+    assert rule_ids(scan_text(tmp_path, data, "export.csv")) == ["P001"]
 
 
 # --- all rules on one file -------------------------------------------------------------------
