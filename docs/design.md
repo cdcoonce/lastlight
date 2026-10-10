@@ -87,7 +87,7 @@ Python 3.12, `uv`, `src/lastlight/`, pytest, ruff. Small modules with one job ea
 | --- | --- | --- |
 | M0 Foundations | Scaffold, CI, privacy scanner, geometry, seal ledger, HRRR transect ingest | CI green; privacy scanner proven by planted leaks |
 | M1 First painting | Renderer v0, daily sealed forecast, almanac site showing tonight's painting | A forecast sealed and verified on 5 consecutive days |
-| **G0** | Spread study: render a year of clear-sky curves from archived inputs | Rendered P10-P90 spread of at least 4 delta-E 2000 in at least 2 of 3 elevation bands on at least 25 percent of days; otherwise the curve target cannot be resolved and the design changes before hardware is bought |
+| **G0** | Spread study: render a year of clear-sky curves from archived inputs | On at least 25 percent of dates, the rendered curve differs from the period's median curve by a band-mean delta-E 2000 of at least 4.0 in at least 2 of 3 twilight bands; otherwise the curve target cannot be resolved and the design changes before hardware is bought |
 | M2 Instrument | Camera purchase (human ask), mount, capture, calibration | **G1**: repeatability of at least 2x below the observed clear-sky spread across 20 clear evenings; re-run in the first hot month |
 | M3 Scoring | Observed curves, vividness, baselines, regimes, public scoreboard | First 30 scored evenings |
 | M4 Physics | Bruneton lookup table, cloud-lit vividness, RRFS-SD dust, CAMS | Pre-registered comparison of v1 against v0 on held-out evenings |
