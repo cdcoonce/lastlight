@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from lastlight.privacy import RULES, Finding, contains_clock_time, scan
 from lastlight.site import PRIVATE_SITE_SENTINEL
 
@@ -77,6 +78,21 @@ def test_p001_reports_the_line_and_the_matched_text(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
+    "disguised",
+    [
+        "sunset-17:42.png",
+        "ts17:42",
+        "frame_17:42.json",
+        "see/17:42",
+        "time=17:42Z",
+        "frame_20261010T0024",
+    ],
+)
+def test_p001_is_not_hidden_by_the_characters_around_it(tmp_path: Path, disguised: str) -> None:
+    assert "P001" in rule_ids(scan_text(tmp_path, disguised + "\n"))
+
+
+@pytest.mark.parametrize(
     "clean",
     [
         "Observed on 2026-10-10 and again on 2026-10-11.",
@@ -84,6 +100,7 @@ def test_p001_reports_the_line_and_the_matched_text(tmp_path: Path) -> None:
         "values[10:20] and rows[1:30]",
         "frame[a, 1:30]",
         "the zone is UTC-07:00 all year",
+        "offsets are written GMT+5:30 and utc-07:00",
         "sha256:0123456789abcdef0123456789abcdef",
         "a 3:1 ratio and port 8080:80",
         "section 4.2 of the design",
@@ -159,6 +176,13 @@ def test_p002_window_applies_before_the_word_too(tmp_path: Path) -> None:
     far = "5 PM" + " " * 41 + "sunset\n"
     assert rule_ids(scan_text(tmp_path, near, "near.txt")) == ["P002"]
     assert scan_text(tmp_path, far, "far.txt") == []
+
+
+def test_p002_sees_sun_event_words_inside_identifiers_but_not_longer_words(
+    tmp_path: Path,
+) -> None:
+    assert rule_ids(scan_text(tmp_path, "sunset_time = 5 PM\n", "key.txt")) == ["P002"]
+    assert scan_text(tmp_path, "sunsetting at 5 PM\n", "longer.txt") == []
 
 
 def test_p002_spans_a_line_break(tmp_path: Path) -> None:
