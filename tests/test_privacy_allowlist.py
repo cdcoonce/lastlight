@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import textwrap
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 import image_factory as images
 import pytest
 
 from lastlight.privacy import Finding, load_allowlist, scan
+from lastlight.privacy.allowlist import SELF_EXEMPT, is_self_exempt
 from lastlight.site import PRIVATE_SITE_SENTINEL
 
 LEAK_A = "17:42"
@@ -231,11 +233,33 @@ def test_every_other_path_is_scanned_normally(tmp_path: Path, relative: str) -> 
     assert [f.rule for f in findings_for(tmp_path, relative)] == ["P001"]
 
 
-def test_the_scanner_exemption_does_not_cover_image_metadata(tmp_path: Path) -> None:
-    # The name matches the exempt glob; the bytes are a PNG, which is recognised by content.
-    relative = "tests/test_privacy_fixture.py"
+# One concrete path under each self-exemption glob. A new glob has to be added here, so no
+# exemption can be added without also being checked against image metadata.
+EXEMPT_SAMPLE_PATHS = {
+    "src/lastlight/privacy/*": "src/lastlight/privacy/leak.png",
+    "tests/test_privacy*.py": "tests/test_privacy_fixture.py",
+    "src/lastlight/site.py": "src/lastlight/site.py",
+    "privacy-allowlist.toml": "privacy-allowlist.toml",
+}
+
+
+def test_every_self_exemption_glob_has_a_sample_path_under_it() -> None:
+    assert set(EXEMPT_SAMPLE_PATHS) == {glob for glob, _rules in SELF_EXEMPT}
+    for glob, relative in EXEMPT_SAMPLE_PATHS.items():
+        assert fnmatchcase(relative, glob), (glob, relative)
+
+
+@pytest.mark.parametrize("relative", list(EXEMPT_SAMPLE_PATHS.values()))
+def test_the_scanner_exemption_does_not_cover_image_metadata(tmp_path: Path, relative: str) -> None:
+    # The name matches an exempt glob; the bytes are a PNG, recognised by content, not name.
     plant(tmp_path, relative, images.png_with_text())
     assert [f.rule for f in findings_for(tmp_path, relative)] == ["P004"]
+
+
+@pytest.mark.parametrize("relative", list(EXEMPT_SAMPLE_PATHS.values()))
+def test_no_self_exemption_covers_image_metadata_or_allowlist_errors(relative: str) -> None:
+    assert not is_self_exempt(relative, "P004")
+    assert not is_self_exempt(relative, "A001")
 
 
 def test_only_the_site_module_and_the_scanner_tests_may_name_the_sentinel(tmp_path: Path) -> None:

@@ -118,11 +118,17 @@ def jpeg_with_xmp(*, gps: bool) -> bytes:
     return jpeg_with_segment(0xE1, b"http://ns.adobe.com/xap/1.0/\x00" + body)
 
 
+def webp_with_chunks(*chunks: tuple[bytes, bytes]) -> bytes:
+    """The plain WebP with extra RIFF chunks appended in order (RIFF size and padding fixed up)."""
+    extra = b""
+    for chunk_type, payload in chunks:
+        extra += chunk_type + struct.pack("<I", len(payload)) + payload
+        if len(payload) % 2:
+            extra += b"\x00"
+    body = plain_webp()[8:] + extra
+    return b"RIFF" + struct.pack("<I", len(body)) + body
+
+
 def webp_with_chunk(chunk_type: bytes, payload: bytes = b"\x00" * 6) -> bytes:
     """The plain WebP with one extra RIFF chunk appended (and the RIFF size fixed up)."""
-    webp = plain_webp()
-    extra = chunk_type + struct.pack("<I", len(payload)) + payload
-    if len(payload) % 2:
-        extra += b"\x00"
-    body = webp[8:] + extra
-    return b"RIFF" + struct.pack("<I", len(body)) + body
+    return webp_with_chunks((chunk_type, payload))
