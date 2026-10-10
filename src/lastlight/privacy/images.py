@@ -230,6 +230,8 @@ def _webp_issues(data: bytes) -> list[str]:
                 note = ""
             issues.append(WEBP_METADATA_CHUNKS[chunk_id] + note)
         position = payload_end + (size % 2)
+    if position < declared_end:  # too short for a chunk header: bytes with no name
+        issues.append("malformed WebP: bytes after the last chunk")
     if declared_end < len(data):
         issues.append("data after RIFF")
     return issues
