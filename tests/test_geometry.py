@@ -22,6 +22,8 @@ from pathlib import Path
 import pandas as pd
 import pvlib
 import pytest
+
+from lastlight import geometry
 from lastlight.geometry import (
     ELEVATION_BANDS,
     ELEVATION_SWEEP,
@@ -31,8 +33,6 @@ from lastlight.geometry import (
     sunset_azimuth,
     transect,
 )
-
-from lastlight import geometry
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
