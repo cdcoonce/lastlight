@@ -17,6 +17,16 @@ Day 0 (2026-10-10). The design contract is in [`docs/design.md`](docs/design.md)
 
 Expect honest nulls: a year of evenings can detect a moderate edge, not a tiny one. The interesting evenings are dust storms, wildfire smoke and monsoon cloud.
 
+## Development
+
+```sh
+uv sync
+uv run lastlight --version
+uv run ruff check && uv run ruff format --check && uv run pytest
+```
+
+Tests run offline: a guard in `tests/conftest.py` refuses every socket connect. A test that really needs the network is marked `@pytest.mark.network`, skipped by default and run on purpose with `uv run pytest -m network`.
+
 ## Privacy
 
 Everything public is referenced to the sun's elevation, never to clock time, because sunset times alone can locate a camera to within about a kilometre. Images are sky-only and stripped of metadata. A CI check enforces this.
