@@ -146,6 +146,52 @@ def test_discover_rejects_a_module_that_defines_no_COMMAND(
         discover("broken_commands")
 
 
+def test_main_loads_its_registry_from_discover_when_no_commands_are_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # `main()` with no `commands=` is how the console script runs. Point `discover` at a
+    # temp package so the whole path (discover -> registry -> parser -> handler) is
+    # exercised without a real subcommand existing yet.
+    package = tmp_path / "wired_commands"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "ping.py").write_text(
+        textwrap.dedent(
+            """
+            from lastlight.cli import Command
+
+
+            def _run(args):
+                print("pong")
+                return 4
+
+
+            COMMAND = Command(name="ping", help="answer a ping", run=_run)
+            """
+        )
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    real_discover = discover
+    monkeypatch.setattr("lastlight.cli.discover", lambda: real_discover("wired_commands"))
+
+    assert main(["ping"]) == 4
+    assert capsys.readouterr().out == "pong\n"
+    assert main(["--help"]) == 0
+    assert "answer a ping" in capsys.readouterr().out
+
+
+def test_explicit_commands_replace_discovery_even_when_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _fail() -> list[Command]:
+        raise AssertionError("discover() must not run when commands= is given")
+
+    monkeypatch.setattr("lastlight.cli.discover", _fail)
+
+    assert main(["echo", "hi"], commands=[ECHO]) == 3
+    assert main(["echo", "hi"], commands=[]) == 2
+
+
 def test_the_real_commands_package_is_discoverable() -> None:
     # No slice has added a subcommand yet; later slices drop a module with COMMAND into it.
     assert all(isinstance(command, Command) for command in discover())
