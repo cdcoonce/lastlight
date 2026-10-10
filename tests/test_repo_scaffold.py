@@ -67,6 +67,7 @@ def test_ci_steps_are_the_gate_in_order(workflow: dict[Any, Any]) -> None:
         "uv run ruff check",
         "uv run ruff format --check",
         "uv run pytest",
+        "uv run lastlight privacy-scan",
     ]
 
 
