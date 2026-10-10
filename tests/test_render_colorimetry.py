@@ -54,7 +54,9 @@ def test_chromaticity_matches_the_colour_science_integration(centre: float, widt
     flat = colour.SpectralDistribution(
         dict(zip(WAVELENGTHS_NM, np.ones_like(WAVELENGTHS_NM), strict=True))
     )
-    reference = colour.sd_to_XYZ(sd, cmfs=cmfs, illuminant=flat, method="Integration")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # colour notes that it re-samples both onto 1 nm
+        reference = colour.sd_to_XYZ(sd, cmfs=cmfs, illuminant=flat, method="Integration")
     reference = reference / reference.sum()
     np.testing.assert_allclose(ours, reference, atol=2e-3)
 

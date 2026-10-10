@@ -16,6 +16,7 @@ import pytest
 from lastlight.render import WAVELENGTHS_NM, Atmosphere
 from lastlight.render.atmosphere import (
     ATMOSPHERE_TOP_KM,
+    EARTH_RADIUS_KM,
     LEVELS_KM,
     OZONE_LAYER_CENTRE_KM,
     RAYLEIGH_SCALE_HEIGHT_KM,
@@ -46,6 +47,14 @@ def test_wavelength_grid_is_380_to_780_nm_in_10_nm_steps() -> None:
     assert WAVELENGTHS_NM[-1] == 780.0
     assert np.all(np.diff(WAVELENGTHS_NM) == 10.0)
     assert WAVELENGTHS_NM.shape == (41,)
+
+
+def test_model_constants_are_the_ones_the_issue_specifies() -> None:
+    """Earth radius 6371 km, atmosphere top 100 km, Rayleigh scale height 8 km, ozone at 22 km."""
+    assert EARTH_RADIUS_KM == 6371.0
+    assert ATMOSPHERE_TOP_KM == 100.0
+    assert RAYLEIGH_SCALE_HEIGHT_KM == 8.0
+    assert OZONE_LAYER_CENTRE_KM == 22.0
 
 
 def test_atmosphere_defaults_are_the_documented_phoenix_background() -> None:
