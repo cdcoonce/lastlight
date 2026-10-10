@@ -1,0 +1,27 @@
+# Privacy scanner and CI gate
+
+**Decided:** `lastlight privacy-scan` makes the section 3 rules executable: five rules (P001 clock-time, P002 sun-event-time, P003 coordinates, P004 image-metadata, P005 private-site), a reviewed allowlist, and a last CI step that fails the build on any finding (issue #3).
+
+- **Spans, not lines.** Rules return character spans over the whole file text, so a coordinate pair split over a TOML `lat`/`lon` pair of lines, a sun-event word on one line and its time on the next, and a JSON `"lat": ..., "lon": ...` object are all caught. The scanner then maps spans to line numbers.
+- **P003 pairs consecutive decimals.** Two decimal numbers with at most 40 digit-free characters (and at most one line break) between them, in either order, either longitude sign, inside the Arizona box, are a pair. The public reference point is excluded numerically (within 1e-6), so `33.450, -112.070` and `33.45 N, 112.07 W` pass and a point 1 km away does not. The box edges are inclusive.
+- **P001 is wide on purpose, with guards for look-alikes.** HH:MM(:SS) with optional am/pm, the `HHhMM` form, ISO datetimes, compact ISO and the bare `THH:MM` half of an ISO datetime. It ignores slices (`a[10:20]`, `arr[10:20, 3]`), UTC offsets and the tail of a longer number. `contains_clock_time` exposes the same pattern for the forecast schema (issue #5).
+- **P002 uses a looser time pattern than P001.** An hour with am/pm and a four-digit time with a zone letter have no HH:MM but still pin a sun event down, so P002 sees them and P001 does not. A sun-event word next to an HH:MM time is therefore both P001 and P002: the rules are independent and each needs its own allowlist entry.
+- **P004 fails closed.** PNG, JPEG, WebP and TIFF (GPS only) are walked by structure. A file with an image suffix that cannot be read, is truncated, or has bytes after the end marker is a finding, as is any image suffix without a walker (GIF, HEIC, AVIF, BMP and others). Beyond the issue's list, ICC profiles and JPEG comment and IPTC segments are flagged too, because design section 3 says "all metadata stripped".
+- **Allowlist `match` is a literal substring of the finding's source line.** That is what lets one `uv.lock` entry cover the 133 PyPI `upload-time` stamps without naming each. An entry suppresses a finding only when path (a glob), rule and match all agree. A bad entry (blank reason, missing or unknown key, unknown rule) is an A001 finding, suppresses nothing, and fails the scan.
+- **Self-exemption is code, not configuration.** The scanner's own source and tests must spell out the patterns, so `SELF_EXEMPT` in `privacy/allowlist.py` lists exactly four path globs. It never covers P004, and only the site module and the scanner's tests may name the private-site sentinel.
+- **`lastlight.site` is only the constants for now.** `REFERENCE_POINT` and `PRIVATE_SITE_SENTINEL` exist; the private-site loader that refuses to run in CI is a later slice. The scanner imports the sentinel instead of spelling it, so its own source stays free of P005.
+
+**Rejected alternatives:** per-line scanning (misses multi-line pairs); a blanket `tests/` exemption (would hide real leaks in other tests); `match` as a regex (an allowlist author could not tell what a line-level entry covers); a stale-entry check on the allowlist (would fail unrelated slices that delete an allowlisted line); superseding P001 with P002 on the same time (hides which rule an entry must name).
+
+**What broke:**
+
+- The first P001 look-behind used `\w`, `/` and `-` to avoid false positives, and that hid a time glued to a word, a hyphen or an underscore, as in a slug or file name. Asking what input misclassifies found it; the guards now block only digits, `.`, `:`, `[` and explicit UTC/GMT offsets.
+- A mutation sweep of the scanner (65 injected defects) left six survivors, each closed by a test: the `[` slice guard (only `arr[10:20, 3]` needs it), the 40-character P003 gap, the P004 exemption test (its path never matched the exempt glob), a symlink filter shadowed by an earlier check, text rules running on binary files, and the ISO alternative (it changes the excerpt, not whether a leak is found).
+- Binary skipping made UTF-16 text exports invisible to the text rules. A byte-order mark now routes UTF-16 and UTF-32 files through them.
+- `ruff check --fix` ran before `lastlight.privacy` existed and sorted its imports as third-party in the new test files; it was re-run once the package was there.
+
+**Not seen by the scanner:** clock times inside file names; coordinates written as degrees-minutes-seconds, scaled integers or Unix timestamps; UTF-16 text without a byte-order mark; TIFF metadata other than GPS. CI skips docs-only changes (`paths-ignore`), so a leak added in a docs-only pull request is first scanned on the next code push.
+
+**Expected false positives:** P003 reads any two decimals in the box as a pair, so SVG path data, CSS colour functions or plot ticks that happen to fall in the Arizona box will be flagged. The almanac slice should avoid such decimals in generated files or allowlist them with a reason. P001 flags any HH:MM, including a duration or a MAC address.
+
+**Next:** solar geometry, seal ledger, HRRR ingest. Each slice that commits a fixed seal time (the scheduled workflow) adds its own allowlist entry with a reason.

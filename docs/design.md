@@ -36,7 +36,7 @@ The home's location must not be derivable from anything public. Sunset clock tim
 - The camera site's coordinates live only in a private config on the capture host (`LASTLIGHT_SITE_FILE`), never in the repo, CI, logs or images.
 - Published images are **sky only**: horizon masked with a margin, downsampled, all metadata stripped (EXIF, XMP, GPS, ICC comments).
 - Scheduled jobs seal at a **fixed clock time** that does not depend on the site.
-- `lastlight privacy-scan` runs in CI over the tracked tree and over every generated site and data artifact. A finding fails the build. Exceptions need an allowlist entry with a written reason.
+- `lastlight privacy-scan` runs in CI over the tracked tree and over every generated site and data artifact. A finding fails the build. Exceptions need an allowlist entry with a written reason. The rules are P001 clock time, P002 sun-event time, P003 coordinates (the public reference point excepted), P004 image metadata and P005 the private-site marker; the allowlist is `privacy-allowlist.toml`.
 
 Metro-level location (Phoenix) is public and accepted.
 
