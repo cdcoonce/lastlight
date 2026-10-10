@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+
 from lastlight.privacy import load_allowlist, scan
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

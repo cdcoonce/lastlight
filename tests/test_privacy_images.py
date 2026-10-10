@@ -6,6 +6,7 @@ from pathlib import Path
 
 import image_factory as images
 import pytest
+
 from lastlight.privacy import Finding, scan
 
 
