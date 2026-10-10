@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# uv and virtualenvs
+.venv/
+venv/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local downloads (forecast inputs, frames, calibration captures); never committed.
+# Anchored to the repo root so a future package data directory is not ignored by accident.
+/data/
+
+# Local environment
+.env
+
+# OS and editors
+.DS_Store
+.idea/
+.vscode/
