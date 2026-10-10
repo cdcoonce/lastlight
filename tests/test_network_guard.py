@@ -25,17 +25,23 @@ def _loopback_listener() -> Iterator[tuple[str, int]]:
 
 def test_plain_socket_connect_raises() -> None:
     # Something is really listening, so without the guard this connect would succeed.
-    with _loopback_listener() as address, socket.socket() as client:
-        with pytest.raises(RuntimeError, match="network") as caught:
-            client.connect(address)
+    with (
+        _loopback_listener() as address,
+        socket.socket() as client,
+        pytest.raises(RuntimeError, match="network") as caught,
+    ):
+        client.connect(address)
     # Not an OSError: code under test that retries or falls back on OSError must not hide it.
     assert not isinstance(caught.value, OSError)
 
 
 def test_connect_ex_raises() -> None:
-    with _loopback_listener() as address, socket.socket() as client:
-        with pytest.raises(RuntimeError, match="network"):
-            client.connect_ex(address)
+    with (
+        _loopback_listener() as address,
+        socket.socket() as client,
+        pytest.raises(RuntimeError, match="network"),
+    ):
+        client.connect_ex(address)
 
 
 def test_create_connection_raises() -> None:
@@ -53,7 +59,9 @@ def _inner_project(tmp_path: Path) -> Path:
     project = tmp_path / "inner"
     (project / "tests").mkdir(parents=True)
     (project / "pyproject.toml").write_text((REPO_ROOT / "pyproject.toml").read_text())
-    (project / "tests" / "conftest.py").write_text((REPO_ROOT / "tests" / "conftest.py").read_text())
+    (project / "tests" / "conftest.py").write_text(
+        (REPO_ROOT / "tests" / "conftest.py").read_text()
+    )
     (project / "tests" / "test_inner.py").write_text(
         "import socket\n"
         "import pytest\n"

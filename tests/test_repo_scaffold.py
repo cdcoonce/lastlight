@@ -70,6 +70,11 @@ def test_ci_steps_are_the_gate_in_order(workflow: dict[Any, Any]) -> None:
     ]
 
 
+def test_ci_does_not_re_resolve_the_lockfile(workflow: dict[Any, Any]) -> None:
+    (job,) = workflow["jobs"].values()
+    assert job["env"]["UV_FROZEN"] == "1"
+
+
 def test_ci_actions_and_uv_are_pinned(workflow: dict[Any, Any]) -> None:
     (job,) = workflow["jobs"].values()
     uses = [step["uses"] for step in job["steps"] if "uses" in step]
