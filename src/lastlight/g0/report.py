@@ -172,8 +172,9 @@ def _criterion_section() -> str:
     return "\n".join(lines)
 
 
-def _inputs_section() -> str:
+def _inputs_section(study: Study) -> str:
     # One line per bullet: Markdown needs no wrapping, and the tests look for whole phrases.
+    smoke = _smoke_sentence(study)
     hrrr = (
         "- **HRRR (smoke and water vapour).** NOAA's HRRR 3 km surface files in the public bucket "
         "`noaa-hrrr-bdp-pds` (no account). Run-selection rule: the analysis (forecast hour 0) of "
@@ -183,7 +184,7 @@ def _inputs_section() -> str:
         "(aerosol optical thickness, smoke only), `PWAT` (precipitable water, recorded and not "
         "rendered) and `LCDC` (low cloud cover, which the reduction requires; recorded and not "
         "rendered). They are sampled along the great circle toward the azimuth at which the sun "
-        "reaches the horizon, every 25 km out to 400 km, nearest cell."
+        "reaches the horizon, every 25 km out to 400 km, nearest cell. " + smoke
     )
     aerosol = (
         "- **Aerosol, total and dust.** NOAA's GEFS-Aerosols (the GEFS control run with the GOCART "
@@ -224,6 +225,95 @@ def _inputs_section() -> str:
     )
     bullets = [hrrr, aerosol, ozone, analyses, geos, fixed]
     return "## Inputs actually used\n\n" + "\n".join(bullets) + "\n"
+
+
+def _smoke_sentence(study: Study) -> str:
+    smoke = [record.atmosphere.aod_smoke for record in study.used if record.atmosphere]
+    nonzero = sum(1 for value in smoke if value > 0.0)
+    if nonzero == 0:
+        return (
+            "HRRR's `AOTK` was exactly zero at every point of the sightline on all "
+            f"{len(smoke)} dates. A check of the whole grid on two dates (2025-09-10 and "
+            "2026-08-20, run on 2026-10-11) found the field zero everywhere at forecast hour 0 "
+            "and non-zero at hours 6 and 12: the smoke model does not populate its analysis. "
+            "HRRR therefore carried no aerosol information here, and all aerosol variation in "
+            "this study comes from GEFS-Aerosols (the daily forecast reads forecast hours, which "
+            "do carry smoke)."
+        )
+    return (
+        f"HRRR's `AOTK` was non-zero on {nonzero} of {len(smoke)} dates "
+        f"(largest transect mean {max(smoke):.3f})."
+    )
+
+
+def _aerosol_months_section(study: Study) -> str:
+    months: dict[str, list] = {}
+    for record in study.used:
+        months.setdefault(record.date.strftime("%Y-%m"), []).append(record.atmosphere)
+    rows = []
+    for month, atmospheres in months.items():
+        total = np.array([a.aod_total for a in atmospheres])
+        dust = np.array([a.aod_dust for a in atmospheres])
+        rows.append(
+            [
+                month,
+                len(atmospheres),
+                f"{np.median(total):.3f}",
+                f"{total.max():.3f}",
+                f"{np.median(dust):.3f}",
+                f"{dust.max():.3f}",
+            ]
+        )
+    table = _table(
+        ["Month", "Dates", "Total, median", "Total, max", "Dust, median", "Dust, max"], rows
+    )
+    return (
+        "## Aerosol input by month\n\n"
+        "Aerosol optical depth at 550 nm from GEFS-Aerosols at the reference point on the dates "
+        "used, the only aerosol input that varies:\n\n"
+        f"{table}\n"
+    )
+
+
+def _channels_section(study: Study) -> str:
+    rows = []
+    for name, outcome in study.channels.items():
+        medians = [f"{np.median(outcome.distances[:, i]):.4f}" for i in range(len(study.bands))]
+        verdict = outcome.verdict
+        rows.append(
+            [name, *medians, f"{verdict.meeting} of {verdict.dates}", _percent(verdict.fraction)]
+        )
+    both = study.outcomes[NOMINAL]
+    rows.append(
+        [
+            "both (the criterion)",
+            *(f"{np.median(both.distances[:, i]):.4f}" for i in range(len(study.bands))),
+            f"{both.verdict.meeting} of {both.verdict.dates}",
+            _percent(both.verdict.fraction),
+        ]
+    )
+    table = _table(
+        [
+            "Channel",
+            *(f"median D {band}" for band in study.bands),
+            "Dates meeting the rule",
+            "Share",
+        ],
+        rows,
+    )
+    lines = [
+        "## Channel decomposition (post hoc)",
+        "",
+        "This section is post hoc. It was added after the verdict was first read, and it is not "
+        "part of the pre-registered criterion: D(d, s) is the mean over both channels, so this "
+        "splits it. The same rule is applied to "
+        "log(R/G) alone and to log(B/G) alone, with the median taken per channel. It shows how "
+        "much of D each channel carries, and it does not change the verdict.",
+        "",
+        table,
+        "",
+    ]
+    return "\n".join(lines)
 
 
 def _view_section(views: Mapping[str, SkyView]) -> str:
@@ -509,12 +599,14 @@ def render_markdown(study: Study, views: Mapping[str, SkyView]) -> str:
         title,
         _verdict_section(study),
         _criterion_section(),
-        _inputs_section(),
+        _inputs_section(study),
+        _aerosol_months_section(study),
         _view_section(views),
         _dates_section(study),
         _distribution_section(study),
         _sensitivity_section(study, views),
         _seasonal_section(study),
+        _channels_section(study),
         _tier_b_section(study),
         _extremes_section(study),
         _floor_section(study),
