@@ -1,0 +1,356 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_collector.py",
+    "tests/test_collect_command.py",
+    "tests/test_camera_registry.py",
+    "tests/test_camera_archive.py",
+    "tests/test_camera_transport.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_collector.py",
+    "tests/test_collect_command.py",
+    "tests/test_camera_registry.py",
+    "tests/test_camera_archive.py",
+    "tests/test_camera_transport.py"
+  ],
+  "mutants": [
+    {
+      "label": "polling floor lowered to 60 s",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "MIN_INTERVAL_S: Final = 300",
+      "replace": "MIN_INTERVAL_S: Final = 60"
+    },
+    {
+      "label": "collect() trusts a config edited after construction",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "    settings.validate()  # a CollectorConfig edited after construction is still checked\n",
+      "replace": "    pass\n"
+    },
+    {
+      "label": "stale threshold is inclusive at 20 minutes",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "if fetched_at - modified > config.stale_after:",
+      "replace": "if fetched_at - modified >= config.stale_after:"
+    },
+    {
+      "label": "stale frames are never rejected",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "if fetched_at - modified > config.stale_after:",
+      "replace": "if False:"
+    },
+    {
+      "label": "validators never remembered",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "double",
+      "find": "    run.etag, run.last_modified = response.header(\"ETag\"), header\n",
+      "replace": "    pass\n"
+    },
+    {
+      "label": "a stale 200 does not update the validators",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "double",
+      "find": "    run.etag, run.last_modified = response.header(\"ETag\"), header\n",
+      "replace": "    if fetched_at - modified <= config.stale_after:\n        run.etag, run.last_modified = response.header(\"ETag\"), header\n"
+    },
+    {
+      "label": "generic User-Agent",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "double",
+      "find": "headers = {\"User-Agent\": USER_AGENT}",
+      "replace": "headers = {\"User-Agent\": \"python-urllib\"}"
+    },
+    {
+      "label": "If-None-Match never sent",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "double",
+      "find": "headers[\"If-None-Match\"] = run.etag",
+      "replace": "pass"
+    },
+    {
+      "label": "If-Modified-Since never sent",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "double",
+      "find": "headers[\"If-Modified-Since\"] = run.last_modified",
+      "replace": "pass"
+    },
+    {
+      "label": "a 304's new ETag is ignored",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "double",
+      "find": "run.etag = fetched.response.header(\"ETag\") or run.etag",
+      "replace": "run.etag = run.etag"
+    },
+    {
+      "label": "two attempts instead of three",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "attempts: int = 3",
+      "replace": "attempts: int = 2"
+    },
+    {
+      "label": "backoff of 10 s",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "backoff_s: float = 20.0",
+      "replace": "backoff_s: float = 10.0"
+    },
+    {
+      "label": "timeout of 30 s",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "double",
+      "find": "timeout_s: float = 60.0",
+      "replace": "timeout_s: float = 30.0"
+    },
+    {
+      "label": "backoff after the last attempt",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "if attempt < config.attempts:",
+      "replace": "if attempt <= config.attempts:"
+    },
+    {
+      "label": "every failure is retried, client errors too",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "return status >= 500 or status in _RETRYABLE_STATUSES",
+      "replace": "return True"
+    },
+    {
+      "label": "server errors are not retried",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "return status >= 500 or status in _RETRYABLE_STATUSES",
+      "replace": "return status in _RETRYABLE_STATUSES"
+    },
+    {
+      "label": "interval measured from the end of a poll",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "    fetched_at = clock.now()\n",
+      "replace": "    fetched_at = clock.now()\n    run.next_due = fetched_at + dt.timedelta(seconds=config.interval_s)\n"
+    },
+    {
+      "label": "sun taken at a fixed longitude, not the camera's",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "solar_position(when, camera.position.lat, camera.position.lon).elevation_deg",
+      "replace": "solar_position(when, camera.position.lat, -112.07).elevation_deg"
+    },
+    {
+      "label": "a rising sun can open the window",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "if not descending or elevation >= config.start_elev:",
+      "replace": "if elevation >= config.start_elev:"
+    },
+    {
+      "label": "window opens a degree late",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "or elevation >= config.start_elev:",
+      "replace": "or elevation >= config.start_elev - 1.0:"
+    },
+    {
+      "label": "polling never stops at the stop elevation",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "elif elevation < config.stop_elev or not descending:",
+      "replace": "elif not descending:"
+    },
+    {
+      "label": "a launch after the window still polls",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "        if elevation < config.stop_elev:\n            _finish(run, now)  # launched",
+      "replace": "        if False:\n            _finish(run, now)  # launched"
+    },
+    {
+      "label": "never-polled evening dated by UTC",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "        run.evening = evening_date(now, run.camera.position.lon)\n\n\ndef _seconds",
+      "replace": "        run.evening = now.date()\n\n\ndef _seconds"
+    },
+    {
+      "label": "one blind ten-times-longer sleep in the wait",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "_MAX_WAIT_S: Final = 600.0",
+      "replace": "_MAX_WAIT_S: Final = 6000.0"
+    },
+    {
+      "label": "wait oversleeps the start",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "_SECONDS_PER_DEGREE_AT_FASTEST: Final = 240.0",
+      "replace": "_SECONDS_PER_DEGREE_AT_FASTEST: Final = 960.0"
+    },
+    {
+      "label": "evening folder dated by UTC",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "        run.evening = evening_date(now, camera.position.lon)\n        run.archive",
+      "replace": "        run.evening = now.date()\n        run.archive"
+    },
+    {
+      "label": "sidecar sun elevation taken at fetch time",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "round(_elevation(camera, modified), 3)",
+      "replace": "round(_elevation(camera, fetched_at), 3)"
+    },
+    {
+      "label": "sidecar keeps every header",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "(\"Last-Modified\", \"ETag\", \"Content-Length\")",
+      "replace": "(\"Last-Modified\", \"ETag\", \"Content-Length\", \"Server\")"
+    },
+    {
+      "label": "a repeated frame is saved again",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "if archive.has_frame(stem):",
+      "replace": "if False:"
+    },
+    {
+      "label": "non-JPEG bodies are saved",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "if not body.startswith(_JPEG_MAGIC):",
+      "replace": "if False:"
+    },
+    {
+      "label": "a missing Last-Modified is not named",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "if header is None:",
+      "replace": "if False:"
+    },
+    {
+      "label": "only a missing directory is survivable on save",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "    except OSError as error:\n        return _Verdict(",
+      "replace": "    except FileNotFoundError as error:\n        return _Verdict("
+    },
+    {
+      "label": "only a missing directory is survivable on log",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "    except OSError as error:\n        say(",
+      "replace": "    except FileNotFoundError as error:\n        say("
+    },
+    {
+      "label": "an unchanged 200 is counted as an error",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "elif verdict.outcome in (\"not_modified\", \"unchanged\"):",
+      "replace": "elif verdict.outcome == \"not_modified\":"
+    },
+    {
+      "label": "git work tree check always passes",
+      "file": "../../src/lastlight/cameras/archive.py",
+      "oracle": "real",
+      "find": "return any(os.path.lexists(directory / \".git\") for directory in (resolved, *resolved.parents))",
+      "replace": "return False"
+    },
+    {
+      "label": "symlinks are not resolved",
+      "file": "../../src/lastlight/cameras/archive.py",
+      "oracle": "real",
+      "find": "return Path(chosen).resolve()",
+      "replace": "return Path(chosen).absolute()"
+    },
+    {
+      "label": "environment beats the command line",
+      "file": "../../src/lastlight/cameras/archive.py",
+      "oracle": "real",
+      "find": "chosen = cli_value or environment.get(ARCHIVE_ENV_VAR) or",
+      "replace": "chosen = environment.get(ARCHIVE_ENV_VAR) or cli_value or"
+    },
+    {
+      "label": "a whitespace-only basis publishes",
+      "file": "../../src/lastlight/cameras/registry.py",
+      "oracle": "real",
+      "find": "if publish and not basis.strip():",
+      "replace": "if publish and not basis:"
+    },
+    {
+      "label": "unknown registry keys are ignored",
+      "file": "../../src/lastlight/cameras/registry.py",
+      "oracle": "real",
+      "find": "    if unknown:\n        raise RegistryError(f\"{label}: unknown key(s) {unknown}\")",
+      "replace": "    pass"
+    },
+    {
+      "label": "an id is checked only by prefix",
+      "file": "../../src/lastlight/cameras/registry.py",
+      "oracle": "real",
+      "find": "_ID_PATTERN.fullmatch(camera_id)",
+      "replace": "_ID_PATTERN.match(camera_id)"
+    },
+    {
+      "label": "a 304 raises instead of returning",
+      "file": "../../src/lastlight/cameras/transport.py",
+      "oracle": "real",
+      "find": "except urllib.error.HTTPError as error:",
+      "replace": "except ZeroDivisionError as error:"
+    },
+    {
+      "label": "oversize bodies are accepted",
+      "file": "../../src/lastlight/cameras/transport.py",
+      "oracle": "real",
+      "find": "if len(body) > MAX_BODY_BYTES:",
+      "replace": "if False:"
+    },
+    {
+      "label": "collect command ignores git work trees",
+      "file": "../../src/lastlight/commands/collect.py",
+      "oracle": "real",
+      "find": "if inside_git_worktree(archive):",
+      "replace": "if False:"
+    },
+    {
+      "label": "collect command accepts a file as archive",
+      "file": "../../src/lastlight/commands/collect.py",
+      "oracle": "real",
+      "find": "if archive.exists() and not archive.is_dir():",
+      "replace": "if False:"
+    },
+    {
+      "label": "duplicate --camera ids reach the collector",
+      "file": "../../src/lastlight/commands/collect.py",
+      "oracle": "real",
+      "find": "list(dict.fromkeys(args.camera))",
+      "replace": "list(args.camera)"
+    },
+    {
+      "label": "[control] reorder two independent statements in _finish",
+      "file": "../../src/lastlight/cameras/collector.py",
+      "oracle": "real",
+      "find": "    run.phase = _DONE\n    if run.evening is None:\n        run.evening = evening_date(now, run.camera.position.lon)\n",
+      "replace": "    if run.evening is None:\n        run.evening = evening_date(now, run.camera.position.lon)\n    run.phase = _DONE\n",
+      "expect": "survived",
+      "why": "The evening-date fallback reads only `now` and the camera's longitude, never `run.phase`, and `phase` is read only by the single-threaded loop after `_finish` returns. Inert in this single-threaded collector; it would not be if `_finish` were ever called from a signal handler or another thread."
+    }
+  ]
+}

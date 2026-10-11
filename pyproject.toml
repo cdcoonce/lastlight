@@ -12,9 +12,17 @@ license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "colour-science>=0.4.7",
+    "eccodes>=2.49.0",
+    # ecCodes needs a native library. The eccodes wheel names it (eccodeslib) as a dependency
+    # only off Windows, and uv's universal lock reads that metadata from the Windows wheel, so
+    # the lock would omit it. Listed here so macOS and Linux get the binary wheel, no system
+    # packages. Windows wheels of eccodes bundle the library.
+    "eccodeslib>=2.48 ; sys_platform != 'win32'",
     "numpy>=2.5.4",
     "pillow>=12.3.0",
+    "pydantic>=2.14.0",
     "rasterio>=1.5.2",
+    "rfc3161-client>=1.0.9",
     "scipy>=1.18.1",
 ]
 

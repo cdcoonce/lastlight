@@ -62,10 +62,12 @@ Python 3.12, `uv`, `src/lastlight/`, pytest, ruff. Small modules with one job ea
 | `geometry` | Solar position (own NOAA-equation implementation, pvlib used only as a test oracle), sun-elevation series, elevation bins, sightline transect points along the solar azimuth |
 | `site` | Public reference point; private site loader that refuses to run in CI |
 | `inputs.hrrr` | Byte-range fetch of selected HRRR fields from the public AWS bucket via `.idx`; sample along the transect |
+| `inputs.http`, `inputs.grib` | Shared by the input modules: the HTTP transport (existence checks, byte ranges, loud failures) and the one place a GRIB2 library is imported (ecCodes) |
 | `inputs.goes` | GOES-18 ABI clear-sky mask along the transect at twilight (regime labels) |
 | `inputs.*` | Later: RRFS-SD dust and smoke, CAMS aerosol and ozone, AirNow PM |
 | `render` | Spectral atmosphere model → radiance per (sun elevation, view elevation) → CIE XYZ → camera RGB and sRGB; v0 single scattering, v1 Bruneton precomputed-scattering lookup table |
-| `seal` | Canonical forecast JSON, SHA-256, RFC 3161 timestamp, `verify` |
+| `forecast` | The sealed forecast schema (pydantic v2): strict fields, no time of day, only the public reference point |
+| `seal` | Canonical forecast JSON, SHA-256, RFC 3161 timestamp (`rfc3161-client`), ledger writer, `verify` (imprint and time; the TSA signature chain is a follow-up) |
 | `cameras` | Registry of tier A cameras (operator, image URL, position, view azimuth, attribution); polite collector (conditional GET, identifying User-Agent, timeouts and retries, stale-frame rejection by Last-Modified and burned-in stamp) writing a private archive on the capture host |
 | `camgeom` | Per-camera pixel-to-(azimuth, elevation) calibration by skyline matching against a public DEM horizon, checked against the sun; frozen fits in `cameras/geometry/`; sky mask |
 | `observe` | Frames → within-frame log-chromaticity contrast profile and vividness (tier A); later absolute colour (tier B) |
