@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from lastlight.camgeom.calibration import PositionTrial, scan_offsets, summarize_scan
-from lastlight.camgeom.orientation import Orientation
+from lastlight.camgeom.orientation import DEFAULT_HFOV_RANGE_DEG, Orientation
 
 
 def trial(east: float, north: float, rms: float, az: float, hfov: float) -> PositionTrial:
@@ -48,6 +48,20 @@ def test_the_summary_reports_the_spread_of_the_residual_and_of_the_orientation()
     assert "held at the described site" in summary["reason"]
 
 
+def test_the_summary_flags_fits_pinned_to_the_field_of_view_limits() -> None:
+    low, high = DEFAULT_HFOV_RANGE_DEG
+    trials = [
+        trial(0.0, 0.0, 3.6, 277.4, 72.5),
+        trial(2.0, 0.0, 1.9, 261.0, low),  # the lowest residual sits on the limit
+        trial(-2.0, 0.0, 3.9, 262.0, high),
+    ]
+    summary = summarize_scan(trials, box_km=2.0, step_km=2.0, site_rms_px=3.6)
+    assert summary["positions_at_hfov_bound"] == 2
+    assert summary["lowest_rms_at_hfov_bound"] is True
+    free = summarize_scan(trials[:1] + trials[2:], 2.0, 2.0, 3.6)
+    assert free["lowest_rms_at_hfov_bound"] is False, "the 3.6 trial is the lowest of these two"
+
+
 def test_the_summary_names_no_position_only_offsets_statistics() -> None:
     summary = summarize_scan([trial(0.0, 0.0, 3.0, 270.0, 70.0)], 0.0, 2.0, 3.0)
     assert set(summary) == {
@@ -59,6 +73,8 @@ def test_the_summary_names_no_position_only_offsets_statistics() -> None:
         "rms_px_max",
         "azimuth_deg_range",
         "hfov_deg_range",
+        "positions_at_hfov_bound",
+        "lowest_rms_at_hfov_bound",
         "adopted",
         "reason",
     }
