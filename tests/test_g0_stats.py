@@ -151,6 +151,24 @@ def test_a_shift_just_above_the_threshold_counts_and_just_below_does_not() -> No
     assert stats.bands_at_threshold(distances(below))[0] == 0
 
 
+def test_a_d_of_exactly_the_threshold_counts_in_every_counted_band() -> None:
+    # The criterion says D(d, s) >= 0.05: a value that equals the threshold is a hit. The rows are
+    # built, not computed, so the 0.05 is the same float as `stats.THRESHOLD`, with no rounding
+    # from a mean in between.
+    at_threshold = 0.05
+    assert at_threshold == stats.THRESHOLD
+    matrix = np.array(
+        [
+            [at_threshold, at_threshold, 0.0, 0.0],  # exactly 0.05 in golden and early: meets
+            [at_threshold, 0.0, 0.0, at_threshold],  # one counted band and late: does not
+            [at_threshold, at_threshold, at_threshold, 0.0],  # all three counted bands
+        ]
+    )
+    assert list(stats.bands_at_threshold(matrix)) == [2, 1, 3]
+    assert list(stats.meets_rule(matrix)) == [True, False, True]
+    assert stats.verdict(matrix).meeting == 2
+
+
 def test_a_date_needs_two_of_the_three_counted_bands() -> None:
     one = series(10, 1, {"golden": 0.2})
     two = series(10, 1, {"golden": 0.2, "mid": 0.2})
