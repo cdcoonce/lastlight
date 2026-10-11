@@ -11,11 +11,16 @@ from camgeom_synthetic import (
     HEIGHT,
     TRUE_MODEL,
     WIDTH,
+    comb_elevation_deg,
+    haze,
+    mismatched_ridge_elevation_deg,
+    paint_cloud_base,
     render_frame,
     ridge_elevation_deg,
     true_skyline_y,
 )
 
+from lastlight.camgeom import orientation as orientation_module
 from lastlight.camgeom.orientation import (
     HorizonProfile,
     Orientation,
@@ -34,19 +39,22 @@ TRUTH = Orientation(
 )
 
 
-def frames_of(model, *, seeds=(11, 12, 13), noise=5.0, edit=None):
+def frames_of(model, *, horizon=ridge_elevation_deg, seeds=(11, 12, 13), noise=5.0, edit=None):
     out = []
     for seed in seeds:
-        image = render_frame(model, seed=seed, noise=noise, stamp=OVERLAY[0])
+        image = render_frame(model, horizon, seed=seed, noise=noise, stamp=OVERLAY[0])
         out.append(edit(image) if edit else image)
     return out
 
 
+# The fit recovers a clean synthetic camera to about 0.002 degrees and 0.01 percent. The bounds
+# are ten times that, not two hundred: a bound far looser than the fit's accuracy lets a stage of
+# the fit be skipped without any test noticing (the reviewer of this slice did exactly that).
 def assert_recovers(found: Orientation, truth: Orientation) -> None:
-    assert found.azimuth_deg == pytest.approx(truth.azimuth_deg, abs=0.2)
-    assert found.elevation_deg == pytest.approx(truth.elevation_deg, abs=0.2)
-    assert found.hfov_deg == pytest.approx(truth.hfov_deg, rel=0.01)
-    assert found.roll_deg == pytest.approx(truth.roll_deg, abs=0.5)
+    assert found.azimuth_deg == pytest.approx(truth.azimuth_deg, abs=0.02)
+    assert found.elevation_deg == pytest.approx(truth.elevation_deg, abs=0.02)
+    assert found.hfov_deg == pytest.approx(truth.hfov_deg, rel=0.001)
+    assert found.roll_deg == pytest.approx(truth.roll_deg, abs=0.05)
 
 
 # --- the acceptance criterion: a known camera, noisy frames, the parameters back  -----------------
@@ -57,7 +65,7 @@ def test_the_fit_recovers_pointing_and_field_of_view_from_noisy_frames() -> None
         frames_of(TRUE_MODEL), HORIZON, Prior(azimuth_deg=270.0), exclude=OVERLAY
     )
     assert_recovers(result.orientation, TRUTH)
-    assert result.rms_px < 1.0
+    assert result.rms_px < 0.15
 
 
 def test_the_fit_recovers_a_camera_with_a_different_pointing_and_a_narrower_view() -> None:
@@ -112,6 +120,122 @@ def test_excluded_regions_do_not_take_part_in_the_fit() -> None:
 
     assert abs(fooled.orientation.elevation_deg - TRUTH.elevation_deg) > 1.5, "the ghost must bite"
     assert_recovers(guarded.orientation, TRUTH)
+
+
+# --- what each stage of the fit is for ------------------------------------------------------------
+#
+# On a clean scene rendered from the very horizon the fit is given, every stage recovers the truth
+# on its own, so no test of that scene can tell whether a stage is there. Each scene below is built
+# so that one stage has a job the others cannot do, and each first shows the job is real by
+# running the fit with that stage removed.
+
+MIDDLE_MODEL = dataclasses.replace(
+    TRUE_MODEL, azimuth_deg=279.3, elevation_deg=1.2, roll_deg=-0.5, hfov_deg=30.0
+)
+MIDDLE_TRUTH = Orientation(279.3, 1.2, -0.5, 30.0)
+MIDDLE_SKYLINE = true_skyline_y(MIDDLE_MODEL)
+
+
+def test_the_climb_finds_the_true_alignment_of_a_ridge_that_repeats(monkeypatch) -> None:
+    # The ridge has a peak every 5.5 degrees, and the true 21.5 degree lens falls between two of
+    # the coarse search's field-of-view steps. The coarse search ranks first an alignment two
+    # periods to the right with a 6 percent wider lens: the peaks line up as well as the grid
+    # allows. Climbing from several of the best candidates is what finds the true alignment.
+    model = dataclasses.replace(
+        TRUE_MODEL, azimuth_deg=278.0, elevation_deg=1.4, roll_deg=0.3, hfov_deg=21.5
+    )
+    truth = Orientation(278.0, 1.4, 0.3, 21.5)
+    frames = frames_of(model, horizon=comb_elevation_deg)
+    horizon = HorizonProfile(AZIMUTHS, comb_elevation_deg(AZIMUTHS))
+    prior = Prior(azimuth_deg=274.0)
+
+    with monkeypatch.context() as stage:
+        stage.setattr(orientation_module, "_climb", lambda start, *rest: (0.0, start))
+        stuck = fit_orientation(frames, horizon, prior, exclude=OVERLAY)
+    assert abs(stuck.orientation.azimuth_deg - truth.azimuth_deg) > 5.0, "the decoy must bite"
+    assert stuck.rms_px > 3.0
+
+    found = fit_orientation(frames, horizon, prior, exclude=OVERLAY)
+    assert_recovers(found.orientation, truth)
+    assert found.rms_px < 0.15
+
+
+def test_a_strong_cloud_edge_in_one_frame_does_not_pull_the_fit_off_a_faint_ridge(
+    monkeypatch,
+) -> None:
+    # In haze the ridge is faint (30 percent of its contrast) and a cloud's dark underside in the
+    # first of three frames is nine times stronger. Averaged into the edge map the cloud outweighs
+    # the ridge, so the climb on that map settles a third of a degree too low. The skyline traced
+    # in each frame and combined by median outvotes the cloud, and the least-squares fit onto it
+    # puts the camera back: that second half is what this scene needs.
+    rows = MIDDLE_SKYLINE
+
+    def hazy(image: np.ndarray) -> np.ndarray:
+        return haze(image, 0.7)
+
+    frames = frames_of(MIDDLE_MODEL, edit=hazy)
+    frames[0] = paint_cloud_base(frames[0], rows, offset_start=10, offset_end=4, x0=100, x1=700)
+    prior = Prior(azimuth_deg=274.0)
+
+    with monkeypatch.context() as stage:
+        stage.setattr(orientation_module, "_fit_to_skyline", lambda start, *rest: start)
+        climbed = fit_orientation(frames, HORIZON, prior, exclude=OVERLAY)
+    assert abs(climbed.orientation.elevation_deg - MIDDLE_TRUTH.elevation_deg) > 0.1
+    assert abs(climbed.orientation.hfov_deg / MIDDLE_TRUTH.hfov_deg - 1.0) > 0.002
+    assert climbed.rms_px > 3.0
+
+    found = fit_orientation(frames, HORIZON, prior, exclude=OVERLAY)
+    assert_recovers(found.orientation, MIDDLE_TRUTH)
+    assert found.rms_px < 0.15
+
+
+def test_a_cloud_in_every_frame_is_dropped_by_the_narrower_trace_bands(monkeypatch) -> None:
+    # A cloud base 22 rows above the ridge, in all three frames, sits inside the first band (30
+    # rows) and outside the last two (18 and 12), once the fit has moved off it. With one pass of
+    # the wide band the traced skyline follows the cloud over 160 columns and the reported
+    # residual is the cloud's, not the ridge's.
+    frames = frames_of(MIDDLE_MODEL)
+    frames = [
+        paint_cloud_base(
+            frame,
+            MIDDLE_SKYLINE,
+            offset_start=22,
+            offset_end=22,
+            x0=300,
+            x1=460,
+            shade_below=60.0,
+        )
+        for frame in frames
+    ]
+    prior = Prior(azimuth_deg=274.0)
+
+    with monkeypatch.context() as stage:
+        stage.setattr(orientation_module, "_BANDS", orientation_module._BANDS[:1])
+        one_pass = fit_orientation(frames, HORIZON, prior, exclude=OVERLAY)
+    assert one_pass.rms_px > 5.0, "the cloud must be traced by a single wide pass"
+    assert abs(one_pass.orientation.azimuth_deg - MIDDLE_TRUTH.azimuth_deg) > 0.05
+
+    found = fit_orientation(frames, HORIZON, prior, exclude=OVERLAY)
+    assert_recovers(found.orientation, MIDDLE_TRUTH)
+    assert found.rms_px < 0.15
+
+
+def test_a_slightly_wrong_terrain_model_shows_as_residual_and_barely_moves_the_pointing() -> None:
+    # The frames come from a ridge that differs from the horizon the fit is given by a smooth
+    # 0.1 degree. No orientation can remove that, so the residual is what it is (about 0.8 px at
+    # this lens), and the fitted camera stays close to the true one.
+    frames = frames_of(TRUE_MODEL, horizon=mismatched_ridge_elevation_deg)
+    result = fit_orientation(frames, HORIZON, Prior(azimuth_deg=270.0), exclude=OVERLAY)
+
+    mismatch = true_skyline_y(TRUE_MODEL, mismatched_ridge_elevation_deg) - predict_skyline(
+        TRUTH, HORIZON, WIDTH, HEIGHT
+    )
+    injected_rms = float(np.sqrt(np.nanmean(mismatch**2)))
+    assert 0.6 < injected_rms < 1.0
+    assert 0.8 * injected_rms < result.rms_px < 1.05 * injected_rms
+    assert result.orientation.azimuth_deg == pytest.approx(TRUTH.azimuth_deg, abs=0.08)
+    assert result.orientation.elevation_deg == pytest.approx(TRUTH.elevation_deg, abs=0.03)
+    assert result.orientation.hfov_deg == pytest.approx(TRUTH.hfov_deg, rel=0.01)
 
 
 # --- how the residuals are reported ---------------------------------------------------------------

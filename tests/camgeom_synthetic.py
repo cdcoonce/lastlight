@@ -51,6 +51,75 @@ def ridge_elevation_deg(azimuth_deg: np.ndarray | float) -> np.ndarray:
     )
 
 
+COMB_PERIOD_DEG = 5.5
+COMB_AMPLITUDES = (
+    0.93, 0.94, 1.06, 1.07, 1.29, 1.29, 1.11, 0.91, 1.05, 1.10,
+    1.17, 0.90, 1.24, 1.00, 0.96, 1.10, 1.14, 0.90, 1.19, 0.95,
+)  # fmt: skip
+
+
+def comb_elevation_deg(azimuth_deg: np.ndarray | float) -> np.ndarray:
+    """A near-periodic skyline: a peak every 5.5 degrees of azimuth, each a little different.
+
+    A fit that is shown this ridge through a 20 degree lens sees three or four peaks, and the
+    same view shifted by a whole number of periods looks almost the same. Only the small
+    differences in height tell the right alignment from its neighbours.
+    """
+    az = np.asarray(azimuth_deg, dtype=float)
+    out = np.full(az.shape, 1.37)
+    for k, amplitude in enumerate(COMB_AMPLITUDES):
+        out = out + 1.57 * amplitude * np.exp(-(((az - (203.2 + k * COMB_PERIOD_DEG)) / 1.75) ** 2))
+    return out
+
+
+def mismatched_ridge_elevation_deg(azimuth_deg: np.ndarray | float) -> np.ndarray:
+    """`ridge_elevation_deg` plus a smooth error of about 0.1 degree, as a DEM that is slightly off.
+
+    Frames rendered from this ridge and fitted against the plain one carry a residual no
+    orientation can remove, which is what real frames and a real terrain model do.
+    """
+    az = np.asarray(azimuth_deg, dtype=float)
+    return (
+        ridge_elevation_deg(az)
+        + 0.08 * np.sin(np.radians(az * 41.0))
+        + 0.05 * np.sin(np.radians(az * 13.0 + 1.0))
+    )
+
+
+def haze(image: np.ndarray, amount: float, level: float = 140.0) -> np.ndarray:
+    """Wash a frame toward a flat grey: `amount` of 0.7 leaves 30 percent of its contrast."""
+    washed = image.astype(float) * (1.0 - amount) + level * amount
+    return np.clip(np.rint(washed), 0, 255).astype(np.uint8)
+
+
+def paint_cloud_base(
+    image: np.ndarray,
+    skyline_rows: np.ndarray,
+    *,
+    offset_start: float,
+    offset_end: float,
+    x0: int,
+    x1: int,
+    thickness: int = 14,
+    shade_below: float = 40.0,
+    shade_rows: int = 8,
+) -> np.ndarray:
+    """A bright cloud whose dark underside runs parallel to the skyline, some rows above it.
+
+    From column `x0` to `x1` the cloud's base lies `offset_start` rows above the skyline,
+    drifting to `offset_end` rows above it. The sky just under the base is `shade_below` dark
+    (a cloud's shadow), so the base is a strong bright-over-dark edge: the kind that can
+    out-shout a faint ridge.
+    """
+    out = image.copy()
+    for column in range(x0, x1):
+        offset = offset_start + (offset_end - offset_start) * (column - x0) / max(1, x1 - x0)
+        base = int(round(skyline_rows[column] - offset))
+        out[max(base - thickness, 0) : base, column] = 250
+        out[base : base + shade_rows, column] = int(shade_below)
+    return out
+
+
 def render_frame(
     model: CameraModel,
     horizon_deg=ridge_elevation_deg,

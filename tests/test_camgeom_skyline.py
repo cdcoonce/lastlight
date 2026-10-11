@@ -12,6 +12,7 @@ from lastlight.camgeom.skyline import (
     default_overlay_boxes,
     edge_strength,
     extract_skyline,
+    trace_skyline,
 )
 
 TRUTH = true_skyline_y(TRUE_MODEL)
@@ -67,6 +68,51 @@ def test_a_stronger_edge_high_in_the_sky_is_ignored_when_the_search_is_banded() 
     assert np.median(np.abs(unbanded - TRUTH)[middle]) > 40.0, "the cloud must win without a band"
     assert np.median(np.abs(banded - TRUTH)) < 0.5
     assert np.max(np.abs(banded - TRUTH)) < 2.5
+
+
+def test_bright_fragments_just_above_the_ridge_do_not_pull_the_path_off_it() -> None:
+    # Fourteen fragments three columns wide (a roof, a gap in a cloud base), 8 to 12 rows above
+    # the ridge and brighter against what is under them than the ridge is. Picking the strongest
+    # edge in each column follows every one; a path that may move only two rows between
+    # neighbouring columns cannot reach a fragment and come back before it is over.
+    image = render_frame(TRUE_MODEL, seed=3, noise=5.0).astype(float)
+    fragment_columns = []
+    for k in range(14):
+        offset = 8 + k % 5
+        for column in range(20 + 36 * k, 23 + 36 * k):
+            base = int(round(TRUTH[column])) - offset
+            image[base - 10 : base, column] = 250.0
+            image[base : base + 6, column] = 60.0
+            fragment_columns.append(column)
+    image = image.astype(np.uint8)
+    around, half_width = TRUTH + 2.0, 30.0
+
+    strongest = np.empty(WIDTH)
+    strength = edge_strength(image)
+    for column in range(WIDTH):
+        low, high = int(around[column] - half_width), int(around[column] + half_width) + 1
+        strongest[column] = low + np.argmax(strength[low:high, column])
+    taken = np.abs(strongest - TRUTH)[fragment_columns] > 5.0
+    assert taken.sum() >= 30, "the fragments must out-shout the ridge column by column"
+
+    found = extract_skyline(image, around=around, half_width=half_width)
+    assert np.max(np.abs(found - TRUTH)) < 2.0
+    assert np.sqrt(np.mean((found - TRUTH) ** 2)) < 0.3
+
+
+def test_a_slightly_stronger_sample_two_rows_off_does_not_buy_a_detour() -> None:
+    # A ridge of strength 100 along one row and, in one column, a sample two rows lower that is 6
+    # percent stronger. Reaching it and coming back moves the path four rows in all, which costs
+    # more than the 6 it gains, so the path stays on the ridge. With no cost for movement the
+    # path would take it, and jitter between rows wherever two are nearly tied.
+    strength = np.zeros((40, 60))
+    strength[20, :] = 100.0
+    strength[22, 30] = 106.0
+    found = trace_skyline(strength)
+    assert found == pytest.approx(np.full(60, 20.0), abs=1e-6)
+
+    strength[22, 30] = 130.0  # but a clearly stronger sample is worth the detour
+    assert trace_skyline(strength)[30] == pytest.approx(22.0, abs=1e-6)
 
 
 def test_a_band_with_gaps_in_the_prediction_leaves_those_columns_unconstrained() -> None:

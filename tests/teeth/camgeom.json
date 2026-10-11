@@ -1,0 +1,117 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_camgeom_cli.py",
+    "tests/test_camgeom_dem.py",
+    "tests/test_camgeom_fitfile.py",
+    "tests/test_camgeom_inputs.py",
+    "tests/test_camgeom_model.py",
+    "tests/test_camgeom_orientation.py",
+    "tests/test_camgeom_position.py",
+    "tests/test_camgeom_skyline.py",
+    "tests/test_camgeom_suncheck.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_camgeom_cli.py",
+    "tests/test_camgeom_dem.py",
+    "tests/test_camgeom_fitfile.py",
+    "tests/test_camgeom_inputs.py",
+    "tests/test_camgeom_model.py",
+    "tests/test_camgeom_orientation.py",
+    "tests/test_camgeom_position.py",
+    "tests/test_camgeom_skyline.py",
+    "tests/test_camgeom_suncheck.py"
+  ],
+  "mutants": [
+    {
+      "label": "fit stage 2 skipped: the best coarse candidate is used as is",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "        _climb(orientation, mean_strength, horizon, prior)\n        for _, orientation in _coarse_candidates",
+      "replace": "        (0.0, orientation)\n        for _, orientation in _coarse_candidates"
+    },
+    {
+      "label": "trace and fit repeated once, with the widest band only",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "_BANDS = (30.0, 18.0, 12.0)",
+      "replace": "_BANDS = (30.0,)"
+    },
+    {
+      "label": "fit stage 3 skipped: the climbed orientation is kept",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "        orientation = _fit_to_skyline(orientation, observed, horizon, width, height, prior)",
+      "replace": "        orientation = orientation"
+    },
+    {
+      "label": "fit stage 3 keeps the climbed field of view",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "    return Orientation(*result.x)\n\n\ndef fit_orientation(",
+      "replace": "    return Orientation(*result.x[:3], start.hfov_deg)\n\n\ndef fit_orientation("
+    },
+    {
+      "label": "fit stage 3 keeps the climbed azimuth and elevation",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "    return Orientation(*result.x)\n\n\ndef fit_orientation(",
+      "replace": "    return Orientation(start.azimuth_deg, start.elevation_deg, *result.x[2:])\n\n\ndef fit_orientation("
+    },
+    {
+      "label": "trace step limit lifted from 2 rows to 40",
+      "file": "../../src/lastlight/camgeom/skyline.py",
+      "oracle": "real",
+      "find": "_MAX_STEP = 2  # rows",
+      "replace": "_MAX_STEP = 40  # rows"
+    },
+    {
+      "label": "trace smoothness cost zero",
+      "file": "../../src/lastlight/camgeom/skyline.py",
+      "oracle": "real",
+      "find": "_SMOOTHNESS = 0.03  #",
+      "replace": "_SMOOTHNESS = 0.0  #"
+    },
+    {
+      "label": "trace continuity removed (step limit lifted and smoothness zero)",
+      "file": "../../src/lastlight/camgeom/skyline.py",
+      "oracle": "real",
+      "find": "_MAX_STEP = 2  # rows the path may move between neighbouring columns\n_SMOOTHNESS = 0.03  #",
+      "replace": "_MAX_STEP = 40  # rows the path may move between neighbouring columns\n_SMOOTHNESS = 0.0  #"
+    },
+    {
+      "label": "a trace band wholly outside the frame is not detected",
+      "file": "../../src/lastlight/camgeom/skyline.py",
+      "oracle": "real",
+      "find": "    unusable = ~allowed.any(axis=1)",
+      "replace": "    unusable = np.zeros(width, dtype=bool)"
+    },
+    {
+      "label": "sun check: one matching frame outvotes a mismatching frame",
+      "file": "../../src/lastlight/camgeom/suncheck.py",
+      "oracle": "real",
+      "find": "    if counts[\"mismatch\"]:\n        worst",
+      "replace": "    if counts[\"mismatch\"] and not counts[\"match\"]:\n        worst"
+    },
+    {
+      "label": "sun disk: the last disk found wins, not the nearest",
+      "file": "../../src/lastlight/camgeom/suncheck.py",
+      "oracle": "real",
+      "find": "        if distance < best_distance:",
+      "replace": "        if True:"
+    }
+  ]
+}

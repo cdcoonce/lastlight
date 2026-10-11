@@ -102,11 +102,18 @@ def test_white_text_in_an_excluded_box_is_not_mistaken_for_a_sun() -> None:
     assert kept is not None and ignored is None
 
 
-def test_the_disk_nearest_the_prediction_wins() -> None:
+@pytest.mark.parametrize(
+    ("near", "wanted"),
+    [((415.0, 128.0), (420.0, 130.0)), ((305.0, 103.0), (300.0, 100.0))],
+    ids=["nearest_is_found_last", "nearest_is_found_first"],
+)
+def test_the_disk_nearest_the_prediction_wins(
+    near: tuple[float, float], wanted: tuple[float, float]
+) -> None:
     image = paint_disk(paint_disk(sky_frame(), 300.0, 100.0), 420.0, 130.0)
-    found = locate_sun_disk(image, near=(415.0, 128.0), radius_px=200.0)
+    found = locate_sun_disk(image, near=near, radius_px=200.0)
     assert found is not None
-    assert math.hypot(found.x - 420.0, found.y - 130.0) < 0.5
+    assert math.hypot(found.x - wanted[0], found.y - wanted[1]) < 0.5
 
 
 # --- the check itself  ----------------------------------------------------------------------------
@@ -132,6 +139,21 @@ def test_the_check_fails_when_the_disk_is_too_far_from_the_prediction() -> None:
     assert result.status == "failed"
     assert result.samples[0].status == "mismatch"
     assert result.samples[0].error_deg == pytest.approx(3.0, abs=0.2)
+
+
+@pytest.mark.parametrize("order", ["match_first", "mismatch_first"])
+def test_one_matching_frame_does_not_outvote_a_mismatching_one(order: str) -> None:
+    # The sun is an independent judge of the fit. If one frame's disk lies where the fit says
+    # and another's lies 3 degrees away, the fit is wrong about at least one of them, and the
+    # check says so; counting the votes would let a lucky frame hide a failure.
+    near = (frame_with_disk_at(WHEN, east_deg=0.2), WHEN)
+    far = (frame_with_disk_at(LATER, east_deg=3.0), LATER)
+    frames = [near, far] if order == "match_first" else [far, near]
+    result = run_sun_check(AIMED, frames, tolerance_deg=1.0)
+    assert result.status == "failed"
+    assert sorted(sample.status for sample in result.samples) == ["match", "mismatch"]
+    assert "1 of 2" in result.reason
+    assert result.max_error_deg == pytest.approx(3.0, abs=0.2)
 
 
 def test_the_tolerance_is_an_angle_not_a_pixel_count() -> None:
