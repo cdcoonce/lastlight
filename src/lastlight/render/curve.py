@@ -15,6 +15,7 @@ once the geometry module exists.
 
 from __future__ import annotations
 
+import io
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -89,11 +90,18 @@ def render_strip(
     return Image.fromarray(blocks)
 
 
-def save_strip(image: Image.Image, path: str | Path) -> None:
-    """Write the strip as a PNG with no ancillary chunks.
+def strip_png_bytes(image: Image.Image) -> bytes:
+    """The strip encoded as a PNG with no ancillary chunks.
 
     The pixels are copied into a fresh image first, so nothing the caller attached to
-    `image.info` (EXIF, ICC profile, dpi, text) can reach the file.
+    `image.info` (EXIF, ICC profile, dpi, text) can reach the bytes.
     """
     clean = Image.frombytes(image.mode, image.size, image.tobytes())
-    clean.save(path, format="PNG")
+    buffer = io.BytesIO()
+    clean.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def save_strip(image: Image.Image, path: str | Path) -> None:
+    """Write the strip as a PNG with no ancillary chunks (see `strip_png_bytes`)."""
+    Path(path).write_bytes(strip_png_bytes(image))

@@ -1,0 +1,56 @@
+name: seal
+
+# Paints the coming Phoenix evening from HRRR, seals the forecast and its strip with an RFC 3161
+# timestamp, and commits the result to the orphan `ledger` branch (docs/ledger.md). It runs once a
+# day at the fixed UTC hour in the cron line below, which is the same for every site and lands
+# hours before the earliest sunset of the year (tests/test_seal_workflow.py checks that).
+#
+# The scheduling rules live in Python, where they are tested: `lastlight seal-daily` exits 0
+# without touching anything if the evening is already sealed (so a second run, or a manual
+# dispatch after the scheduled one, is a no-op), and refuses with a non-zero exit if the sun has
+# already reached the horizon (a late day is recorded as missing, never back-filled). Any failure
+# fails this job, which is how the owner finds out.
+#
+# Other workflows (the almanac site) react to this one finishing by name, so keep `name: seal`.
+
+on:
+  schedule:
+    - cron: "0 21 * * *"
+  workflow_dispatch:
+
+concurrency:
+  # Seals queue; a second run never cancels the first mid-timestamp.
+  group: seal
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  seal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # `uv run` must not re-resolve: the committed uv.lock is the environment that seals.
+      UV_FROZEN: "1"
+    steps:
+      # The code always comes from main, whichever ref dispatched this run.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.8.0"
+          enable-cache: false
+      - run: uv sync --frozen
+      - name: Attach the ledger branch (an empty orphan the first time)
+        run: uv run lastlight ledger-branch open --worktree ledger-wt
+      - name: Paint, seal and verify tonight
+        run: uv run lastlight seal-daily --ledger-dir ledger-wt/ledger
+      - name: Scan the ledger for anything that could locate a camera
+        run: uv run lastlight privacy-scan --root "$PWD/ledger-wt" "$PWD/ledger-wt/ledger"
+      - name: Commit to the ledger branch and push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: uv run lastlight ledger-branch publish --worktree ledger-wt

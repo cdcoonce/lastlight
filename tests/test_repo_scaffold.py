@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -103,6 +105,43 @@ def _gitignore_entries() -> set[str]:
 )
 def test_gitignore_covers_python_uv_caches_and_local_data(entry: str) -> None:
     assert entry in _gitignore_entries()
+
+
+LOCAL_OUTPUTS = [
+    "ledger/index.jsonl",  # `seal-daily --ledger-dir ledger`, `seal ... --ledger-dir ledger`
+    "ledger/2026/10/10.forecast.json",
+    "ledger/2026/10/10.strip.png",
+    "ledger-wt/.git",  # the workflow's worktree of the `ledger` branch (`ledger-branch open`)
+    "ledger-wt/ledger/index.jsonl",
+    "forecast.json",  # `lastlight forecast --out forecast.json --strip strip.png`
+    "strip.png",
+    "data/hrrr/example.grib2",  # the byte-range cache
+]
+
+
+def test_what_the_local_commands_write_never_shows_up_as_untracked(tmp_path: Path) -> None:
+    # Daily data lives on the `ledger` branch, never on `main`: running the documented commands
+    # in a checkout of `main` must leave `git status` clean. Checked against a real repository,
+    # because `git check-ignore` cannot judge a directory that does not exist yet.
+    repo = tmp_path / "checkout"
+    repo.mkdir()
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
+
+    def git(*args: str) -> str:
+        done = subprocess.run(
+            ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True, env=env
+        )
+        return done.stdout
+
+    git("init", "--quiet", "-b", "main")
+    (repo / ".gitignore").write_text((REPO_ROOT / ".gitignore").read_text())
+    git("add", ".gitignore")
+    for name in [*LOCAL_OUTPUTS, "not-an-output.txt"]:
+        path = repo / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x")
+    status = git("status", "--porcelain", "--untracked-files=all").splitlines()
+    assert [line for line in status if line.startswith("??")] == ["?? not-an-output.txt"]
 
 
 def test_lockfile_is_committed_not_ignored() -> None:

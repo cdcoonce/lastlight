@@ -4,14 +4,19 @@ Layout (`docs/design.md` section 4), under a ledger directory:
 
     YYYY/MM/DD.forecast.json   the canonical forecast bytes, exactly as hashed
     YYYY/MM/DD.forecast.tsr    the RFC 3161 response for the SHA-256 of those bytes
+    YYYY/MM/DD.strip.png       the painting, when the forecast names one (`strip_sha256`)
     index.jsonl                one line per sealed forecast: date, digest, model_version
 
 `seal` never overwrites: a date with any trace of a seal is refused before a timestamp is
 requested, and a seal that fails part-way removes what it had written, so the ledger is
-either unchanged or holds a complete seal. `verify` re-derives everything from the files:
-the digest of the sealed bytes must equal the timestamp's imprint, the file must be a valid
-forecast for the requested date in canonical form, and the timestamp must have been issued
-before geometric sunset at the reference point on that date (`lastlight.geometry`).
+either unchanged or holds a complete seal. The strip is sealed through the forecast: the
+forecast carries the SHA-256 of the PNG, so the one timestamp covers the numbers and the
+picture, and `seal` refuses a strip that is not the one the forecast names, is not a PNG, or
+carries metadata (the ledger is append-only and a sealed leak could not be taken back). `verify`
+re-derives everything from the files: the digest of the sealed bytes must equal the timestamp's
+imprint, the file must be a valid forecast for the requested date in canonical form, the
+timestamp must have been issued before geometric sunset at the reference point on that date
+(`lastlight.geometry`), and the strip beside the forecast must hash to `strip_sha256`.
 
 `verify` does not validate the timestamp's signature chain against the TSA certificate; that
 is a follow-up. It reports durations, never clock times, in its reasons.
@@ -28,6 +33,7 @@ from pydantic import ValidationError
 
 from lastlight.forecast import Forecast
 from lastlight.geometry import elevation_crossings
+from lastlight.privacy.images import PNG_SIGNATURE, image_issues
 from lastlight.seal import tsa
 from lastlight.seal.canonical import canonical_bytes, digest_hex
 from lastlight.seal.tsa import DEFAULT_TSA_URL, TsaError
@@ -39,11 +45,16 @@ class AlreadySealedError(Exception):
     """The date already has a sealed forecast (or the remains of one); nothing was changed."""
 
 
+class StripError(Exception):
+    """The strip handed to `seal` is not one that may be sealed with this forecast."""
+
+
 @dataclass(frozen=True)
 class LedgerPaths:
     forecast: Path
     timestamp: Path
     index: Path
+    strip: Path
 
 
 @dataclass(frozen=True)
@@ -55,10 +66,15 @@ class SealResult:
 
 @dataclass(frozen=True)
 class VerifyResult:
-    """`ok` with no reason, or not ok with the one reason the first failed check gives."""
+    """`ok` with no reason, or not ok with the one reason the first failed check gives.
+
+    `strip_verified` is true only when the forecast named a strip and the PNG in the ledger
+    hashed to it; a forecast with no strip passes with it false.
+    """
 
     ok: bool
     reason: str | None = None
+    strip_verified: bool = False
 
 
 def ledger_paths(ledger_dir: Path, date: dt.date) -> LedgerPaths:
@@ -68,6 +84,7 @@ def ledger_paths(ledger_dir: Path, date: dt.date) -> LedgerPaths:
         forecast=folder / f"{stem}.json",
         timestamp=folder / f"{stem}.tsr",
         index=ledger_dir / INDEX_NAME,
+        strip=folder / f"{date.day:02d}.strip.png",
     )
 
 
@@ -87,8 +104,19 @@ def _indexed(index: Path, date: dt.date) -> bool:
     return False
 
 
+def is_sealed(date: dt.date, ledger_dir: Path) -> bool:
+    """True if the ledger holds any trace of a seal for `date`: a file of it, or an index row."""
+    paths = ledger_paths(ledger_dir, date)
+    return (
+        paths.forecast.exists()
+        or paths.timestamp.exists()
+        or paths.strip.exists()
+        or _indexed(paths.index, date)
+    )
+
+
 def _refuse_if_sealed(date: dt.date, paths: LedgerPaths, ledger_dir: Path) -> None:
-    if paths.forecast.exists() or paths.timestamp.exists() or _indexed(paths.index, date):
+    if is_sealed(date, ledger_dir):
         raise AlreadySealedError(
             f"{date.isoformat()} is already sealed in {ledger_dir}; the ledger was not changed"
         )
@@ -110,15 +138,44 @@ def _append(index: Path, line: bytes) -> None:
         handle.write((b"\n" if needs_break else b"") + line)
 
 
-def seal(forecast: Forecast, ledger_dir: Path, *, tsa_url: str = DEFAULT_TSA_URL) -> SealResult:
-    """Write the canonical forecast, its timestamp and an index line; refuse a sealed date.
+def _check_strip(forecast: Forecast, strip: bytes | None) -> None:
+    """Refuse a strip that is not the one the forecast names, or that could leak."""
+    declared = forecast.strip_sha256
+    if strip is None:
+        if declared is not None:
+            raise StripError("the forecast names a strip (strip_sha256) but none was given")
+        return
+    if declared is None:
+        raise StripError("a strip was given but the forecast names none (strip_sha256 is null)")
+    if digest_hex(strip) != declared:
+        raise StripError("the strip is not the one the forecast names: its SHA-256 differs")
+    if not strip.startswith(PNG_SIGNATURE):
+        # `image_issues` goes by the bytes, not the name: a clean JPEG or WebP passes it, and
+        # would be sealed as `DD.strip.png` and served as a PNG.
+        raise StripError("the strip is not a PNG image")
+    issues = image_issues(strip, ".png")
+    if issues:
+        raise StripError(f"the strip carries image metadata the privacy rules forbid: {issues[0]}")
 
-    Raises `AlreadySealedError` before any network call if the date has been sealed, and
-    `TsaError` (writing nothing) if the timestamp authority fails or answers for other data.
+
+def seal(
+    forecast: Forecast,
+    ledger_dir: Path,
+    *,
+    strip: bytes | None = None,
+    tsa_url: str = DEFAULT_TSA_URL,
+) -> SealResult:
+    """Write the canonical forecast, its timestamp, its strip and an index line.
+
+    A date with any trace of a seal is refused. `strip` must be given exactly when the forecast
+    names one (`strip_sha256`) and must be that PNG, with no metadata. Raises
+    `AlreadySealedError` or `StripError` before any network call, and `TsaError` (writing
+    nothing) if the timestamp authority fails or answers for other data.
     """
     date = forecast.date
     paths = ledger_paths(ledger_dir, date)
     _refuse_if_sealed(date, paths, ledger_dir)
+    _check_strip(forecast, strip)
 
     data = canonical_bytes(forecast)
     digest = digest_hex(data)
@@ -128,7 +185,10 @@ def seal(forecast: Forecast, ledger_dir: Path, *, tsa_url: str = DEFAULT_TSA_URL
     written: list[Path] = []
     try:
         paths.forecast.parent.mkdir(parents=True, exist_ok=True)
-        for path, payload in ((paths.forecast, data), (paths.timestamp, reply)):
+        files = [(paths.forecast, data), (paths.timestamp, reply)]
+        if strip is not None:
+            files.append((paths.strip, strip))
+        for path, payload in files:
             with path.open("xb") as handle:  # exclusive: never replaces an existing file
                 written.append(path)
                 handle.write(payload)
@@ -165,8 +225,25 @@ def _duration(span: dt.timedelta) -> str:
     return f"{seconds / 3600:.1f} hours"
 
 
+def _strip_failure(forecast: Forecast, paths: LedgerPaths, day: str) -> str | None:
+    """Why the strip beside the forecast does not match what the forecast names, or None."""
+    declared = forecast.strip_sha256
+    if declared is None:
+        if paths.strip.exists():
+            return f"an unsealed strip sits beside the forecast of {day} (the forecast names none)"
+        return None
+    if not paths.strip.is_file():
+        return f"no sealed strip for {day} (the forecast names one)"
+    actual = digest_hex(paths.strip.read_bytes())
+    if actual != declared:
+        return (
+            f"strip mismatch: the strip file hashes to {actual} but the forecast names {declared}"
+        )
+    return None
+
+
 def verify(date: dt.date, ledger_dir: Path) -> VerifyResult:
-    """Check the sealed forecast of `date`: digest, form, date, and seal before sunset."""
+    """Check the sealed forecast of `date`: digest, form, date, seal before sunset, and strip."""
     day = date.isoformat()
     paths = ledger_paths(ledger_dir, date)
     if not paths.forecast.is_file():
@@ -207,4 +284,7 @@ def verify(date: dt.date, ledger_dir: Path) -> VerifyResult:
             f"late seal: the timestamp is {_duration(stamp.gen_time - sunset)} "
             f"after sunset at the reference point on {day}"
         )
-    return VerifyResult(ok=True)
+    problem = _strip_failure(forecast, paths, day)
+    if problem is not None:
+        return _fail(problem)
+    return VerifyResult(ok=True, strip_verified=forecast.strip_sha256 is not None)

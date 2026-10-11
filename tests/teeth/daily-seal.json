@@ -1,0 +1,278 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_daily.py",
+    "tests/test_cli_daily.py",
+    "tests/test_seal_strip.py",
+    "tests/test_seal_ledger.py",
+    "tests/test_seal_cli.py",
+    "tests/test_seal_canonical.py",
+    "tests/test_seal_tsa.py",
+    "tests/test_forecast.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_daily.py",
+    "tests/test_cli_daily.py",
+    "tests/test_seal_strip.py",
+    "tests/test_seal_ledger.py",
+    "tests/test_seal_cli.py",
+    "tests/test_seal_canonical.py",
+    "tests/test_seal_tsa.py",
+    "tests/test_forecast.py"
+  ],
+  "mutants": [
+    {
+      "label": "A01 sunset instant itself is accepted (>= becomes >)",
+      "file": "../../src/lastlight/daily.py",
+      "oracle": "real",
+      "find": "if now >= elevation_crossings(evening, lat, lon)[0.0]:",
+      "replace": "if now > elevation_crossings(evening, lat, lon)[0.0]:"
+    },
+    {
+      "label": "A02 refusal comes a minute early? no: a minute LATE (run allowed up to 1 min after sunset)",
+      "file": "../../src/lastlight/daily.py",
+      "oracle": "real",
+      "find": "if now >= elevation_crossings(evening, lat, lon)[0.0]:",
+      "replace": "if now - dt.timedelta(minutes=1) >= elevation_crossings(evening, lat, lon)[0.0]:"
+    },
+    {
+      "label": "A03 one minute before sunset is refused (early cut)",
+      "file": "../../src/lastlight/daily.py",
+      "oracle": "real",
+      "find": "if now >= elevation_crossings(evening, lat, lon)[0.0]:",
+      "replace": "if now + dt.timedelta(minutes=1) >= elevation_crossings(evening, lat, lon)[0.0]:"
+    },
+    {
+      "label": "A04 one SECOND before sunset is refused (1 s early cut)",
+      "file": "../../src/lastlight/daily.py",
+      "oracle": "real",
+      "find": "if now >= elevation_crossings(evening, lat, lon)[0.0]:",
+      "replace": "if now + dt.timedelta(seconds=1) >= elevation_crossings(evening, lat, lon)[0.0]:"
+    },
+    {
+      "label": "A05 lateness measured at civil twilight (-6) instead of the horizon",
+      "file": "../../src/lastlight/daily.py",
+      "oracle": "real",
+      "find": "if now >= elevation_crossings(evening, lat, lon)[0.0]:",
+      "replace": "if now >= elevation_crossings(evening, lat, lon)[-6.0]:"
+    },
+    {
+      "label": "A06 idempotence short-circuit removed",
+      "file": "../../src/lastlight/daily.py",
+      "oracle": "real",
+      "find": "if is_sealed(evening, ledger_dir):",
+      "replace": "if False:"
+    },
+    {
+      "label": "A07 sealed check made to lose to the lateness check (rerun after sunset errors)",
+      "file": "../../src/lastlight/daily.py",
+      "oracle": "real",
+      "find": "if is_sealed(evening, ledger_dir):",
+      "replace": "if is_sealed(evening, ledger_dir) and now < elevation_crossings(evening, REFERENCE_POINT[0], REFERENCE_POINT[1])[0.0]:"
+    },
+    {
+      "label": "A08 existing seal that fails verify is waved through",
+      "file": "../../src/lastlight/daily.py",
+      "oracle": "real",
+      "find": "if not existing.ok:",
+      "replace": "if False:"
+    },
+    {
+      "label": "A09 post-seal verify ignored (late timestamp keeps a late seal)",
+      "file": "../../src/lastlight/daily.py",
+      "oracle": "real",
+      "find": "if not outcome.ok:",
+      "replace": "if False:"
+    },
+    {
+      "label": "A10 already-sealed reported as sealed",
+      "file": "../../src/lastlight/daily.py",
+      "oracle": "real",
+      "find": "return DailyResult(\"already-sealed\", evening,",
+      "replace": "return DailyResult(\"sealed\", evening,"
+    },
+    {
+      "label": "A11 default evening is the UTC date, not the local mean solar date",
+      "file": "../../src/lastlight/daily.py",
+      "oracle": "real",
+      "find": "return evening_date(_utc(now_utc), REFERENCE_POINT[1])",
+      "replace": "return _utc(now_utc).date()"
+    },
+    {
+      "label": "A12 too-late exit code collapses into generic failure",
+      "file": "../../src/lastlight/commands/seal_daily.py",
+      "oracle": "real",
+      "find": "EXIT_TOO_LATE = 3",
+      "replace": "EXIT_TOO_LATE = 1"
+    },
+    {
+      "label": "A13 verify: changed strip digest accepted",
+      "file": "../../src/lastlight/seal/ledger.py",
+      "oracle": "real",
+      "find": "if actual != declared:",
+      "replace": "if False:"
+    },
+    {
+      "label": "A14 verify: missing strip accepted",
+      "file": "../../src/lastlight/seal/ledger.py",
+      "oracle": "real",
+      "find": "return f\"no sealed strip for {day} (the forecast names one)\"",
+      "replace": "return None"
+    },
+    {
+      "label": "A15 verify: strip beside a forecast that names none accepted",
+      "file": "../../src/lastlight/seal/ledger.py",
+      "oracle": "real",
+      "find": "if paths.strip.exists():",
+      "replace": "if False:"
+    },
+    {
+      "label": "A16 seal: strip metadata not refused",
+      "file": "../../src/lastlight/seal/ledger.py",
+      "oracle": "real",
+      "find": "if issues:",
+      "replace": "if False:"
+    },
+    {
+      "label": "A17 seal: a metadata-free JPEG or WebP is accepted as the PNG strip (PNG signature check gone)",
+      "file": "../../src/lastlight/seal/ledger.py",
+      "oracle": "real",
+      "find": "if not strip.startswith(PNG_SIGNATURE):",
+      "replace": "if False:"
+    },
+    {
+      "label": "A18 seal: strip whose digest differs from the named one accepted",
+      "file": "../../src/lastlight/seal/ledger.py",
+      "oracle": "real",
+      "find": "if digest_hex(strip) != declared:",
+      "replace": "if False:"
+    },
+    {
+      "label": "A19 seal: strip given but forecast names none accepted",
+      "file": "../../src/lastlight/seal/ledger.py",
+      "oracle": "real",
+      "find": "raise StripError(\"a strip was given but the forecast names none (strip_sha256 is null)\")",
+      "replace": "return"
+    },
+    {
+      "label": "A20 seal: forecast names a strip but none given accepted",
+      "file": "../../src/lastlight/seal/ledger.py",
+      "oracle": "real",
+      "find": "raise StripError(\"the forecast names a strip (strip_sha256) but none was given\")",
+      "replace": "return"
+    },
+    {
+      "label": "A21 seal: the strip is never written",
+      "file": "../../src/lastlight/seal/ledger.py",
+      "oracle": "real",
+      "find": "if strip is not None:\n            files.append((paths.strip, strip))",
+      "replace": "if False:\n            files.append((paths.strip, strip))"
+    },
+    {
+      "label": "A22 strip path is not beside the forecast with the .strip.png name",
+      "file": "../../src/lastlight/seal/ledger.py",
+      "oracle": "real",
+      "find": "strip=folder / f\"{date.day:02d}.strip.png\"",
+      "replace": "strip=folder / f\"{date.day:02d}.png\""
+    },
+    {
+      "label": "A23 a lone strip file is not a trace of a seal",
+      "file": "../../src/lastlight/seal/ledger.py",
+      "oracle": "real",
+      "find": "or paths.strip.exists()\n        or _indexed",
+      "replace": "or False\n        or _indexed"
+    },
+    {
+      "label": "A24 verify never claims the strip was verified",
+      "file": "../../src/lastlight/seal/ledger.py",
+      "oracle": "real",
+      "find": "strip_verified=forecast.strip_sha256 is not None",
+      "replace": "strip_verified=False"
+    },
+    {
+      "label": "A25 verify CLI prints bare PASS even with a strip",
+      "file": "../../src/lastlight/commands/verify.py",
+      "oracle": "real",
+      "find": "print(\"PASS (strip verified)\" if outcome.strip_verified else \"PASS\")",
+      "replace": "print(\"PASS\")"
+    },
+    {
+      "label": "A26 seal CLI: StripError not turned into a refusal",
+      "file": "../../src/lastlight/commands/seal.py",
+      "oracle": "real",
+      "find": "except (AlreadySealedError, StripError) as error:",
+      "replace": "except AlreadySealedError as error:"
+    },
+    {
+      "label": "A27 strip_sha256 accepts uppercase hex",
+      "file": "../../src/lastlight/forecast.py",
+      "oracle": "real",
+      "find": "pattern=r\"^[0-9a-f]{64}$\"",
+      "replace": "pattern=r\"^[0-9a-fA-F]{64}$\""
+    },
+    {
+      "label": "A28 strip_sha256 pattern loses its end anchor",
+      "file": "../../src/lastlight/forecast.py",
+      "oracle": "real",
+      "find": "pattern=r\"^[0-9a-f]{64}$\"",
+      "replace": "pattern=r\"^[0-9a-f]{64}\""
+    },
+    {
+      "label": "A29 strip_sha256 pattern loses its start anchor",
+      "file": "../../src/lastlight/forecast.py",
+      "oracle": "real",
+      "find": "pattern=r\"^[0-9a-f]{64}$\"",
+      "replace": "pattern=r\"[0-9a-f]{64}$\""
+    },
+    {
+      "label": "A30 strip_sha256 accepts 32..64 chars",
+      "file": "../../src/lastlight/forecast.py",
+      "oracle": "real",
+      "find": "pattern=r\"^[0-9a-f]{64}$\"",
+      "replace": "pattern=r\"^[0-9a-f]{32,64}$\""
+    },
+    {
+      "label": "A31 strip_sha256 defaults to null (forgotten painting seals silently)",
+      "file": "../../src/lastlight/forecast.py",
+      "oracle": "real",
+      "find": "strip_sha256: Sha256Hex | None\n",
+      "replace": "strip_sha256: Sha256Hex | None = None\n"
+    },
+    {
+      "label": "A32 canonical form drops null fields (strip_sha256 omitted when null)",
+      "file": "../../src/lastlight/seal/canonical.py",
+      "oracle": "real",
+      "find": "forecast.model_dump(mode=\"json\")",
+      "replace": "forecast.model_dump(mode=\"json\", exclude_none=True)"
+    },
+    {
+      "label": "A33 canonical keys not sorted (strip_sha256 lands last)",
+      "file": "../../src/lastlight/seal/canonical.py",
+      "oracle": "real",
+      "find": "document, sort_keys=True,",
+      "replace": "document, sort_keys=False,"
+    },
+    {
+      "label": "[control] assert on a value paint() always provides (inert at runtime)",
+      "file": "../../src/lastlight/daily.py",
+      "oracle": "real",
+      "find": "    assert painting.strip_png is not None  # paint() makes a strip unless told not to\n",
+      "replace": "",
+      "expect": "survived",
+      "why": "seal_daily calls paint() without with_strip, which defaults to True, so strip_png is never None on any path that reaches the line (failures raise earlier); the assert only narrows the type for mypy and is already stripped under python -O. Holds while paint()'s default stays True; not inert if a caller passes with_strip=False."
+    }
+  ]
+}

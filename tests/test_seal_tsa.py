@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import io
 import urllib.error
 import urllib.request
@@ -12,6 +13,7 @@ import pytest
 import seal_helpers as helpers
 
 from lastlight.seal import tsa
+from lastlight.seal.canonical import canonical_bytes
 from lastlight.seal.tsa import DEFAULT_TSA_URL, Timestamp, TsaError
 
 NOT_GRANTED = bytes.fromhex("30053003020102")  # status 2 (rejection), no token
@@ -26,7 +28,8 @@ def test_the_default_tsa_is_freetsa() -> None:
 
 
 def test_the_request_asks_for_a_sha256_imprint_of_the_data_without_a_nonce() -> None:
-    # These exact bytes were accepted by the public TSA when the fixture was recorded.
+    # The structure (everything around the digest) is what the public TSA accepted when the
+    # fixture was recorded; the digest is that of the current stub.
     assert tsa.build_request(helpers.STUB_CANONICAL).hex() == helpers.STUB_REQUEST_HEX
 
 
@@ -44,6 +47,60 @@ def test_the_recorded_response_parses_to_the_stub_digest_and_a_utc_time() -> Non
     assert stamp.imprint.hex() == helpers.STUB_DIGEST
     assert stamp.gen_time.utcoffset() == dt.timedelta(0)
     assert stamp.gen_time.date() == dt.date(2026, 10, 11)
+
+
+PRE_STRIP_CANONICAL = (
+    b'{"curve":['
+    b'{"L":78.1235,"a":12.3457,"b":45.6789,"sun_elevation":6.0,"view_elevation":2.0},'
+    b'{"L":65.4321,"a":20.0,"b":38.1,"sun_elevation":0.0,"view_elevation":2.0},'
+    b'{"L":40.5556,"a":8.88889,"b":10.0,"sun_elevation":-4.0,"view_elevation":5.0},'
+    b'{"L":10.1,"a":-1.23457,"b":-2.5e-07,"sun_elevation":-8.0,"view_elevation":10.0}],'
+    b'"date":"2026-10-11",'
+    b'"inputs":[{"cycle_date":"2026-10-10","cycle_hour_utc":18,'
+    b'"digest":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",'
+    b'"forecast_hour":6,"source":"hrrr"}],'
+    b'"model":{"code_sha":"0123456789abcdef0123456789abcdef01234567",'
+    b'"name":"lastlight-stub","version":"0.0.1"},'
+    b'"notes":"stub forecast for the seal tests",'
+    b'"reference_point":{"elev_m":340.0,"lat":33.45,"lon":-112.07},'
+    b'"schema_version":1,'
+    b'"vividness":{"mean":0.42,"sd":0.07}}'
+)
+"""The stub's canonical bytes as they were when the public TSA stamped them: the schema before
+`strip_sha256` existed, written out by hand and not derived from anything in `lastlight`."""
+
+
+def test_the_raw_recorded_response_is_the_timestamp_of_the_pre_strip_canonical_form() -> None:
+    # `recorded_tsr()` re-points the imprint at the current stub, so the tests that read it
+    # prove nothing about the canonical form. This one reads the file exactly as the public
+    # authority sent it: its imprint is the SHA-256 of bytes written down independently of the
+    # code, which is the external check on the canonicalisation.
+    stamp = tsa.parse_response(helpers.recorded_response())
+    assert stamp.algorithm == "sha256"
+    assert stamp.imprint.hex() == hashlib.sha256(PRE_STRIP_CANONICAL).hexdigest()
+    assert stamp.imprint.hex() != helpers.STUB_DIGEST, "the stub has moved on since it was stamped"
+
+
+def test_the_canonicaliser_still_makes_those_bytes_apart_from_the_new_null_member() -> None:
+    # The member sits between `schema_version` and `vividness` (keys are sorted), so taking it
+    # out leaves exactly the bytes that were stamped; any other difference in the canonical form
+    # (key order, spacing, rounding, escaping) would show here against the recorded response.
+    made = canonical_bytes(helpers.stub_forecast())
+    assert made.count(b'"strip_sha256":null,') == 1
+    assert made.replace(b'"strip_sha256":null,', b"") == PRE_STRIP_CANONICAL
+    assert helpers.STUB_CANONICAL.replace(b'"strip_sha256":null,', b"") == PRE_STRIP_CANONICAL
+
+
+def test_re_pointing_the_recorded_response_changes_its_imprint_bytes_and_nothing_else() -> None:
+    raw, pointed = helpers.recorded_response(), helpers.recorded_tsr()
+    imprint = hashlib.sha256(PRE_STRIP_CANONICAL).digest()
+    start = raw.index(imprint)
+    assert raw.count(imprint) == 1 and len(raw) == len(pointed)
+    changed = [
+        i for i, (before, after) in enumerate(zip(raw, pointed, strict=True)) if before != after
+    ]
+    assert changed and all(start <= i < start + len(imprint) for i in changed)
+    assert pointed[start : start + len(imprint)] == bytes.fromhex(helpers.STUB_DIGEST)
 
 
 def test_the_recorded_response_precedes_sunset_on_the_stub_date() -> None:
