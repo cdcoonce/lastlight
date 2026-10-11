@@ -16,7 +16,7 @@ Agents never install the timer; the owner does. Nothing in this repo installs or
 <archive>/<camera id>/<YYYY-MM-DD>/log.jsonl                 one line per poll: saved, not_modified, unchanged, stale, error
 ```
 
-The date folder is the local solar date of the evening, so one evening is one folder even when it passes UTC midnight. A frame whose Last-Modified is more than 20 minutes old is logged as `stale` and not saved. The default archive is `~/.local/share/lastlight/frames`; set `LASTLIGHT_ARCHIVE` to move it. The files are an estimated 50 MB a month per camera; check the real figure after a week.
+The date folder is the local solar date of the evening, so one evening is one folder even when it passes UTC midnight. A frame whose Last-Modified is more than 20 minutes old is logged as `stale` and not saved. The default archive is `~/.local/share/lastlight/frames`; set `LASTLIGHT_ARCHIVE` to move it. Frames are 130 to 180 KB each, so an evening is roughly 4 MB per camera and a year roughly 1.5 GB per camera (an estimate; check the real figure after a week).
 
 ## Install (once, on the always-on Ubuntu host)
 

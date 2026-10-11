@@ -6,7 +6,12 @@
     "pytest",
     "-q",
     "-p",
-    "no:cacheprovider"
+    "no:cacheprovider",
+    "tests/test_collector.py",
+    "tests/test_collect_command.py",
+    "tests/test_camera_registry.py",
+    "tests/test_camera_archive.py",
+    "tests/test_camera_transport.py"
   ],
   "collect_command": [
     "uv",
@@ -15,7 +20,12 @@
     "--collect-only",
     "-q",
     "-p",
-    "no:cacheprovider"
+    "no:cacheprovider",
+    "tests/test_collector.py",
+    "tests/test_collect_command.py",
+    "tests/test_camera_registry.py",
+    "tests/test_camera_archive.py",
+    "tests/test_camera_transport.py"
   ],
   "mutants": [
     {

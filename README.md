@@ -26,6 +26,8 @@ uv run ruff check && uv run ruff format --check && uv run pytest
 uv run lastlight privacy-scan
 ```
 
+Public-camera frames are collected on the always-on capture host by `lastlight collect` (see `uv run lastlight collect --help`); the owner's install steps are in [`docs/runbooks/collector.md`](docs/runbooks/collector.md).
+
 Tests run offline: a guard in `tests/conftest.py` refuses every socket connect. A test that really needs the network is marked `@pytest.mark.network`, skipped by default and run on purpose with `uv run pytest -m network`.
 
 ## Privacy
