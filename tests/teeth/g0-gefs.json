@@ -1,0 +1,238 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_gefs.py",
+    "tests/test_g0_collect.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "tests/test_gefs.py",
+    "tests/test_g0_collect.py"
+  ],
+  "mutants": [
+    {
+      "label": "idx range: ends at the next offset (off by one)",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "following = entries[position + 1].offset - 1 if position + 1 < len(entries) else None",
+      "replace": "following = entries[position + 1].offset if position + 1 < len(entries) else None"
+    },
+    {
+      "label": "idx range: last message gets a closed range",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "following = entries[position + 1].offset - 1 if position + 1 < len(entries) else None",
+      "replace": "following = entries[position + 1].offset - 1 if position + 1 < len(entries) else entries[position].offset + 10"
+    },
+    {
+      "label": "idx range: starts one byte late",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "ranges[spec.name] = ByteRange(entries[position].offset, following)",
+      "replace": "ranges[spec.name] = ByteRange(entries[position].offset + 1, following)"
+    },
+    {
+      "label": "idx select: duplicates accepted",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "if len(hits) != 1:",
+      "replace": "if len(hits) < 1:"
+    },
+    {
+      "label": "idx select: label matched by substring",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "and entry.label == spec.label",
+      "replace": "and spec.label in entry.label"
+    },
+    {
+      "label": "idx select: level not checked",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "and entry.level == \"entire atmosphere\"",
+      "replace": "and True"
+    },
+    {
+      "label": "idx select: variable not checked",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "entry.variable == \"AOTK\"",
+      "replace": "True"
+    },
+    {
+      "label": "idx parse: equal offsets accepted",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "if entries and offset <= entries[-1].offset:",
+      "replace": "if entries and offset < entries[-1].offset:"
+    },
+    {
+      "label": "message check: parameter not checked",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "if (message.discipline, message.category, message.number) != _EXPECTED_PARAMETER:",
+      "replace": "if False:"
+    },
+    {
+      "label": "message check: surface not checked",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "if message.surface_type != _WHOLE_COLUMN:",
+      "replace": "if False:"
+    },
+    {
+      "label": "message check: aerosol type not checked",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "if message.aerosol_type != spec.aerosol_type:",
+      "replace": "if False:"
+    },
+    {
+      "label": "message check: wavelength not checked",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "abs(found - wanted) > _WAVELENGTH_TOLERANCE_NM",
+      "replace": "abs(found - wanted) > 1e9"
+    },
+    {
+      "label": "message check: wavelength missing accepted",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "if band is None or any(",
+      "replace": "if band is not None and any("
+    },
+    {
+      "label": "message check: cycle not checked",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "if (message.reference_date, message.reference_hour) != (plan.cycle_date, plan.cycle_hour):",
+      "replace": "if False:"
+    },
+    {
+      "label": "message check: forecast hour not checked",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "if message.step_hours != plan.forecast_hour:",
+      "replace": "if False:"
+    },
+    {
+      "label": "download: trailer 7777 not required",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "return data[:4] == b\"GRIB\" and data[-4:] == b\"7777\"",
+      "replace": "return data[:4] == b\"GRIB\""
+    },
+    {
+      "label": "download: length not checked",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "if byte_range.length is not None and len(data) != byte_range.length:",
+      "replace": "if False:"
+    },
+    {
+      "label": "cache: a cached partial download is returned",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "if _is_whole_message(cached, byte_range):",
+      "replace": "if True:"
+    },
+    {
+      "label": "optical depth: negative values accepted",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "value < -_PACKING_NOISE",
+      "replace": "value < -1.0"
+    },
+    {
+      "label": "optical depth: negative packing noise kept (not floored to 0)",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "return max(value, 0.0)",
+      "replace": "return value"
+    },
+    {
+      "label": "cell: masked cell read as data",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "if np.ma.getmaskarray(values)[cell]:",
+      "replace": "if False:"
+    },
+    {
+      "label": "cell: off-grid point accepted",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "if distance_km > half_diagonal_km:",
+      "replace": "if False:"
+    },
+    {
+      "label": "run: the next cycle instead of the latest at or before",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "hour=instant.hour // 6 * 6",
+      "replace": "hour=(instant.hour // 6 + 1) * 6 % 24"
+    },
+    {
+      "label": "run: forecast hour 3 instead of the analysis",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "return RunPlan(cycle.date(), cycle.hour, 0)",
+      "replace": "return RunPlan(cycle.date(), cycle.hour, 3)"
+    },
+    {
+      "label": "sample: total read from the dust message",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "total_aod_550=values[TOTAL_AOD_550.name],",
+      "replace": "total_aod_550=values[DUST_AOD_550.name],"
+    },
+    {
+      "label": "sample: dust read from the total message",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "dust_aod_550=values[DUST_AOD_550.name],",
+      "replace": "dust_aod_550=values[TOTAL_AOD_550.name],"
+    },
+    {
+      "label": "column(): dust reported as the total",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "dust_aod_550=self.dust_aod_550,",
+      "replace": "dust_aod_550=self.total_aod_550,"
+    },
+    {
+      "label": "column(): source label dropped",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "source=SOURCE_LABEL,",
+      "replace": "source=\"x\","
+    },
+    {
+      "label": "grid: second message on a different grid accepted",
+      "file": "../../src/lastlight/inputs/gefs.py",
+      "oracle": "real",
+      "find": "elif not (",
+      "replace": "elif False and not ("
+    },
+    {
+      "label": "[control] closed_below compares the name with the literal 'late' instead of BANDS[-1]",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "BANDS is tuple(ELEVATION_BANDS) and its last key is 'late' (geometry.ELEVATION_BANDS order golden, early, mid, late), so BANDS[-1] == 'late' and the boolean is identical for every band name on every path. Inert over the whole suite; it would differ only if ELEVATION_BANDS were reordered, which no test or caller does.",
+      "find": "closed_below = name == BANDS[-1]",
+      "replace": "closed_below = name == \"late\""
+    }
+  ]
+}

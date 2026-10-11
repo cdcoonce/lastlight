@@ -1,0 +1,96 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_g0_transport.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "tests/test_g0_transport.py"
+  ],
+  "mutants": [
+    {
+      "label": "transport: a 404 is retried",
+      "file": "../../src/lastlight/g0/transport.py",
+      "oracle": "real",
+      "find": "if is_not_found(error) or failures == self.retries:",
+      "replace": "if failures == self.retries:"
+    },
+    {
+      "label": "transport: nothing ever re-raised before the loop ends",
+      "file": "../../src/lastlight/g0/transport.py",
+      "oracle": "real",
+      "find": "if is_not_found(error) or failures == self.retries:",
+      "replace": "if is_not_found(error):"
+    },
+    {
+      "label": "transport: no pacing",
+      "file": "../../src/lastlight/g0/transport.py",
+      "oracle": "real",
+      "find": "if remaining > 0.0:",
+      "replace": "if False:"
+    },
+    {
+      "label": "transport: pacing measures the wrong span",
+      "file": "../../src/lastlight/g0/transport.py",
+      "oracle": "real",
+      "find": "remaining = self.min_interval_s - (self._clock() - self._last)",
+      "replace": "remaining = self.min_interval_s + (self._clock() - self._last)"
+    },
+    {
+      "label": "transport: one try fewer",
+      "file": "../../src/lastlight/g0/transport.py",
+      "oracle": "real",
+      "find": "for failures in range(self.retries + 1):",
+      "replace": "for failures in range(self.retries):"
+    },
+    {
+      "label": "transport: no growing backoff",
+      "file": "../../src/lastlight/g0/transport.py",
+      "oracle": "real",
+      "find": "self._sleep(self.backoff_s * (failures + 1))",
+      "replace": "self._sleep(self.backoff_s)"
+    },
+    {
+      "label": "transport: attempts not counted",
+      "file": "../../src/lastlight/g0/transport.py",
+      "oracle": "real",
+      "find": "self.requests += 1",
+      "replace": "pass"
+    },
+    {
+      "label": "not found: any message containing 404 reads as not found",
+      "file": "../../src/lastlight/g0/transport.py",
+      "oracle": "real",
+      "find": "return status is not None and status.group(1) == \"404\"",
+      "replace": "return \"404\" in str(error)"
+    },
+    {
+      "label": "not found: a status of more than three digits starting 404 reads as not found",
+      "file": "../../src/lastlight/g0/transport.py",
+      "oracle": "real",
+      "find": "_STATUS = re.compile(r\"^\\S+: HTTP (\\d{3})(?!\\d)\")",
+      "replace": "_STATUS = re.compile(r\"^\\S+: HTTP (\\d{3})\")"
+    },
+    {
+      "label": "[control] closed_below compares the name with the literal 'late' instead of BANDS[-1]",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "BANDS is tuple(ELEVATION_BANDS) and its last key is 'late' (geometry.ELEVATION_BANDS order golden, early, mid, late), so BANDS[-1] == 'late' and the boolean is identical for every band name on every path. Inert over the whole suite; it would differ only if ELEVATION_BANDS were reordered, which no test or caller does.",
+      "find": "closed_below = name == BANDS[-1]",
+      "replace": "closed_below = name == \"late\""
+    }
+  ]
+}

@@ -1,0 +1,212 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_g0_report.py",
+    "tests/test_g0_figures.py",
+    "tests/test_g0_command.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "tests/test_g0_report.py",
+    "tests/test_g0_figures.py",
+    "tests/test_g0_command.py"
+  ],
+  "mutants": [
+    {
+      "label": "report: verdict word inverted",
+      "file": "../../src/lastlight/g0/report.py",
+      "oracle": "real",
+      "find": "return \"PASS\" if passed else \"FAIL\"",
+      "replace": "return \"FAIL\" if passed else \"PASS\""
+    },
+    {
+      "label": "report: late marked as counted in the distribution",
+      "file": "../../src/lastlight/g0/report.py",
+      "oracle": "real",
+      "find": "\"yes\" if name in study.counted_bands else \"not counted\"",
+      "replace": "\"yes\""
+    },
+    {
+      "label": "report: dropped dates not listed",
+      "file": "../../src/lastlight/g0/report.py",
+      "oracle": "real",
+      "find": "rows.append(\n            [record.date.isoformat(), f\"`{record.drop_reason}`\", DROP_REASONS[record.drop_reason]]\n        )",
+      "replace": "pass"
+    },
+    {
+      "label": "report: a clock time of day added to the title",
+      "file": "../../src/lastlight/g0/report.py",
+      "oracle": "real",
+      "find": "        title,\n        _verdict_section(study),",
+      "replace": "        title + \"\\nRun at 15:32.\\n\",\n        _verdict_section(study),"
+    },
+    {
+      "label": "report: a HRRR file name with a cycle hour added to the rule",
+      "file": "../../src/lastlight/g0/report.py",
+      "oracle": "real",
+      "find": "which is the past-evening path of ",
+      "replace": "(file hrrr.t18z.wrfsfcf00) which is the past-evening path of "
+    },
+    {
+      "label": "report: a per-date cycle hour stated as a cycle number",
+      "file": "../../src/lastlight/g0/report.py",
+      "oracle": "real",
+      "find": "on the evening of the date, which is",
+      "replace": "on the evening of the date (cycle 18), which is"
+    },
+    {
+      "label": "report: output depends on the clock (nanosecond stamp)",
+      "file": "../../src/lastlight/g0/report.py",
+      "oracle": "real",
+      "find": "        title,\n        _verdict_section(study),",
+      "replace": "        title + f\"<!-- {__import__('time').time_ns()} -->\\n\",\n        _verdict_section(study),"
+    },
+    {
+      "label": "results: rows not in date order (reversed)",
+      "file": "../../src/lastlight/g0/report.py",
+      "oracle": "real",
+      "find": "for day in study.attempted:",
+      "replace": "for day in reversed(study.attempted):"
+    },
+    {
+      "label": "results: dropped dates lose their reason",
+      "file": "../../src/lastlight/g0/report.py",
+      "oracle": "real",
+      "find": "writer.writerow([day.isoformat(), \"dropped\", dropped[day].drop_reason, *padding])",
+      "replace": "writer.writerow([day.isoformat(), \"dropped\", \"\", *padding])"
+    },
+    {
+      "label": "figures: a text chunk attached to every PNG",
+      "file": "../../src/lastlight/g0/figures.py",
+      "oracle": "real",
+      "find": "return strip_png_bytes(self.image)",
+      "replace": "import io as _io\n        from PIL.PngImagePlugin import PngInfo as _P\n        _p = _P()\n        _p.add_text('Software', 'x')\n        _b = _io.BytesIO()\n        self.image.save(_b, format='PNG', pnginfo=_p)\n        return _b.getvalue()"
+    },
+    {
+      "label": "figures: axis limit set from the maximum, not a percentile",
+      "file": "../../src/lastlight/g0/figures.py",
+      "oracle": "real",
+      "find": "limit = axis_limit(outcome.distances, percentile=98.0, floor=stats.THRESHOLD * 2)",
+      "replace": "limit = axis_limit(outcome.distances, percentile=100.0, floor=stats.THRESHOLD * 2)"
+    },
+    {
+      "label": "verdict caveat: omitted from the verdict section",
+      "file": "../../src/lastlight/g0/report.py",
+      "oracle": "real",
+      "find": "        _caveat(study),\n        \"\",\n        f\"{verdict.meeting}",
+      "replace": "        f\"{verdict.meeting}"
+    },
+    {
+      "label": "verdict caveat: channel shares swapped",
+      "file": "../../src/lastlight/g0/report.py",
+      "oracle": "real",
+      "find": "f\"{blue} alone meets the rule on {share[blue]} of dates and {red} alone on {share[red]}\"",
+      "replace": "f\"{blue} alone meets the rule on {share[red]} of dates and {red} alone on {share[blue]}\""
+    },
+    {
+      "label": "verdict caveat: seasonal shares swapped",
+      "file": "../../src/lastlight/g0/report.py",
+      "oracle": "real",
+      "find": "seasonal_split = f\"{blue} alone {seasonal[blue]}, {red} alone {seasonal[red]}\"",
+      "replace": "seasonal_split = f\"{blue} alone {seasonal[red]}, {red} alone {seasonal[blue]}\""
+    },
+    {
+      "label": "verdict caveat: horizon contrast read from log(R/G)",
+      "file": "../../src/lastlight/g0/report.py",
+      "oracle": "real",
+      "find": "f\"{_horizon_contrast(study)[1]:+.2f}, where the four usable frames",
+      "replace": "f\"{_horizon_contrast(study)[0]:+.2f}, where the four usable frames"
+    },
+    {
+      "label": "verdict caveat: the result always said to rest on one channel",
+      "file": "../../src/lastlight/g0/report.py",
+      "oracle": "real",
+      "find": "        if passed and carrier\n        else f\"by channel, {split}\"",
+      "replace": "        if True\n        else f\"by channel, {split}\""
+    },
+    {
+      "label": "verdict caveat: a FAIL said to rest on one channel",
+      "file": "../../src/lastlight/g0/report.py",
+      "oracle": "real",
+      "find": "        if passed and carrier\n        else f\"by channel, {split}\"",
+      "replace": "        if carrier\n        else f\"by channel, {split}\""
+    },
+    {
+      "label": "verdict caveat: the seasonal control always said to rest on the same channel",
+      "file": "../../src/lastlight/g0/report.py",
+      "oracle": "real",
+      "find": "if passed and carrier and _carrier(study.seasonal_channels) == carrier",
+      "replace": "if passed and carrier"
+    },
+    {
+      "label": "verdict caveat: HRRR smoke always said to be zero",
+      "file": "../../src/lastlight/g0/report.py",
+      "oracle": "real",
+      "find": "if not any(value > 0.0 for value in _smoke_values(study))",
+      "replace": "if True"
+    },
+    {
+      "label": "verdict caveat: a FAIL gets the PASS paragraph",
+      "file": "../../src/lastlight/g0/report.py",
+      "oracle": "real",
+      "find": "    if passed:\n        last = (",
+      "replace": "    if True:\n        last = ("
+    },
+    {
+      "label": "verdict caveat: the cited observed range changed",
+      "file": "../../src/lastlight/g0/report.py",
+      "oracle": "real",
+      "find": "OBSERVED_CONTRAST_RANGE: Final = (-0.21, 0.14)",
+      "replace": "OBSERVED_CONTRAST_RANGE: Final = (-0.21, 0.41)"
+    },
+    {
+      "label": "inputs: the NOAA attribution dropped",
+      "file": "../../src/lastlight/g0/report.py",
+      "oracle": "real",
+      "find": "bullets = [hrrr, aerosol, ozone, analyses, model, geos, fixed, attribution]",
+      "replace": "bullets = [hrrr, aerosol, ozone, analyses, model, geos, fixed]"
+    },
+    {
+      "label": "inputs: the note that the aerosol is a model dropped",
+      "file": "../../src/lastlight/g0/report.py",
+      "oracle": "real",
+      "find": "bullets = [hrrr, aerosol, ozone, analyses, model, geos, fixed, attribution]",
+      "replace": "bullets = [hrrr, aerosol, ozone, analyses, geos, fixed, attribution]"
+    },
+    {
+      "label": "seasonal section: the old wording about what a forecast has to beat",
+      "file": "../../src/lastlight/g0/report.py",
+      "oracle": "real",
+      "find": "This is the closer measure of what a forecast would have to beat, in renderer units.",
+      "replace": "This is the closer measure of what a forecast has to beat if it is to do better than a seasonal climatology."
+    },
+    {
+      "label": "seasonal section: the per-channel numbers dropped",
+      "file": "../../src/lastlight/g0/report.py",
+      "oracle": "real",
+      "find": "f\"By channel the same control gives {by_channel}. \"",
+      "replace": "\"\""
+    },
+    {
+      "label": "[control] closed_below compares the name with the literal 'late' instead of BANDS[-1]",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "BANDS is tuple(ELEVATION_BANDS) and its last key is 'late' (geometry.ELEVATION_BANDS order golden, early, mid, late), so BANDS[-1] == 'late' and the boolean is identical for every band name on every path. Inert over the whole suite; it would differ only if ELEVATION_BANDS were reordered, which no test or caller does.",
+      "find": "closed_below = name == BANDS[-1]",
+      "replace": "closed_below = name == \"late\""
+    }
+  ]
+}
