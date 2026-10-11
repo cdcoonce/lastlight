@@ -55,3 +55,19 @@ def ledger_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     for date in ledger_factory.DATES:
         ledger_factory.write_strip(ledger, date)
     return ledger
+
+
+@pytest.fixture
+def shuffled_ledger_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The same three evenings and paintings as `ledger_dir`, sealed out of date order.
+
+    The index lists 2026-10-13, then 2026-10-11, then 2026-10-12: neither ascending nor
+    descending, so only sorting by date can put them newest first.
+    """
+    import ledger_factory
+
+    ledger = tmp_path / "ledger"
+    ledger_factory.seal_dates_out_of_date_order(ledger, monkeypatch)
+    for date in ledger_factory.DATES:
+        ledger_factory.write_strip(ledger, date)
+    return ledger

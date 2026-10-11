@@ -89,6 +89,26 @@ def test_the_archive_lists_every_painting_newest_first(site: Path) -> None:
     ]
 
 
+def test_evenings_sealed_out_of_date_order_are_still_featured_and_listed_newest_first(
+    shuffled_ledger_dir: Path, tmp_path: Path
+) -> None:
+    out = tmp_path / "site"
+    assert build_site(shuffled_ledger_dir, out).findings == ()
+    home = read_page(out, "index.html")
+    assert "2026-10-13" in home.headings(), "the featured evening is the newest verified date"
+    assert home.find("img")[0].attrs["src"] == "strips/2026-10-13.png"
+    assert [entry.text.split()[0] for entry in home.find("li", "evening")] == [
+        "2026-10-13",
+        "2026-10-12",
+        "2026-10-11",
+    ]
+    archive = read_page(out, "archive.html")
+    date_links = [
+        href for href in archive.hrefs() if re.fullmatch(r"\d{4}-\d{2}-\d{2}\.html", href)
+    ]
+    assert date_links == ["2026-10-13.html", "2026-10-12.html", "2026-10-11.html"]
+
+
 def test_the_home_page_lists_only_recent_evenings_and_the_archive_lists_all(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -27,6 +27,17 @@ def test_evenings_come_newest_first(ledger_dir: Path) -> None:
     assert ledger.skipped_index_lines == 0
 
 
+def test_evenings_are_ordered_by_date_not_by_the_order_they_were_sealed(
+    shuffled_ledger_dir: Path,
+) -> None:
+    index = (shuffled_ledger_dir / "index.jsonl").read_text().splitlines()
+    listed = [json.loads(line)["date"] for line in index]
+    assert listed == ["2026-10-13", "2026-10-11", "2026-10-12"], "the fixture must be unsorted"
+    ledger = read_ledger(shuffled_ledger_dir)
+    assert [evening.date for evening in ledger.evenings] == list(reversed(factory.DATES))
+    assert [evening.model_version for evening in ledger.evenings] == ["0.0.3", "0.0.2", "0.0.1"]
+
+
 def test_an_evening_carries_the_sealed_digest_and_model_version(ledger_dir: Path) -> None:
     newest = evening_of(ledger_dir)
     sealed = ledger_paths(ledger_dir, NEWEST).forecast.read_bytes()

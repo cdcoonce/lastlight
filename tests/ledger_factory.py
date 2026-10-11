@@ -61,6 +61,17 @@ def seal_dates(ledger: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         seal_date(ledger, date, monkeypatch, version=f"0.0.{number}")
 
 
+def seal_dates_out_of_date_order(ledger: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Seal `DATES` newest, oldest, middle, so the index lists them in no date order at all.
+
+    The ledger lets any unsealed date be sealed at any time; model versions still follow the
+    date (0.0.3 for the newest, 0.0.1 for the oldest) so a page can be told from another.
+    """
+    newest, oldest, middle = DATES[2], DATES[0], DATES[1]
+    for date, version in ((newest, "0.0.3"), (oldest, "0.0.1"), (middle, "0.0.2")):
+        seal_date(ledger, date, monkeypatch, version=version)
+
+
 def strip_png(color: tuple[int, int, int] = (200, 120, 60)) -> bytes:
     buffer = io.BytesIO()
     Image.new("RGB", STRIP_SIZE, color).save(buffer, format="PNG")
