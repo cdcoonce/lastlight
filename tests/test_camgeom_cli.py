@@ -381,6 +381,20 @@ def test_a_corrupt_dem_tile_exits_2_with_a_one_line_reason(
     assert not (tmp_path / "x.json").exists()
 
 
+def test_a_fit_that_cannot_write_its_file_exits_2_with_a_one_line_reason(
+    tmp_path: Path, archive: Path, dem_tif: Path, site_file: Path, capsys: pytest.CaptureFixture
+) -> None:
+    blocker = tmp_path / "blocker"
+    blocker.write_text("a file where a directory is needed")
+    code = run(
+        "fit", "--camera", "SYN1", "--frames", str(archive), "--site-file", str(site_file),
+        "--dem", str(dem_tif), "--out", str(blocker / "SYN1.json"),
+    )  # fmt: skip
+    err = capsys.readouterr().err
+    assert code == 2 and "blocker" in err
+    assert err.strip().count("\n") == 0 and "Traceback" not in err
+
+
 def test_fit_without_a_site_file_says_which_environment_variable_would_do(
     tmp_path: Path, archive: Path, dem_tif: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture,

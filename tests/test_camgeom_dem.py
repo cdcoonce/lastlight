@@ -376,6 +376,21 @@ def test_an_interrupted_write_leaves_neither_the_tile_nor_a_partial_file(
     assert path.read_bytes() == fake_tile()
 
 
+def test_a_tile_that_opens_but_cannot_be_decoded_is_a_dem_error_naming_it(tmp_path: Path) -> None:
+    # The directory at the end of the file is intact, so the tile opens; the pixel data in front
+    # of it is scrambled, so reading it fails.
+    dem = cone_dem(REF_LAT, REF_LON, 900.0, 0.1, half_extent_m=3000.0, step_arcsec=3.0)
+    good = write_geotiff(tmp_path / "good.tif", dem).read_bytes()
+    damaged = bytearray(good)
+    for index in range(int(len(good) * 0.05) + 8, int(len(good) * 0.6)):
+        damaged[index] ^= 0xA5
+    broken = tmp_path / "scrambled.tif"
+    broken.write_bytes(bytes(damaged))
+    bounds = (dem.lon_left - 0.1, dem.lat_top - 0.5, dem.lon_left + 0.5, dem.lat_top + 0.1)
+    with pytest.raises(DemError, match=r"scrambled.tif.*cannot be decoded"):
+        read_dem([broken], bounds=bounds)
+
+
 def test_the_readme_carries_the_credit_the_copernicus_licence_asks_for() -> None:
     readme = (Path(__file__).resolve().parents[1] / "README.md").read_text()
     for required in (
