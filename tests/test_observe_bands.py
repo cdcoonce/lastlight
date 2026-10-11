@@ -12,7 +12,8 @@ import dataclasses
 
 import numpy as np
 import pytest
-from camgeom_synthetic import HEIGHT, WIDTH, example_fit
+from camgeom_synthetic import HEIGHT, WIDTH
+from observe_support import COLUMNS, flat_fit
 
 from lastlight.cameras import ContrastBands, load_registry
 from lastlight.camgeom.fitfile import load_fit
@@ -24,21 +25,6 @@ from lastlight.observe.bands import (
     band_coverage,
     validate_contrast,
 )
-
-COLUMNS = tuple(float(x) for x in range(WIDTH))
-
-
-def flat_fit(top: float = 200.0, **changes):
-    """A fit whose skyline sits at row `top` in every one of the 800 columns, with no overlay.
-
-    `changes` replace any field of the fit, `skyline_y_px` and `overlay_boxes` included.
-    """
-    fields = {
-        "skyline_x_px": COLUMNS,
-        "skyline_y_px": tuple(top for _ in COLUMNS),
-        "overlay_boxes": (),
-    }
-    return example_fit(**{**fields, **changes})
 
 
 def bands(**changes) -> ContrastBands:
