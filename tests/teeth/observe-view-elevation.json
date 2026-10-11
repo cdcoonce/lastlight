@@ -1,0 +1,179 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_observe_contrast.py",
+    "tests/test_observe_bands.py",
+    "tests/test_observe_evening.py",
+    "tests/test_observe_command.py",
+    "tests/test_observe_vividness.py",
+    "tests/test_camera_registry_contrast.py",
+    "tests/test_camera_registry.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_observe_contrast.py",
+    "tests/test_observe_bands.py",
+    "tests/test_observe_evening.py",
+    "tests/test_observe_command.py",
+    "tests/test_observe_vividness.py",
+    "tests/test_camera_registry_contrast.py",
+    "tests/test_camera_registry.py"
+  ],
+  "mutants": [
+    {
+      "label": "range ends swapped (max, min)",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "range_deg=(min(elevations), max(elevations)),",
+      "replace": "range_deg=(max(elevations), min(elevations)),"
+    },
+    {
+      "label": "range scale inverted (scale / nominal)",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "skyline + height_deg * nominal_scale / scale for scale in scales",
+      "replace": "skyline + height_deg * scale / nominal_scale for scale in scales"
+    },
+    {
+      "label": "range ignores the fit's uncertainty",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "scales += list(fit.uncertainty.px_per_deg)",
+      "replace": "pass"
+    },
+    {
+      "label": "nominal elevation is the skyline's, band height dropped",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "nominal_deg=skyline + height_deg,",
+      "replace": "nominal_deg=skyline,"
+    },
+    {
+      "label": "band centre at the bottom edge",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "y_centre = y_skyline - (low + high - 1) / 2.0",
+      "replace": "y_centre = y_skyline - float(low)"
+    },
+    {
+      "label": "band centre at the top edge",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "y_centre = y_skyline - (low + high - 1) / 2.0",
+      "replace": "y_centre = y_skyline - float(high)"
+    },
+    {
+      "label": "[documented survivor] band centre half a row off ((low + high) / 2)",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "y_centre = y_skyline - (low + high - 1) / 2.0",
+      "replace": "y_centre = y_skyline - (low + high) / 2.0",
+      "expect": "survived",
+      "why": "Moves the nominal view elevation by half a row, 0.01 to 0.02 degrees at 39.6 px/deg, against a nominal range of about 0.25 degrees and a pinned tolerance of 0.03; below the label's precision (review non-blocking item 5, build log)."
+    },
+    {
+      "label": "band centre BELOW the skyline",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "y_centre = y_skyline - (low + high - 1) / 2.0",
+      "replace": "y_centre = y_skyline + (low + high - 1) / 2.0"
+    },
+    {
+      "label": "nominal scale from the wrong width",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "nominal_scale = pixels_per_degree(o.hfov_deg, fit.width)",
+      "replace": "nominal_scale = pixels_per_degree(o.hfov_deg, fit.height)"
+    },
+    {
+      "label": "nominal elevation rounded to whole degrees in json",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "\"nominal\": round(self.nominal_deg, _DEGREE_DECIMALS),",
+      "replace": "\"nominal\": round(self.nominal_deg, 0),"
+    },
+    {
+      "label": "json range written [high, low]",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "\"range\": [round(low, _DEGREE_DECIMALS), round(high, _DEGREE_DECIMALS)],",
+      "replace": "\"range\": [round(high, _DEGREE_DECIMALS), round(low, _DEGREE_DECIMALS)],"
+    },
+    {
+      "label": "json range keys dropped to nominal only",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "\"range\": [round(low, _DEGREE_DECIMALS), round(high, _DEGREE_DECIMALS)],",
+      "replace": "\"range\": [round(self.nominal_deg, _DEGREE_DECIMALS)] * 2,"
+    },
+    {
+      "label": "json nominal is the range low end",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "\"nominal\": round(self.nominal_deg, _DEGREE_DECIMALS),",
+      "replace": "\"nominal\": round(low, _DEGREE_DECIMALS),"
+    },
+    {
+      "label": "range rounded to whole degrees in the file",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "\"range\": [round(low, _DEGREE_DECIMALS), round(high, _DEGREE_DECIMALS)],",
+      "replace": "\"range\": [round(low, 0), round(high, 0)],"
+    },
+    {
+      "label": "view elevation omitted from band json (None)",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "None if self.view_elevation is None else self.view_elevation.to_json()",
+      "replace": "None"
+    },
+    {
+      "label": "view elevation note dropped from file",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "\"view_elevation_note\": VIEW_ELEVATION_NOTE,",
+      "replace": "\"view_elevation_note\": \"\","
+    },
+    {
+      "label": "[documented survivor] elevation computed over all columns incl. outside (columns not inside)",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "out.view_elevation = _view_elevation(fit, rows, np.flatnonzero(inside), top)",
+      "replace": "out.view_elevation = _view_elevation(fit, rows, np.arange(fit.width), top)",
+      "expect": "survived",
+      "why": "Identical for WHTM1: every band and the reference lie inside the sky mask in 800 of 800 columns, so inside, post-dome and all columns coincide. Differs only for a camera whose band leaves the frame in some columns, and the label is nominal (+/- the pixel scale's range) either way."
+    },
+    {
+      "label": "[documented survivor] elevation computed over used columns (post-dome) instead of inside",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "out.view_elevation = _view_elevation(fit, rows, np.flatnonzero(inside), top)",
+      "replace": "out.view_elevation = _view_elevation(fit, rows, used, top)",
+      "expect": "survived",
+      "why": "Identical for WHTM1's 800 of 800 inside columns when the dome is out of the label: the nominal elevation is a label of the rows, and the dome columns are the same rows at the same elevation. Differs by well under the nominal range only for a table whose dome overlaps columns the skyline puts at a different elevation."
+    },
+    {
+      "label": "[control] reorder the _Measured __slots__ tuple",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "__slots__ = (\"excluded\", \"log_bg\", \"log_rg\", \"n_pixels\", \"view_elevation\")",
+      "replace": "__slots__ = (\"view_elevation\", \"n_pixels\", \"log_rg\", \"log_bg\", \"excluded\")",
+      "expect": "survived",
+      "why": "__slots__ order fixes only the order descriptors are created in; nothing iterates, pickles or indexes __slots__ in this repo (grep), so every path the suite reaches is unchanged. Not inert for code that relied on slot order, of which there is none."
+    }
+  ]
+}

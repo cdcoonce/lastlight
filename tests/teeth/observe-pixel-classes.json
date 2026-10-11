@@ -1,0 +1,152 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_observe_contrast.py",
+    "tests/test_observe_bands.py",
+    "tests/test_observe_evening.py",
+    "tests/test_observe_command.py",
+    "tests/test_observe_vividness.py",
+    "tests/test_camera_registry_contrast.py",
+    "tests/test_camera_registry.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_observe_contrast.py",
+    "tests/test_observe_bands.py",
+    "tests/test_observe_evening.py",
+    "tests/test_observe_command.py",
+    "tests/test_observe_vividness.py",
+    "tests/test_camera_registry_contrast.py",
+    "tests/test_camera_registry.py"
+  ],
+  "mutants": [
+    {
+      "label": "saturated: >= becomes > at the use site",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "saturated = (pixels >= SATURATION_LEVEL).any(axis=-1)",
+      "replace": "saturated = (pixels > SATURATION_LEVEL).any(axis=-1)"
+    },
+    {
+      "label": "saturated: literal 251 at the use site",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "saturated = (pixels >= SATURATION_LEVEL).any(axis=-1)",
+      "replace": "saturated = (pixels >= 251).any(axis=-1)"
+    },
+    {
+      "label": "saturated: literal 249 at the use site",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "saturated = (pixels >= SATURATION_LEVEL).any(axis=-1)",
+      "replace": "saturated = (pixels >= 249).any(axis=-1)"
+    },
+    {
+      "label": "saturated: all channels, not any",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "saturated = (pixels >= SATURATION_LEVEL).any(axis=-1)",
+      "replace": "saturated = (pixels >= SATURATION_LEVEL).all(axis=-1)"
+    },
+    {
+      "label": "saturation constant 251",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "SATURATION_LEVEL: Final = 250",
+      "replace": "SATURATION_LEVEL: Final = 251"
+    },
+    {
+      "label": "too dark: <= becomes < at the use site",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "(pixels <= DARK_LEVEL).all(axis=-1)",
+      "replace": "(pixels < DARK_LEVEL).all(axis=-1)"
+    },
+    {
+      "label": "too dark: literal 4 at the use site",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "(pixels <= DARK_LEVEL).all(axis=-1)",
+      "replace": "(pixels <= 4).all(axis=-1)"
+    },
+    {
+      "label": "too dark: literal 6 at the use site",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "(pixels <= DARK_LEVEL).all(axis=-1)",
+      "replace": "(pixels <= 6).all(axis=-1)"
+    },
+    {
+      "label": "too dark: any channel, not all",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "(pixels <= DARK_LEVEL).all(axis=-1)",
+      "replace": "(pixels <= DARK_LEVEL).any(axis=-1)"
+    },
+    {
+      "label": "zero channel no longer excluded (log of 0)",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": " | (pixels <= 0).any(axis=-1)",
+      "replace": ""
+    },
+    {
+      "label": "a saturated pixel with a zero channel is double counted",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": ".any(axis=-1)) & ~saturated",
+      "replace": ".any(axis=-1))"
+    },
+    {
+      "label": "minimum 49 pixels at the use site",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "return self.n_pixels >= MIN_VALID_PIXELS",
+      "replace": "return self.n_pixels >= 49"
+    },
+    {
+      "label": "minimum 51 pixels at the use site",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "return self.n_pixels >= MIN_VALID_PIXELS",
+      "replace": "return self.n_pixels >= 51"
+    },
+    {
+      "label": "minimum: > not >=",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "return self.n_pixels >= MIN_VALID_PIXELS",
+      "replace": "return self.n_pixels > MIN_VALID_PIXELS"
+    },
+    {
+      "label": "geometry count not multiplied by band height",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "geometry=int((~inside).sum()) * height,",
+      "replace": "geometry=int((~inside).sum()),"
+    },
+    {
+      "label": "[control] reorder the _Measured __slots__ tuple",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "__slots__ = (\"excluded\", \"log_bg\", \"log_rg\", \"n_pixels\", \"view_elevation\")",
+      "replace": "__slots__ = (\"view_elevation\", \"n_pixels\", \"log_rg\", \"log_bg\", \"excluded\")",
+      "expect": "survived",
+      "why": "__slots__ order fixes only the order descriptors are created in; nothing iterates, pickles or indexes __slots__ in this repo (grep), so every path the suite reaches is unchanged. Not inert for code that relied on slot order, of which there is none."
+    }
+  ]
+}

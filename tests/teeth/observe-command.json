@@ -1,0 +1,124 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_observe_contrast.py",
+    "tests/test_observe_bands.py",
+    "tests/test_observe_evening.py",
+    "tests/test_observe_command.py",
+    "tests/test_observe_vividness.py",
+    "tests/test_camera_registry_contrast.py",
+    "tests/test_camera_registry.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_observe_contrast.py",
+    "tests/test_observe_bands.py",
+    "tests/test_observe_evening.py",
+    "tests/test_observe_command.py",
+    "tests/test_observe_vividness.py",
+    "tests/test_camera_registry_contrast.py",
+    "tests/test_camera_registry.py"
+  ],
+  "mutants": [
+    {
+      "label": "command: refusal exits 1",
+      "file": "../../src/lastlight/commands/observe.py",
+      "oracle": "real",
+      "find": "    return 2\n",
+      "replace": "    return 1\n"
+    },
+    {
+      "label": "command: no usable frame exits 0",
+      "file": "../../src/lastlight/commands/observe.py",
+      "oracle": "real",
+      "find": "        return 1\n    return 0",
+      "replace": "        return 0\n    return 0"
+    },
+    {
+      "label": "command: no-frame branch never taken",
+      "file": "../../src/lastlight/commands/observe.py",
+      "oracle": "real",
+      "find": "if not observation.frames:",
+      "replace": "if False:"
+    },
+    {
+      "label": "command: unknown camera not refused",
+      "file": "../../src/lastlight/commands/observe.py",
+      "oracle": "real",
+      "find": "if camera is None:",
+      "replace": "if False:"
+    },
+    {
+      "label": "seed: WHTM1 margin 9",
+      "file": "../../src/lastlight/cameras/registry.toml",
+      "oracle": "real",
+      "find": "skyline_margin_rows = 8",
+      "replace": "skyline_margin_rows = 9"
+    },
+    {
+      "label": "seed: WHTM1 reference rows moved",
+      "file": "../../src/lastlight/cameras/registry.toml",
+      "oracle": "real",
+      "find": "reference_rows = [118, 138]",
+      "replace": "reference_rows = [108, 128]"
+    },
+    {
+      "label": "seed: WHTM1 light dome starts at 540",
+      "file": "../../src/lastlight/cameras/registry.toml",
+      "oracle": "real",
+      "find": "light_dome_columns = [[530, 800]]",
+      "replace": "light_dome_columns = [[540, 800]]"
+    },
+    {
+      "label": "seed: WHTM1 band list loses the top band",
+      "file": "../../src/lastlight/cameras/registry.toml",
+      "oracle": "real",
+      "find": "bands_rows = [[8, 28], [28, 48], [48, 68], [68, 88], [88, 108]]",
+      "replace": "bands_rows = [[8, 28], [28, 48], [48, 68], [68, 88]]"
+    },
+    {
+      "label": "N1: WHTM1 seed shipped as settled",
+      "file": "../../src/lastlight/cameras/registry.toml",
+      "oracle": "real",
+      "find": "light_dome_provisional = true",
+      "replace": "light_dome_provisional = false"
+    },
+    {
+      "label": "N1: registry comment loses the word PROVISIONAL",
+      "file": "../../src/lastlight/cameras/registry.toml",
+      "oracle": "real",
+      "find": "# PROVISIONAL. Seeded",
+      "replace": "# Seeded"
+    },
+    {
+      "label": "N1: registry comment loses the one-overcast-frame reason",
+      "file": "../../src/lastlight/cameras/registry.toml",
+      "oracle": "real",
+      "find": "It rests on ONE\n# overcast frame",
+      "replace": "It rests on several\n# overcast frames"
+    },
+    {
+      "label": "[control] reorder the _Measured __slots__ tuple",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "__slots__ = (\"excluded\", \"log_bg\", \"log_rg\", \"n_pixels\", \"view_elevation\")",
+      "replace": "__slots__ = (\"view_elevation\", \"n_pixels\", \"log_rg\", \"log_bg\", \"excluded\")",
+      "expect": "survived",
+      "why": "__slots__ order fixes only the order descriptors are created in; nothing iterates, pickles or indexes __slots__ in this repo (grep), so every path the suite reaches is unchanged. Not inert for code that relied on slot order, of which there is none."
+    }
+  ]
+}

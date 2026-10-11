@@ -1,0 +1,159 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_observe_contrast.py",
+    "tests/test_observe_bands.py",
+    "tests/test_observe_evening.py",
+    "tests/test_observe_command.py",
+    "tests/test_observe_vividness.py",
+    "tests/test_camera_registry_contrast.py",
+    "tests/test_camera_registry.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_observe_contrast.py",
+    "tests/test_observe_bands.py",
+    "tests/test_observe_evening.py",
+    "tests/test_observe_command.py",
+    "tests/test_observe_vividness.py",
+    "tests/test_camera_registry_contrast.py",
+    "tests/test_camera_registry.py"
+  ],
+  "mutants": [
+    {
+      "label": "light dome applies at exactly -4 (<=)",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "sun_elevation_deg < LIGHT_DOME_SUN_ELEVATION_DEG",
+      "replace": "sun_elevation_deg <= LIGHT_DOME_SUN_ELEVATION_DEG"
+    },
+    {
+      "label": "light dome threshold -6 at the use site",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "sun_elevation_deg < LIGHT_DOME_SUN_ELEVATION_DEG",
+      "replace": "sun_elevation_deg < -6.0"
+    },
+    {
+      "label": "light dome threshold -2 at the use site",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "sun_elevation_deg < LIGHT_DOME_SUN_ELEVATION_DEG",
+      "replace": "sun_elevation_deg < -2.0"
+    },
+    {
+      "label": "light dome always on",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "sun_elevation_deg < LIGHT_DOME_SUN_ELEVATION_DEG",
+      "replace": "True"
+    },
+    {
+      "label": "light dome applies when the sun is ABOVE -4",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "sun_elevation_deg < LIGHT_DOME_SUN_ELEVATION_DEG",
+      "replace": "sun_elevation_deg > LIGHT_DOME_SUN_ELEVATION_DEG"
+    },
+    {
+      "label": "light dome not applied to the reference band",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "reference = _measure(frame, fit, contrast.reference_rows, margin_rows=margin, dome=dome)",
+      "replace": "reference = _measure(frame, fit, contrast.reference_rows, margin_rows=margin, dome=None)"
+    },
+    {
+      "label": "light dome not applied to the scored bands",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "band = _measure(frame, fit, rows, margin_rows=margin, dome=dome)",
+      "replace": "band = _measure(frame, fit, rows, margin_rows=margin, dome=None)"
+    },
+    {
+      "label": "light dome range loses its first column",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "columns[low : min(high, width)] = True",
+      "replace": "columns[low + 1 : min(high, width)] = True"
+    },
+    {
+      "label": "light dome range loses its last column",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "columns[low : min(high, width)] = True",
+      "replace": "columns[low : min(high, width) - 1] = True"
+    },
+    {
+      "label": "light dome range includes a column before it",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "columns[low : min(high, width)] = True",
+      "replace": "columns[max(low - 1, 0) : min(high, width)] = True"
+    },
+    {
+      "label": "dome columns double counted with geometry",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "else dome & inside",
+      "replace": "else dome"
+    },
+    {
+      "label": "dome count not multiplied by band height",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "light_dome=int(in_dome.sum()) * height,",
+      "replace": "light_dome=int(in_dome.sum()),"
+    },
+    {
+      "label": "dome flag always False in the profile",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "light_dome_excluded=dome_active,",
+      "replace": "light_dome_excluded=False,"
+    },
+    {
+      "label": "empty light_dome_columns still activates (drop bool guard)",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "dome_active = bool(contrast.light_dome_columns) and (",
+      "replace": "dome_active = True and ("
+    },
+    {
+      "label": "N1: light_dome_provisional echoed as False whatever the table says",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "\"light_dome_provisional\": contrast.light_dome_provisional,",
+      "replace": "\"light_dome_provisional\": False,"
+    },
+    {
+      "label": "N1: light_dome_provisional not echoed into the file",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "                \"light_dome_provisional\": contrast.light_dome_provisional,\n",
+      "replace": ""
+    },
+    {
+      "label": "[control] reorder the _Measured __slots__ tuple",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "__slots__ = (\"excluded\", \"log_bg\", \"log_rg\", \"n_pixels\", \"view_elevation\")",
+      "replace": "__slots__ = (\"view_elevation\", \"n_pixels\", \"log_rg\", \"log_bg\", \"excluded\")",
+      "expect": "survived",
+      "why": "__slots__ order fixes only the order descriptors are created in; nothing iterates, pickles or indexes __slots__ in this repo (grep), so every path the suite reaches is unchanged. Not inert for code that relied on slot order, of which there is none."
+    }
+  ]
+}
