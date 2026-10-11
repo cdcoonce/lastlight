@@ -443,6 +443,13 @@
       "oracle": "real",
       "find": "provided under COPERNICUS by the European Union and ESA",
       "replace": "provided by ESA"
+    },
+    {
+      "label": "the site file's view azimuth may be any number",
+      "file": "../../src/lastlight/camgeom/sites.py",
+      "oracle": "real",
+      "find": "view_azimuth_deg=_number(table, \"view_azimuth_deg\", camera_id, 0.0, 360.0),",
+      "replace": "view_azimuth_deg=_number(table, \"view_azimuth_deg\", camera_id, -1e9, 1e9),"
     }
   ]
 }
