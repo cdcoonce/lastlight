@@ -294,3 +294,51 @@ def test_an_existing_output_directory_is_reused_and_the_files_replaced(tmp_path)
     (tmp_path / "report.md").write_text("old")
     write_outputs(study, tmp_path, views=whtm1_views())
     assert (tmp_path / "report.md").read_text().startswith("# G0")
+
+
+# --- post hoc additions: channels, the smoke input, the aerosol by month -----------------------
+
+
+def test_the_channel_decomposition_is_marked_post_hoc_and_changes_nothing(outputs) -> None:
+    study, _, _, text = outputs
+    section = text.split("## Channel decomposition (post hoc)")[1].split("\n## ")[0]
+    assert "post hoc" in section and "not part of the pre-registered criterion" in section
+    assert "does not change the verdict" in section
+    assert "log(R/G)" in section and "log(B/G)" in section
+    for band in stats.BANDS:
+        assert band in section
+    assert "**PASS**" in text.split("## Verdict")[1].split("\n## ")[0]
+
+
+def test_the_channel_table_gives_the_median_d_and_the_share_meeting_the_rule(outputs) -> None:
+    study, _, _, text = outputs
+    section = text.split("## Channel decomposition (post hoc)")[1].split("\n## ")[0]
+    blue_row = next(line for line in section.splitlines() if line.startswith("| log(B/G)"))
+    meeting = study.channels["log(B/G)"].verdict.meeting
+    assert f"{meeting} of {study.channels['log(B/G)'].verdict.dates}" in blue_row
+
+
+def test_a_smoke_field_that_is_zero_everywhere_is_said_to_carry_nothing(outputs) -> None:
+    study, _, _, text = outputs
+    section = text.split("## Inputs actually used")[1].split("\n## ")[0]
+    assert f"exactly zero at every point of the sightline on all {len(study.used)} dates" in section
+    assert "all aerosol variation" in section
+
+
+def test_a_smoke_field_with_values_is_summarised_instead(tmp_path) -> None:
+    days = dates(START, 20)
+    records = [synthetic_record(day, smoke=0.05 if i == 3 else 0.0) for i, day in enumerate(days)]
+    write_outputs(build_study(records, START, days[-1]), tmp_path, views=whtm1_views())
+    section = (tmp_path / "report.md").read_text().split("## Inputs actually used")[1]
+    section = section.split("\n## ")[0]
+    assert "non-zero on 1 of 20 dates" in section
+    assert "exactly zero at every point" not in section
+
+
+def test_the_aerosol_input_is_summarised_by_month(outputs) -> None:
+    study, _, _, text = outputs
+    section = text.split("## Aerosol input by month")[1].split("\n## ")[0]
+    assert "2026-01" in section and "2026-02" in section
+    assert "dust" in section.lower() and "median" in section
+    january = next(line for line in section.splitlines() if line.startswith("| 2026-01"))
+    assert f"| {sum(1 for d in study.used_dates if d.month == 1)} |" in january

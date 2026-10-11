@@ -218,3 +218,38 @@ def test_counted_bands_and_the_late_band_are_named_in_the_study() -> None:
 
 def test_contrast_helper_matches_the_band_membership() -> None:
     assert shifted_contrast({"early": 1.0}).sum() == 4 * 5 * 2
+
+
+# --- the channel decomposition (post hoc, reported only) ---------------------------------------
+
+
+def blue_only_population(n: int, moved: int, amount: float = 0.2):
+    """Dates whose first `moved` are shifted in log(B/G) only, in golden and early."""
+    records = population(n, 0)
+    for record in records[:moved]:
+        for band in ("golden", "early"):
+            record.contrast["nominal"][list(stats.band_members(band)), :, 1] += amount
+    return records
+
+
+def test_the_statistic_is_also_split_by_channel() -> None:
+    study = study_of(blue_only_population(20, 6))
+    assert list(study.channels) == ["log(R/G)", "log(B/G)"]
+    red, blue = study.channels["log(R/G)"], study.channels["log(B/G)"]
+    np.testing.assert_allclose(red.distances, 0.0, atol=1e-12)
+    np.testing.assert_allclose(blue.distances[:6, 0], 0.2)  # golden, blue only
+    np.testing.assert_allclose(blue.distances[:6, 1], 0.2)  # early
+    # With both channels averaged (the pre-registered D) the same shift is half as large.
+    np.testing.assert_allclose(study.outcomes["nominal"].distances[:6, 0], 0.1)
+
+
+def test_a_shift_that_is_only_in_blue_is_carried_by_blue_alone() -> None:
+    study = study_of(blue_only_population(20, 6, amount=0.12))
+    assert study.channels["log(B/G)"].verdict.passed  # 6 of 20 dates, D = 0.12
+    assert not study.channels["log(R/G)"].verdict.passed
+    assert study.verdict.passed  # over both channels D is 0.06, still at the threshold
+
+
+def test_the_channel_runs_never_replace_the_verdict() -> None:
+    study = study_of(blue_only_population(20, 6, amount=0.12))
+    assert study.verdict is study.outcomes["nominal"].verdict

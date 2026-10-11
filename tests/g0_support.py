@@ -78,6 +78,7 @@ def synthetic_record(
     high: dict[str, float] | None = None,
     aod: float = 0.08,
     dust: float = 0.02,
+    smoke: float = 0.0,
     lab_shift: float = 0.0,
 ) -> DateRecord:
     """A rendered date: `shifts` for the nominal scale, optionally different ones at the ends."""
@@ -97,7 +98,7 @@ def synthetic_record(
         atmosphere=AtmosphereRecord(
             aod_total=aod,
             aod_dust=dust,
-            aod_smoke=0.0,
+            aod_smoke=smoke,
             ozone_du=280.0,
             pwat_kg_m2=15.0,
             lcdc_pct=10.0,
