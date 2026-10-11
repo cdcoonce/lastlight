@@ -24,7 +24,7 @@ Both are scored against two baselines: **climatology** (smoothed day-of-year mea
 | **A (primary, from 2026-10-10)** | Public, uncalibrated webcams: ADEQ PhoenixVis White Tank (`WHTM1`, looks west, 274 degrees, from Avondale) and Estrella (`ESMO1`, looks southwest from North Mountain). 800x300 JPEG, a new frame about every 15 minutes, auto exposure and white balance, no archive beyond 48 hours of hourly thumbnails. | **Within-frame colour contrasts only.** A webcam's exposure and white balance act, to first order, as one gain per colour channel for the whole frame. So the log-chromaticity difference between two sky regions of the same frame (for example `log(R/G)` at 2 degrees above the horizon minus at 20 degrees) cancels them. The curve target becomes a profile of these contrasts against view elevation, per frame, indexed by the sun elevation at the frame's time. Vividness is defined on the same invariants. Absolute colour ("how red is the whole sky") is not scored in tier A. |
 | **B (optional, later)** | A calibrated RAW camera at the owner's home | Absolute colour, delta-E 2000 in camera-native space. Built only if tier A shows skill worth measuring more precisely; it brings back the home-privacy rules in section 3. |
 
-The forecast computes the same invariants from its rendered spectra for each camera's own viewing geometry (camera position, azimuth, field of view, horizon line), so model and camera are compared like for like. Each camera's pixel-to-sky geometry is calibrated from the sun's track through the frame and the horizon ridge's known elevation, fitted on a declared window and frozen.
+The forecast computes the same invariants from its rendered spectra for each camera's own viewing geometry (camera position, azimuth, field of view, horizon line), so model and camera are compared like for like. Each camera's pixel-to-sky geometry is fitted on a declared window by matching the camera's skyline to the horizon a public terrain model predicts from the camera's position, checked against the sun's disk wherever the sun is visible, and frozen. The sun is a check, not a fit input, so that it can disagree.
 
 ## 2. Honesty rules
 
@@ -49,7 +49,7 @@ The home's location must not be derivable from anything public. Sunset clock tim
 
 Metro-level location (Phoenix) is public and accepted.
 
-The rules above protect a home camera site (tier B). Tier A cameras are public and their locations are published by their operators, so they leak nothing about the owner; the rules stay in force anyway, because they cost little and tier B may follow.
+The rules above protect a home camera site (tier B). Tier A cameras are public and their locations are published by their operators, so they leak nothing about the owner; the rules stay in force anyway, because they cost little and tier B may follow. In practice that means a frozen camera fit holds orientation only; the camera's position is read at fit time from a private site file (`LASTLIGHT_CAMERA_SITES`) and never committed.
 
 **Third-party camera frames.** Use only cameras whose page is public and whose operator's terms do not forbid automated access; a feed whose terms forbid it (for example a consumer-camera public share) needs the operator's written consent first. Poll at most once per 5 minutes per camera, with conditional requests and an identifying User-Agent. Keep raw frames private on the capture host, never in git or CI artifacts. Publish derived numbers and small, sky-only thumbnails (at most 320 pixels wide), each credited to and linked back to the operator, and only for cameras whose registry entry has `publish_thumbnails = true` with a recorded `basis`. The site states that any operator's material is removed on request, and a removal is honoured the same day. Basis for the ADEQ PhoenixVis cameras: public page, `robots.txt` allows all, terms silent on automated use; the owner decided on 2026-10-10 to proceed without a prior permission request.
 
@@ -74,7 +74,7 @@ Python 3.12, `uv`, `src/lastlight/`, pytest, ruff. Small modules with one job ea
 | `ledger_branch` | The orphan `ledger` branch as a git worktree: open it, commit a seal to it, push it (never forced) |
 | `seal` | Canonical forecast JSON, SHA-256, RFC 3161 timestamp (`rfc3161-client`), ledger writer (forecast, timestamp, strip), `verify` (imprint, time, and the strip against `strip_sha256`; the TSA signature chain is a follow-up) |
 | `cameras` | Registry of tier A cameras (operator, image URL, position, view azimuth, attribution); polite collector (conditional GET, identifying User-Agent, timeouts and retries, stale-frame rejection by Last-Modified and burned-in stamp) writing a private archive on the capture host |
-| `camgeom` | Per-camera pixel-to-(azimuth, elevation) calibration from the sun's track and the horizon ridge; sky mask |
+| `camgeom` | Per-camera pixel-to-(azimuth, elevation) calibration by skyline matching against a public DEM horizon, checked against the sun; frozen fits in `cameras/geometry/`; sky mask |
 | `observe` | Frames → within-frame log-chromaticity contrast profile and vividness (tier A); later absolute colour (tier B) |
 | `capture`, `calibrate` | Tier B only: RAW capture, dark frames, colour-chart spectral sensitivity |
 | `score` | delta-E 2000, CRPS, baselines, regimes, skill with confidence intervals |

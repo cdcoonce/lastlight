@@ -32,6 +32,17 @@ uv run lastlight seal-daily --ledger-dir ledger           # what the scheduled j
 uv run lastlight site build --ledger-dir ledger --out site  # the almanac; privacy-scans its own output
 ```
 
+Camera geometry (issue #16) is fitted and used from the command line:
+
+```sh
+export LASTLIGHT_CAMERA_SITES=~/.workshop/lastlight/camera-sites.toml   # private, never committed
+uv run lastlight camgeom fit --camera WHTM1 --frames ~/.workshop/lastlight/frames/WHTM1 --position-box-km 8
+uv run lastlight camgeom mask --camera WHTM1
+uv run lastlight camgeom holdout --camera WHTM1 --frames ~/.workshop/lastlight/frames/WHTM1
+```
+
+The first `fit` downloads one Copernicus GLO-30 DEM tile (about 40 MB) into `~/.cache/lastlight/dem`. The fit file it writes holds orientation only; the camera's position stays in the private site file, and a position search records only its offset from that file. A fit whose sun check has not passed is marked `provisional` in its file, with the ranges of azimuth and field of view that fit about equally well; `fit` exits 1, after writing the file, when the sun check fails. `holdout` lays a frozen skyline over frames the fit was not made from and prints how closely it matches each.
+
 Sealed days are kept on the orphan `ledger` branch, written once a day by the `seal` workflow; [`docs/ledger.md`](docs/ledger.md) explains how anyone can fetch it and verify a day, what is sealed (the forecast and the SHA-256 of its painting) and what the RFC 3161 timestamp proves.
 
 Public-camera frames are collected on the always-on capture host by `lastlight collect` (see `uv run lastlight collect --help`); the owner's install steps are in [`docs/runbooks/collector.md`](docs/runbooks/collector.md).
@@ -41,6 +52,10 @@ Tests run offline: a guard in `tests/conftest.py` refuses every socket connect. 
 ## Privacy
 
 Everything public is referenced to the sun's elevation, never to clock time, because sunset times alone can locate a camera to within about a kilometre. Images are sky-only and stripped of metadata. `lastlight privacy-scan` enforces this in CI over every tracked file and over `site/`: it fails on clock times (P001), sun-event times (P002), coordinates other than the public Phoenix reference point (P003), image metadata (P004) and the private-site marker (P005). Reviewed exceptions, each with a written reason, live in [`privacy-allowlist.toml`](privacy-allowlist.toml).
+
+## Data credits
+
+Terrain heights are the Copernicus DEM GLO-30: © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018, provided under COPERNICUS by the European Union and ESA; all rights reserved.
 
 ## Who built this
 

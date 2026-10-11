@@ -21,7 +21,9 @@ dependencies = [
     "numpy>=2.5.4",
     "pillow>=12.3.0",
     "pydantic>=2.14.0",
+    "rasterio>=1.5.2",
     "rfc3161-client>=1.0.9",
+    "scipy>=1.18.1",
 ]
 
 [project.scripts]
