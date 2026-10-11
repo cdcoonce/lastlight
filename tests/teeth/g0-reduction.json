@@ -1,0 +1,156 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_render_view_azimuth.py",
+    "tests/test_render_curve.py",
+    "tests/test_render_physics.py",
+    "tests/test_render_atmosphere.py",
+    "tests/test_atmosphere_aerosol.py",
+    "tests/test_atmosphere_reduction.py",
+    "tests/test_painting.py",
+    "tests/test_forecast.py",
+    "tests/test_g0_contrast.py",
+    "tests/test_g0_collect.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "tests/test_render_view_azimuth.py",
+    "tests/test_render_curve.py",
+    "tests/test_render_physics.py",
+    "tests/test_render_atmosphere.py",
+    "tests/test_atmosphere_aerosol.py",
+    "tests/test_atmosphere_reduction.py",
+    "tests/test_painting.py",
+    "tests/test_forecast.py",
+    "tests/test_g0_contrast.py",
+    "tests/test_g0_collect.py"
+  ],
+  "mutants": [
+    {
+      "label": "daily reduction: notes sentence changed (byte pin)",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "f\"+ {smoke:.3f} HRRR smoke (AOTK transect mean). \"",
+      "replace": "f\"+ {smoke:.3f} HRRR smoke (AOTK transect mean) \""
+    },
+    {
+      "label": "daily reduction: background 0.06 -> 0.07",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "BACKGROUND_AOD: Final = 0.06",
+      "replace": "BACKGROUND_AOD: Final = 0.07"
+    },
+    {
+      "label": "daily reduction: aod_dust default becomes 0.0 not None",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "aod_dust=None if aerosol is None else aerosol.dust_aod_550,",
+      "replace": "aod_dust=0.0 if aerosol is None else aerosol.dust_aod_550,"
+    },
+    {
+      "label": "daily reduction: no-aerosol path adds nothing but smoke",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "aod = smoke + BACKGROUND_AOD if aerosol is None else aerosol.total_aod_550",
+      "replace": "aod = smoke if aerosol is None else aerosol.total_aod_550"
+    },
+    {
+      "label": "aerosol wiring: the dust is rendered instead of the total",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "aod = smoke + BACKGROUND_AOD if aerosol is None else aerosol.total_aod_550",
+      "replace": "aod = smoke + BACKGROUND_AOD if aerosol is None else aerosol.dust_aod_550"
+    },
+    {
+      "label": "aerosol wiring: HRRR smoke added to the total (double count)",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "aod = smoke + BACKGROUND_AOD if aerosol is None else aerosol.total_aod_550",
+      "replace": "aod = smoke + BACKGROUND_AOD if aerosol is None else smoke + aerosol.total_aod_550"
+    },
+    {
+      "label": "aerosol wiring: background added to the total",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "aod = smoke + BACKGROUND_AOD if aerosol is None else aerosol.total_aod_550",
+      "replace": "aod = smoke + BACKGROUND_AOD if aerosol is None else aerosol.total_aod_550 + BACKGROUND_AOD"
+    },
+    {
+      "label": "aerosol wiring: argument ignored",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "aod = smoke + BACKGROUND_AOD if aerosol is None else aerosol.total_aod_550",
+      "replace": "aod = smoke + BACKGROUND_AOD"
+    },
+    {
+      "label": "aerosol wiring: notes not told about the aerosol",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "notes=_notes(atmosphere.aod_550, smoke, ozone, evening.month, pwat, clouds, aerosol),",
+      "replace": "notes=_notes(atmosphere.aod_550, smoke, ozone, evening.month, pwat, clouds),"
+    },
+    {
+      "label": "aerosol wiring: dust not kept beside the total",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "aod_dust=None if aerosol is None else aerosol.dust_aod_550,",
+      "replace": "aod_dust=None,"
+    },
+    {
+      "label": "aerosol column: dust above the total accepted",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "if self.dust_aod_550 > self.total_aod_550 + DUST_EXCESS_TOLERANCE:",
+      "replace": "if False:"
+    },
+    {
+      "label": "aerosol column: negative optical depth accepted",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "if not math.isfinite(value) or value < 0.0:",
+      "replace": "if not math.isfinite(value):"
+    },
+    {
+      "label": "collector: reduction called without the aerosol column",
+      "file": "../../src/lastlight/g0/collect.py",
+      "oracle": "real",
+      "find": "reduction = reduce_transect(samples, evening, aerosol=aerosol.column())",
+      "replace": "reduction = reduce_transect(samples, evening)"
+    },
+    {
+      "label": "collector: relative azimuth computed against 0 instead of the camera's",
+      "file": "../../src/lastlight/g0/collect.py",
+      "oracle": "real",
+      "find": "relative_azimuth(self.views[\"nominal\"].azimuth_deg, sun)",
+      "replace": "relative_azimuth(0.0, sun)"
+    },
+    {
+      "label": "collector: every scale rendered at the nominal view",
+      "file": "../../src/lastlight/g0/collect.py",
+      "oracle": "real",
+      "find": "contrast[name], floored[name] = day_contrasts(atmosphere, self.views[name], azimuths)",
+      "replace": "contrast[name], floored[name] = day_contrasts(atmosphere, self.views[\"nominal\"], azimuths)"
+    },
+    {
+      "label": "[control] closed_below compares the name with the literal 'late' instead of BANDS[-1]",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "BANDS is tuple(ELEVATION_BANDS) and its last key is 'late' (geometry.ELEVATION_BANDS order golden, early, mid, late), so BANDS[-1] == 'late' and the boolean is identical for every band name on every path. Inert over the whole suite; it would differ only if ELEVATION_BANDS were reordered, which no test or caller does.",
+      "find": "closed_below = name == BANDS[-1]",
+      "replace": "closed_below = name == \"late\""
+    }
+  ]
+}
