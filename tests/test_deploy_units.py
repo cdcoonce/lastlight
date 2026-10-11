@@ -31,7 +31,9 @@ def timer() -> configparser.ConfigParser:
     return parse_unit(UNIT_DIR / "lastlight-collect.timer")
 
 
-def test_the_timer_fires_daily_at_the_fixed_afternoon_time(timer: configparser.ConfigParser) -> None:
+def test_the_timer_fires_daily_at_the_fixed_afternoon_time(
+    timer: configparser.ConfigParser,
+) -> None:
     match = re.fullmatch(r"\*-\*-\* (\d\d):(\d\d):(\d\d)", timer["Timer"]["OnCalendar"])
     assert match is not None
     assert tuple(int(group) for group in match.groups()) == (15, 0, 0)

@@ -40,6 +40,8 @@ from lastlight.geometry import elevation_crossings, solar_position
 
 EVENING = dt.date(2026, 10, 10)
 DAY_DIR = EVENING.isoformat()
+# Crossing instants are found by bisection to within a second and cut to whole seconds.
+TOLERANCE = dt.timedelta(seconds=2)
 
 
 def seconds(count: float) -> dt.timedelta:
@@ -193,9 +195,7 @@ def test_a_repeated_200_with_the_same_last_modified_is_not_saved_twice(tmp_path:
         ("Last-Modified", lambda call: Response(200, {}, jpeg("x"))),
         (
             "Last-Modified",
-            lambda call: Response(
-                200, {"Last-Modified": "not a date"}, jpeg("x")
-            ),
+            lambda call: Response(200, {"Last-Modified": "not a date"}, jpeg("x")),
         ),
         ("JPEG", lambda call: ok(b"<html>busy</html>", call.at)),
         ("empty", lambda call: ok(b"", call.at)),
@@ -260,7 +260,9 @@ def test_the_sidecar_records_the_request_and_the_sun_at_the_frames_own_time(
     run([camera], tmp_path, clock, fetch, config)
 
     frame_time = start - ten_minutes
-    sidecar = json.loads((tmp_path / "TEST1" / DAY_DIR / f"{frame_name(frame_time)}.json").read_text())
+    sidecar = json.loads(
+        (tmp_path / "TEST1" / DAY_DIR / f"{frame_name(frame_time)}.json").read_text()
+    )
     assert sidecar["camera"] == "TEST1"
     assert sidecar["url"] == camera.image_url
     assert sidecar["status"] == 200
@@ -272,7 +274,9 @@ def test_the_sidecar_records_the_request_and_the_sun_at_the_frames_own_time(
     assert dt.datetime.fromisoformat(sidecar["fetched_at"]) == start
     assert sidecar["sha256"] == hashlib.sha256(jpeg("a")).hexdigest()
     # The elevation is the sun's at the frame's Last-Modified time, not at the fetch time.
-    assert sidecar["sun_elevation_deg"] == pytest.approx(sun_elevation(camera, frame_time), abs=1e-3)
+    assert sidecar["sun_elevation_deg"] == pytest.approx(
+        sun_elevation(camera, frame_time), abs=1e-3
+    )
     assert abs(sidecar["sun_elevation_deg"] - sun_elevation(camera, start)) > 1.0
 
 
@@ -283,11 +287,7 @@ def test_sidecar_headers_omit_what_the_server_did_not_send(tmp_path: Path) -> No
     body = jpeg("a")
     fetch = FakeFetch(
         clock,
-        [
-            lambda call: Response(
-                200, {"Last-Modified": http_date(call.at - seconds(30))}, body
-            )
-        ],
+        [lambda call: Response(200, {"Last-Modified": http_date(call.at - seconds(30))}, body)],
         default=lambda call: not_modified(),
     )
 
@@ -311,7 +311,7 @@ def test_every_request_identifies_lastlight_and_uses_a_sixty_second_timeout(
     run([camera], tmp_path, clock, fetch, config)
 
     expected = f"lastlight/{lastlight.__version__} (+https://github.com/cdcoonce/lastlight)"
-    assert USER_AGENT == expected
+    assert expected == USER_AGENT
     assert len(fetch.calls) == 7
     assert {call.headers["User-Agent"] for call in fetch.calls} == {expected}
     assert {call.timeout_s for call in fetch.calls} == {60.0}
@@ -496,8 +496,10 @@ def test_polling_starts_at_the_start_elevation_and_stops_at_the_stop_elevation(
     (summary,), _ = run([camera], tmp_path, clock, fetch, config)
 
     times = [call.at for call in fetch.calls]
-    assert opens <= times[0] <= opens + seconds(10)  # not before the sun reaches +6
-    assert times[-1] <= closes < times[-1] + seconds(300)  # the last poll was in the window
+    assert opens - TOLERANCE <= times[0] <= opens + seconds(10)  # not before the sun reaches +6
+    assert (
+        times[-1] <= closes + TOLERANCE < times[-1] + seconds(300)
+    )  # the last poll was in the window
     assert {b - a for a, b in zip(times, times[1:], strict=False)} == {seconds(300)}
     assert len(times) == int((closes - times[0]).total_seconds() // 300) + 1
     for when in times:
@@ -549,7 +551,7 @@ def test_a_launch_in_the_morning_twilight_waits_for_the_evening(tmp_path: Path) 
 
     run([camera], tmp_path, clock, fetch, config)
 
-    assert opens <= fetch.calls[0].at <= opens + seconds(10)
+    assert opens - TOLERANCE <= fetch.calls[0].at <= opens + seconds(10)
 
 
 def test_each_camera_follows_the_sun_at_its_own_position(tmp_path: Path) -> None:
@@ -566,8 +568,8 @@ def test_each_camera_follows_the_sun_at_its_own_position(tmp_path: Path) -> None
     assert [summary.camera_id for summary in summaries] == ["EAST1", "WEST1"]
     for camera in (east, west):
         times = [call.at for call in fetch.calls_to(camera.image_url)]
-        assert opens[camera.id] <= times[0] <= opens[camera.id] + seconds(10)
-        assert times[-1] <= closes[camera.id] < times[-1] + seconds(300)
+        assert opens[camera.id] - TOLERANCE <= times[0] <= opens[camera.id] + seconds(10)
+        assert times[-1] <= closes[camera.id] + TOLERANCE < times[-1] + seconds(300)
         assert {b - a for a, b in zip(times, times[1:], strict=False)} == {seconds(300)}
 
 
@@ -581,8 +583,8 @@ def test_the_start_and_stop_elevations_are_the_ones_given(tmp_path: Path) -> Non
     run([camera], tmp_path, clock, fetch, config)
 
     times = [call.at for call in fetch.calls]
-    assert opens <= times[0] <= opens + seconds(10)
-    assert times[-1] <= closes < times[-1] + seconds(300)
+    assert opens - TOLERANCE <= times[0] <= opens + seconds(10)
+    assert times[-1] <= closes + TOLERANCE < times[-1] + seconds(300)
 
 
 def test_the_evening_folder_is_the_local_solar_date_not_the_utc_date(tmp_path: Path) -> None:

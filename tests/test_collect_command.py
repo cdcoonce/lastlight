@@ -82,7 +82,16 @@ def test_interval_60_is_refused_with_a_clear_message(
 def test_interval_300_is_accepted(tmp_path: Path) -> None:
     clock = evening_clock()
     fetch = FakeFetch(clock, default=lambda call: not_modified())
-    argv = ["--archive", str(tmp_path), "--interval", "300", "--start-elev", "6", "--stop-elev", "-8"]
+    argv = [
+        "--archive",
+        str(tmp_path),
+        "--interval",
+        "300",
+        "--start-elev",
+        "6",
+        "--stop-elev",
+        "-8",
+    ]
     assert cli(argv, clock, fetch) == 0
 
 
@@ -192,7 +201,9 @@ def test_camera_selects_which_cameras_are_polled(
     assert {call.url for call in fetch.calls} == {load_registry()["WHTM1"].image_url}
 
 
-def test_camera_may_be_repeated_or_listed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_camera_may_be_repeated_or_listed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     for argv in (["--camera", "ESMO1", "--camera", "WHTM1"], ["--camera", "ESMO1", "WHTM1"]):
         clock = evening_clock()
         fetch = FakeFetch(clock, default=lambda call: not_modified())

@@ -20,7 +20,9 @@ def test_the_default_archive_is_under_the_home_directory(tmp_path: Path) -> None
 
 def test_the_environment_variable_replaces_the_default(tmp_path: Path) -> None:
     chosen = tmp_path / "from-env"
-    assert resolve_archive(None, environ={"LASTLIGHT_ARCHIVE": str(chosen)}, home=tmp_path) == chosen
+    assert (
+        resolve_archive(None, environ={"LASTLIGHT_ARCHIVE": str(chosen)}, home=tmp_path) == chosen
+    )
 
 
 def test_the_command_line_beats_the_environment(tmp_path: Path) -> None:
@@ -39,9 +41,7 @@ def test_a_leading_tilde_expands_to_the_home_directory(tmp_path: Path) -> None:
     assert resolve_archive("~/frames", environ={}, home=tmp_path) == tmp_path / "frames"
 
 
-def test_a_relative_path_becomes_absolute(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_relative_path_becomes_absolute(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     resolved = resolve_archive("frames", environ={}, home=tmp_path)
     assert resolved.is_absolute()

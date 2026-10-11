@@ -10,7 +10,9 @@ import pytest
 
 from lastlight.cameras import Camera, RegistryError, load_registry, parse_registry
 
-ADEQ_ATTRIBUTION = "Image source: Arizona Department of Environmental Quality, PhoenixVis (phoenixvis.net)"
+ADEQ_ATTRIBUTION = (
+    "Image source: Arizona Department of Environmental Quality, PhoenixVis (phoenixvis.net)"
+)
 ADEQ_BASIS = (
     "Public page; robots.txt allows all; ADEQ terms silent on automated use; "
     "owner decision 2026-10-10; removed on request"

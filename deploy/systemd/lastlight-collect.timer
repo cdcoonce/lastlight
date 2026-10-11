@@ -1,0 +1,15 @@
+# User timer: start the collector every afternoon. The collector itself waits for the twilight
+# window, so this only has to fire well before sunset in every season. Time is the host's
+# local time; see docs/runbooks/collector.md.
+
+[Unit]
+Description=Start the lastlight collector each afternoon
+
+[Timer]
+OnCalendar=*-*-* 15:00:00
+# If the host was down at the scheduled time, run once when it comes back: the collector
+# works out for itself whether a window is still open.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
