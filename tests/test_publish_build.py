@@ -238,6 +238,34 @@ def test_a_directory_that_is_not_a_previous_site_is_never_replaced(
     assert tree(out) == {"notes.txt": b"keep me"}
 
 
+FOREIGN_HOME = b"<!doctype html><title>someone else's web root</title>"
+
+
+def test_a_directory_with_a_foreign_index_html_is_never_replaced(
+    ledger_dir: Path, tmp_path: Path
+) -> None:
+    out = tmp_path / "webroot"
+    out.mkdir()
+    (out / "index.html").write_bytes(FOREIGN_HOME)
+    (out / "about.html").write_bytes(b"<p>about me</p>")
+    before = tree(out)
+    with pytest.raises(BuildError, match="not a lastlight site"):
+        build_site(ledger_dir, out)
+    assert tree(out) == before == {"index.html": FOREIGN_HOME, "about.html": b"<p>about me</p>"}
+    assert [path.name for path in tmp_path.iterdir() if path.name != "ledger"] == ["webroot"]
+
+
+def test_an_earlier_build_with_extra_files_beside_it_is_still_replaced(
+    ledger_dir: Path, tmp_path: Path
+) -> None:
+    out = tmp_path / "site"
+    assert build_site(ledger_dir, out).ok
+    (out / "leftover.txt").write_text("from an older version of the generator")
+    assert build_site(ledger_dir, out).ok
+    assert not (out / "leftover.txt").exists()
+    assert (out / "index.html").is_file()
+
+
 def test_an_output_path_that_is_a_file_or_a_symlink_is_an_error(
     ledger_dir: Path, tmp_path: Path
 ) -> None:

@@ -85,6 +85,21 @@ def test_an_output_directory_that_is_not_a_site_is_refused_with_exit_two(
     assert (out / "notes.txt").read_text() == "keep me"
 
 
+def test_an_output_directory_with_a_foreign_index_html_is_refused_with_exit_two(
+    capsys: pytest.CaptureFixture[str], ledger_dir: Path, tmp_path: Path
+) -> None:
+    out = tmp_path / "webroot"
+    out.mkdir()
+    (out / "index.html").write_bytes(b"<!doctype html><title>mine</title>")
+    (out / "about.html").write_bytes(b"<p>about me</p>")
+    code, stdout, stderr = build(capsys, ledger_dir, out)
+    assert code == 2
+    assert stdout == ""
+    assert "not a lastlight site" in stderr
+    assert (out / "index.html").read_bytes() == b"<!doctype html><title>mine</title>"
+    assert (out / "about.html").read_bytes() == b"<p>about me</p>"
+
+
 @pytest.mark.parametrize("missing", ["--ledger-dir", "--out"])
 def test_both_directories_are_required(
     capsys: pytest.CaptureFixture[str], ledger_dir: Path, tmp_path: Path, missing: str
