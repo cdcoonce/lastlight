@@ -82,6 +82,39 @@ def png_with_chunk(chunk_type: bytes, payload: bytes = b"\x00" * 7) -> bytes:
     return png[:iend] + png_chunk(chunk_type, payload) + png[iend:]
 
 
+IHDR_END = len(PNG_SIGNATURE) + 4 + 4 + 13 + 4
+"""Where the first chunk after IHDR starts: signature, then IHDR (length, type, 13 bytes, CRC)."""
+
+COLOUR_AND_DENSITY_CHUNKS = {
+    b"iCCP": b"lastlight test profile\x00\x00" + zlib.compress(bytes(128)),
+    b"sRGB": b"\x00",
+    b"gAMA": struct.pack(">I", 45455),
+    b"pHYs": struct.pack(">IIB", 11811, 11811, 1),
+    b"cHRM": struct.pack(">8I", 31270, 32900, 64000, 33000, 30000, 60000, 15000, 6000),
+}
+"""A valid payload for each colour-profile, gamma, chromaticity and density chunk of a PNG.
+
+These are what a plain Pillow save can carry over from an input image, unlike the textual and
+time chunks, which only a deliberate writer adds.
+"""
+
+
+def png_with_chunks_after_ihdr(png: bytes, chunks: dict[bytes, bytes]) -> bytes:
+    """`png` with the given chunks spliced in right after IHDR, before any PLTE or IDAT.
+
+    That is where the colour-space and density chunks belong, so the result is a valid PNG
+    whether or not `png` is paletted.
+    """
+    assert png.startswith(PNG_SIGNATURE)
+    spliced = b"".join(png_chunk(chunk_type, payload) for chunk_type, payload in chunks.items())
+    return png[:IHDR_END] + spliced + png[IHDR_END:]
+
+
+def png_colour_type(png: bytes) -> int:
+    """The colour type byte of IHDR: 2 is RGB, 3 is paletted."""
+    return png[len(PNG_SIGNATURE) + 4 + 4 + 9]
+
+
 def tiff_bytes(*, gps: bool, byte_order: bytes = b"II") -> bytes:
     """A minimal TIFF structure. With `gps`, IFD0 carries the GPSInfo pointer (tag 0x8825)."""
     e = "<" if byte_order == b"II" else ">"

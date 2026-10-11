@@ -2,8 +2,9 @@
 
 `canonical` turns a `lastlight.forecast.Forecast` into one reproducible byte string and its
 SHA-256 digest; `tsa` gets that digest witnessed by an RFC 3161 timestamp authority; `ledger`
-writes the sealed files and checks them again. The `lastlight seal` and `lastlight verify`
-commands (in `lastlight.commands`) are thin wrappers over `ledger`.
+writes the sealed files (forecast, timestamp, and the strip the forecast names) and checks them
+again. The `lastlight seal` and `lastlight verify` commands (in `lastlight.commands`) are thin
+wrappers over `ledger`.
 """
 
 from lastlight.seal.canonical import canonical_bytes, digest_hex
@@ -11,7 +12,9 @@ from lastlight.seal.ledger import (
     AlreadySealedError,
     LedgerPaths,
     SealResult,
+    StripError,
     VerifyResult,
+    is_sealed,
     ledger_paths,
     seal,
     verify,
@@ -23,11 +26,13 @@ __all__ = [
     "AlreadySealedError",
     "LedgerPaths",
     "SealResult",
+    "StripError",
     "Timestamp",
     "TsaError",
     "VerifyResult",
     "canonical_bytes",
     "digest_hex",
+    "is_sealed",
     "ledger_paths",
     "seal",
     "verify",

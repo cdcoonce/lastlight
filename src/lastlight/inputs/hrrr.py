@@ -25,6 +25,7 @@ import math
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Final
 
@@ -393,13 +394,18 @@ class FieldData:
 
 @dataclass(frozen=True)
 class HrrrFields:
-    """Decoded fields of one run and forecast hour, all on one grid."""
+    """Decoded fields of one run and forecast hour, all on one grid.
+
+    `digests` maps each field name to the SHA-256 (lowercase hex) of the raw GRIB message it was
+    decoded from, so a forecast can record exactly which bytes it read.
+    """
 
     cycle_date: dt.date
     cycle_hour: int
     forecast_hour: int
     grid: Grid
     fields: dict[str, FieldData]
+    digests: dict[str, str] = dataclass_field(default_factory=dict)
 
 
 def _check_message(
@@ -465,7 +471,10 @@ def fetch_fields(
         lats, lons = grid_coordinates(messages[specs[0].name])
     except GribError as error:
         raise HrrrError(f"cannot read the grid: {error}") from error
-    return HrrrFields(cycle_date, cycle_hour, forecast_hour, Grid(grid_spec, lats, lons), decoded)
+    digests = {name: hashlib.sha256(data).hexdigest() for name, data in messages.items()}
+    return HrrrFields(
+        cycle_date, cycle_hour, forecast_hour, Grid(grid_spec, lats, lons), decoded, digests
+    )
 
 
 # --- sampling along the transect ------------------------------------------------------------------

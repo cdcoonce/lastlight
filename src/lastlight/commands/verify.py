@@ -1,9 +1,10 @@
 """`lastlight verify DATE --ledger-dir DIR`: check that a sealed forecast really was sealed in time.
 
 Thin by design: it parses the date and calls `lastlight.seal.ledger.verify`. It prints `PASS`
-or `FAIL: <reason>` on stdout. Exit codes: 0 pass, 1 fail, 2 the arguments were unusable.
-This checks the digest, the timestamp's imprint and its time against sunset; it does not yet
-validate the timestamp's signature chain.
+(or `PASS (strip verified)` when the forecast names a strip and the PNG in the ledger hashes to
+it) or `FAIL: <reason>` on stdout. Exit codes: 0 pass, 1 fail, 2 the arguments were unusable.
+This checks the digest, the timestamp's imprint and its time against sunset, and the strip; it
+does not yet validate the timestamp's signature chain.
 """
 
 from __future__ import annotations
@@ -44,7 +45,7 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 def _run(args: argparse.Namespace) -> int:
     outcome = verify(args.date, args.ledger_dir)
     if outcome.ok:
-        print("PASS")
+        print("PASS (strip verified)" if outcome.strip_verified else "PASS")
         return 0
     print(f"FAIL: {outcome.reason}")
     return 1
@@ -52,7 +53,7 @@ def _run(args: argparse.Namespace) -> int:
 
 COMMAND = Command(
     name="verify",
-    help="check a sealed forecast: digest, timestamp imprint, and seal before sunset",
+    help="check a sealed forecast: digest, timestamp imprint, seal before sunset, and strip",
     run=_run,
     configure=_configure,
 )

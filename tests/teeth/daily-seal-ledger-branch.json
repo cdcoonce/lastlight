@@ -1,0 +1,145 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_ledger_branch.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_ledger_branch.py"
+  ],
+  "mutants": [
+    {
+      "label": "B01 commit message uses 8 digest characters",
+      "file": "../../src/lastlight/ledger_branch.py",
+      "oracle": "real",
+      "find": "return f\"seal: {date} {digest[:12]}\"",
+      "replace": "return f\"seal: {date} {digest[:8]}\""
+    },
+    {
+      "label": "B02 commit message prefix changed",
+      "file": "../../src/lastlight/ledger_branch.py",
+      "oracle": "real",
+      "find": "return f\"seal: {date} {digest[:12]}\"",
+      "replace": "return f\"sealed: {date} {digest[:12]}\""
+    },
+    {
+      "label": "B03 message names the OLDEST index row, not the newest",
+      "file": "../../src/lastlight/ledger_branch.py",
+      "oracle": "real",
+      "find": "row = json.loads(lines[-1])",
+      "replace": "row = json.loads(lines[0])"
+    },
+    {
+      "label": "B04 orphan branch is started from HEAD (has a parent, carries code)",
+      "file": "../../src/lastlight/ledger_branch.py",
+      "oracle": "real",
+      "find": "\"worktree\", \"add\", \"--quiet\", \"--orphan\", \"-b\", branch, str(worktree)",
+      "replace": "\"worktree\", \"add\", \"--quiet\", \"-b\", branch, str(worktree)"
+    },
+    {
+      "label": "B05 publish stages everything, not just ledger/",
+      "file": "../../src/lastlight/ledger_branch.py",
+      "oracle": "real",
+      "find": "_git(worktree, \"add\", \"--\", LEDGER_DIRECTORY)",
+      "replace": "_git(worktree, \"add\", \"-A\")"
+    },
+    {
+      "label": "B06 push is forced",
+      "file": "../../src/lastlight/ledger_branch.py",
+      "oracle": "real",
+      "find": "worktree, \"push\", \"--quiet\", remote,",
+      "replace": "worktree, \"push\", \"--force\", \"--quiet\", remote,"
+    },
+    {
+      "label": "B07 token also sent on the status command",
+      "file": "../../src/lastlight/ledger_branch.py",
+      "oracle": "real",
+      "find": "worktree, \"status\", \"--porcelain\", \"--untracked-files=all\", \"--\", LEDGER_DIRECTORY\n    )",
+      "replace": "worktree, \"status\", \"--porcelain\", \"--untracked-files=all\", \"--\", LEDGER_DIRECTORY,\n        config=_auth_config(token)[0],\n    )"
+    },
+    {
+      "label": "B08 token is not scrubbed from push errors",
+      "file": "../../src/lastlight/ledger_branch.py",
+      "oracle": "real",
+      "find": "text = text.replace(secret, \"***\")",
+      "replace": "text = text"
+    },
+    {
+      "label": "B08b token's encoded header is not scrubbed from push errors (only the raw token is)",
+      "file": "../../src/lastlight/ledger_branch.py",
+      "oracle": "real",
+      "find": "    return [f\"http.https://github.com/.extraheader=AUTHORIZATION: basic {encoded}\"], [\n        token,\n        encoded,\n    ]",
+      "replace": "    return [f\"http.https://github.com/.extraheader=AUTHORIZATION: basic {encoded}\"], [\n        token,\n    ]"
+    },
+    {
+      "label": "B09 any ls-remote failure is read as 'no ledger branch yet' (new orphan)",
+      "file": "../../src/lastlight/ledger_branch.py",
+      "oracle": "real",
+      "find": "elif probe.returncode == _LS_REMOTE_NO_MATCH:",
+      "replace": "elif probe.returncode != 0:"
+    },
+    {
+      "label": "B10 publish with nothing new still commits and pushes",
+      "file": "../../src/lastlight/ledger_branch.py",
+      "oracle": "real",
+      "find": "if not status.stdout.strip():",
+      "replace": "if False:"
+    },
+    {
+      "label": "B11 commit author email changed",
+      "file": "../../src/lastlight/ledger_branch.py",
+      "oracle": "real",
+      "find": "41898282+github-actions[bot]@users.noreply.github.com",
+      "replace": "noreply@example.invalid"
+    },
+    {
+      "label": "B12 worktree directory in use is accepted",
+      "file": "../../src/lastlight/ledger_branch.py",
+      "oracle": "real",
+      "find": "if worktree.exists() and (not worktree.is_dir() or any(worktree.iterdir())):",
+      "replace": "if False:"
+    },
+    {
+      "label": "B13 existing branch is checked out at HEAD, not the remote tip",
+      "file": "../../src/lastlight/ledger_branch.py",
+      "oracle": "real",
+      "find": "str(worktree), f\"{remote}/{branch}\")",
+      "replace": "str(worktree), \"HEAD\")"
+    },
+    {
+      "label": "B14 command never forwards GITHUB_TOKEN to the push",
+      "file": "../../src/lastlight/commands/ledger_branch.py",
+      "oracle": "real",
+      "find": "token=os.environ.get(\"GITHUB_TOKEN\"),",
+      "replace": "token=None,"
+    },
+    {
+      "label": "B15 command reads the wrong environment variable for the token",
+      "file": "../../src/lastlight/commands/ledger_branch.py",
+      "oracle": "real",
+      "find": "token=os.environ.get(\"GITHUB_TOKEN\"),",
+      "replace": "token=os.environ.get(\"GH_TOKEN\"),"
+    },
+    {
+      "label": "[control] swap the order of two independent module constants (the bot's name and email)",
+      "file": "../../src/lastlight/ledger_branch.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "BOT_NAME and BOT_EMAIL are separate string constants; neither is computed from the other, and nothing reads one while the other is being defined, so their order of definition changes no value anywhere. Holds for module-level constants read after import; not inert for code that read them by source position.",
+      "find": "BOT_NAME: Final = \"github-actions[bot]\"\nBOT_EMAIL: Final = \"41898282+github-actions[bot]@users.noreply.github.com\"",
+      "replace": "BOT_EMAIL: Final = \"41898282+github-actions[bot]@users.noreply.github.com\"\nBOT_NAME: Final = \"github-actions[bot]\""
+    }
+  ]
+}

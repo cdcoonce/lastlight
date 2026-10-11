@@ -19,5 +19,6 @@
   "reference_point": {"lat": 33.45, "lon": -112.07, "elev_m": 340},
   "model": {"name": "lastlight-stub", "version": "0.0.1", "code_sha": "0123456789abcdef0123456789abcdef01234567"},
   "date": "2026-10-11",
-  "schema_version": 1
+  "schema_version": 1,
+  "strip_sha256": null
 }

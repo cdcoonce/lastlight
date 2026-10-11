@@ -18,6 +18,7 @@ from lastlight.render.curve import (
     render_row,
     render_strip,
     save_strip,
+    strip_png_bytes,
 )
 from lastlight.render.transfer import sky_spectrum
 
@@ -33,4 +34,5 @@ __all__ = [
     "sky_spectrum",
     "spectrum_to_lab",
     "spectrum_to_srgb",
+    "strip_png_bytes",
 ]
