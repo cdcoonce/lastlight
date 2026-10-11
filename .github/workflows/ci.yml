@@ -1,15 +1,11 @@
 name: ci
 
+# No path filters: the privacy scan must see docs-only changes too, because build logs and
+# docs are where a clock time is most likely to slip in.
 on:
   pull_request:
-    paths-ignore:
-      - "docs/**"
-      - "**/*.md"
   push:
     branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "**/*.md"
 
 concurrency:
   group: ci-${{ github.ref }}
