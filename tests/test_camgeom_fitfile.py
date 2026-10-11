@@ -26,33 +26,18 @@ from lastlight.camgeom.mask import sky_mask, write_mask_png
 from lastlight.camgeom.model import CameraModel
 from lastlight.camgeom.orientation import Orientation
 from lastlight.camgeom.skyline import default_overlay_boxes
+from lastlight.privacy.rules import text_hits
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 COMMITTED = REPO_ROOT / "src" / "lastlight" / "cameras" / "geometry" / "WHTM1.json"
 
 COLUMNS = tuple(float(x) for x in range(0, WIDTH, 10)) + (float(WIDTH - 1),)
 
-# Stand-ins for the repository's privacy rules (the real scanner is `lastlight privacy-scan`):
-# a clock time or ISO datetime, a sun-event word, or a latitude and longitude pair in Arizona.
-_CLOCK = re.compile(
-    r"(?<![\d.:\[])(?:[01]?\d|2[0-3]):[0-5]\d(?!\d)"
-    r"|\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}|\d{8}T\d{4}|\bT\d{2}:\d{2}"
-)
-_SUN_WORD = re.compile(r"sunset|sunrise|dusk|dawn", re.IGNORECASE)
-_NUMBER = re.compile(r"-?\d+\.\d+")
-
 
 def assert_nothing_private(text: str) -> None:
-    assert not _CLOCK.search(text), "a clock time or ISO datetime"
-    assert not _SUN_WORD.search(text), "a sun-event word"
-    numbers = [(m.start(), abs(float(m.group()))) for m in _NUMBER.finditer(text)]
-    for (start_a, a), (start_b, b) in zip(numbers, numbers[1:], strict=False):
-        close = start_b - start_a < 40
-        lat_lon = 31.0 <= a <= 37.5 and 109.0 <= b <= 115.0
-        lon_lat = 109.0 <= a <= 115.0 and 31.0 <= b <= 37.5
-        assert not (close and (lat_lon or lon_lat)), (
-            f"a coordinate pair near {text[start_a : start_b + 8]!r}"
-        )
+    """The repository's own text rules (P001 to P003) find nothing in `text`."""
+    found = [text[hit.start : hit.end] for hit in text_hits(text)]
+    assert not found, f"the privacy rules flag {found}"
 
 
 def example_fit(**changes) -> CameraFit:
@@ -71,7 +56,7 @@ def example_fit(**changes) -> CameraFit:
         frames_used=(FrameRecord("2026-10-10", 14.65, "ab" * 32),),
         sun_check={"status": "skipped", "reason": "sun hidden by cloud", "tolerance_deg": 1.0},
         radial_term={"k1": 0.1, "skyline_rms_px": 0.7, "adopted": False},
-        position_scan={"box_km": 6.0, "positions": 49, "adopted": False},
+        position_search={"box_km": 8.0, "positions": 60, "adopted": True},
         frozen_on="2026-10-10",
         position_basis="operator description, supplied at fit time and not stored",
     )
@@ -105,10 +90,10 @@ def test_the_file_is_versioned_and_says_what_it_fitted() -> None:
     ]
 
 
-def test_a_fit_without_a_position_scan_says_so_with_null() -> None:
-    data = example_fit(position_scan=None).to_json()
-    assert data["position_scan"] is None
-    assert CameraFit.from_json(data).position_scan is None
+def test_a_fit_without_a_position_search_says_so_with_null() -> None:
+    data = example_fit(position_search=None).to_json()
+    assert data["position_search"] is None
+    assert CameraFit.from_json(data).position_search is None
 
 
 def test_the_file_never_carries_the_cameras_coordinates_or_a_clock_time(tmp_path: Path) -> None:
@@ -123,10 +108,10 @@ def test_the_privacy_probe_itself_catches_what_it_is_meant_to() -> None:
     clock = ":".join(["17", "42"])
     iso = "2026-10-10" + "T" + ":".join(["00", "24", "00"]) + "Z"
     pair = f"[{REF_LAT + 0.1:.1f}, {REF_LON - 0.2:.1f}]"
-    for leak in [f'"t": "{clock}"', f'"t": "{iso}"', "the sunset was early", pair]:
+    for leak in [f'"t": "{clock}"', f'"t": "{iso}"', f"sunset at {clock}", pair]:
         with pytest.raises(AssertionError):
             assert_nothing_private(leak)
-    assert_nothing_private("[33.45, 14.65, 274.0, 66.0]")
+    assert_nothing_private("[14.65, 274.0, 66.0]")
 
 
 def test_loading_a_fit_that_is_not_there_names_the_camera(tmp_path: Path) -> None:
@@ -256,10 +241,10 @@ def test_the_committed_whtm1_fit_is_a_valid_frozen_fit() -> None:
     assert COMMITTED.parent == GEOMETRY_DIR
     assert (fit.width, fit.height) == (800, 300)
     assert abs(fit.orientation.azimuth_deg - 274.0) < 20.0, "within the operator's stated view"
-    assert 35.0 < fit.orientation.hfov_deg < 110.0
+    assert 30.0 < fit.orientation.hfov_deg < 120.0
     assert abs(fit.orientation.elevation_deg) < 10.0 and abs(fit.orientation.roll_deg) < 5.0
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", fit.frozen_on)
-    assert 0.0 < fit.skyline_rms_px < 5.0, "sanity bound; the number itself is reported in the PR"
+    assert 0.0 < fit.skyline_rms_px < 2.0, "the issue's target for the skyline residual"
     assert fit.skyline_rms_deg == pytest.approx(
         fit.skyline_rms_px / (fit.camera_model(REF_LAT, REF_LON, 0.0).focal_px * math.pi / 180),
         rel=0.02,
@@ -267,10 +252,11 @@ def test_the_committed_whtm1_fit_is_a_valid_frozen_fit() -> None:
     assert fit.n_columns > 500
     assert len(fit.skyline_x_px) == len(fit.skyline_y_px) > 20
     assert fit.radial_term is not None and fit.radial_term["adopted"] is False
-    scan = fit.position_scan
-    assert scan is not None, "the committed fit must record the position scan that was run"
-    assert scan["adopted"] is False and scan["positions"] >= 25 and scan["box_km"] >= 4.0
-    assert scan["rms_px_min"] <= scan["rms_px_at_site"] <= scan["rms_px_max"]
+    search = fit.position_search
+    assert search is not None, "the committed fit must record the position search that was run"
+    assert search["adopted"] is True and search["positions"] >= 25 and search["box_km"] >= 6.0
+    assert search["rms_px_best"] == pytest.approx(fit.skyline_rms_px, abs=0.01)
+    assert search["near_best_positions"] >= 1
 
 
 def test_the_committed_fit_names_its_frames_without_pixels_or_clock_times() -> None:

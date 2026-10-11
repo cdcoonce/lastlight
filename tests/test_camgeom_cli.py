@@ -181,27 +181,28 @@ def test_fit_reads_the_dem_tile_from_the_cache_and_never_the_network(
     )
 
 
-def test_a_position_scan_is_recorded_without_moving_the_site(
+def test_a_position_search_that_cannot_move_still_records_itself(
     tmp_path: Path, archive: Path, dem_tif: Path, site_file: Path, capsys: pytest.CaptureFixture
 ) -> None:
-    # A box smaller than the step scans only the site itself: the whole path is exercised
-    # (flags, scan, summary, file) for the price of one extra horizon.
+    # A box smaller than the step searches only the site itself: the whole path is exercised
+    # (flags, search, summary, file) for the price of one extra horizon.
     out = tmp_path / "SYN1.json"
     code = run(
         "fit", "--camera", "SYN1", "--frames", str(archive), "--site-file", str(site_file),
         "--dem", str(dem_tif), "--out", str(out), "--frozen-on", "2026-10-10",
-        "--scan-position-km", "1", "--scan-step-km", "2",
+        "--position-box-km", "1", "--position-step-km", "2",
     )  # fmt: skip
     assert code == 0
-    scan = load_fit("SYN1", directory=tmp_path).position_scan
-    assert scan is not None
-    assert scan["positions"] == 1 and scan["adopted"] is False
-    assert scan["rms_px_at_site"] == scan["rms_px_min"] == scan["rms_px_max"]
-    assert "position scan" in capsys.readouterr().out
+    search = load_fit("SYN1", directory=tmp_path).position_search
+    assert search is not None
+    assert search["positions"] == 1 and search["adopted"] is True
+    assert (search["offset_east_km"], search["offset_north_km"]) == (0.0, 0.0)
+    assert search["rms_px_at_site"] == search["rms_px_best"]
+    assert "position search" in capsys.readouterr().out
 
 
-def test_without_the_scan_flags_no_scan_is_recorded(fitted: Fitted) -> None:
-    assert load_fit("SYN1", directory=fitted.out_dir).position_scan is None
+def test_without_the_search_flags_no_search_is_recorded(fitted: Fitted) -> None:
+    assert load_fit("SYN1", directory=fitted.out_dir).position_search is None
 
 
 def test_fit_refuses_when_no_frame_is_bright_enough_and_names_the_threshold(

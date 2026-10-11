@@ -15,6 +15,7 @@ from camgeom_synthetic import (
     ridge_elevation_deg,
     true_skyline_y,
 )
+
 from lastlight.camgeom.orientation import (
     HorizonProfile,
     Orientation,
@@ -65,6 +66,15 @@ def test_the_fit_recovers_a_camera_with_a_different_pointing_and_a_narrower_view
     )
     truth = Orientation(262.5, -1.0, -1.2, 52.0)
     result = fit_orientation(frames_of(model), HORIZON, Prior(azimuth_deg=270.0), exclude=OVERLAY)
+    assert_recovers(result.orientation, truth)
+
+
+def test_the_fit_recovers_a_telephoto_camera_with_a_narrow_view() -> None:
+    model = dataclasses.replace(
+        TRUE_MODEL, azimuth_deg=281.0, elevation_deg=2.5, roll_deg=0.3, hfov_deg=20.0
+    )
+    truth = Orientation(281.0, 2.5, 0.3, 20.0)
+    result = fit_orientation(frames_of(model), HORIZON, Prior(azimuth_deg=274.0), exclude=OVERLAY)
     assert_recovers(result.orientation, truth)
 
 
