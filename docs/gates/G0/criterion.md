@@ -32,3 +32,11 @@ The criterion leaves these open. They are fixed here, from the design contract a
 9. **Inputs.** HRRR analyses (forecast hour 0) at the whole UTC hour nearest the instant the sun reaches the horizon at the public reference point, for smoke aerosol (AOTK) and water vapour (PWAT); an aerosol archive that needs no account for total and dust aerosol optical depth at 550 nm; the monthly ozone climatology. The report states the sources actually used and every date dropped, with its reason.
 10. **The five most extreme dates** are the five with the largest mean of D(d, s) over the three counted bands.
 11. **Also reported, and not part of the verdict:** (a) delta-E 2000 of each date's absolute curve (the forecast's own curve, `render_curve`) against the period's median curve, by band `early`, `mid` and `late`; (b) a seasonal-control check, the same rule with the median taken over the dates within 15 days of d instead of over the whole period, because the sun's azimuth and the ozone column change with the season and a year-wide median counts that as variation.
+
+## Amendments and additions
+
+### 2026-10-11, after the verdict was first read: additions only
+
+The criterion, the definitions above and the verdict they give are unchanged. The report also carries three things that were not registered above, because reading the first results showed they were needed to read the verdict: (a) D(d, s) split by channel, log(R/G) alone and log(B/G) alone, with the same rule applied to each (D is the mean over both channels, and the two carry very different amounts of it); (b) a statement of what HRRR's smoke field held on the dates used (it was exactly zero on every date, so all aerosol variation comes from the second archive); and (c) the aerosol optical depth by month. Each is labelled in the report as an addition, and none of them changes the criterion or the verdict.
+
+The aerosol archive named only as "an archive that needs no account" above is NOAA GEFS-Aerosols (the analysis, total and dust optical depth at 550 nm), chosen after NASA GEOS-FP through OPeNDAP proved to cover only part of the period. The report states both facts.
