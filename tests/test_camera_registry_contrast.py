@@ -116,10 +116,45 @@ def test_a_missing_required_contrast_field_is_rejected_by_name(key: str) -> None
         parse_registry(text)
 
 
-def test_an_unknown_contrast_key_is_rejected_so_a_typo_cannot_hide() -> None:
+def test_a_misspelt_required_contrast_key_is_refused_for_the_field_it_leaves_missing() -> None:
+    # Renaming a required key trips the missing-field check first; this is not the unknown-key
+    # check (the next tests), and its message names the field that is now missing.
     text = VALID.replace("reference_rows", "reference_row")
-    with pytest.raises(RegistryError, match=r"reference_row"):
+    with pytest.raises(
+        RegistryError, match=r"TEST1.*contrast is missing required field 'reference_rows'"
+    ):
         parse_registry(text)
+
+
+@pytest.mark.parametrize(
+    ("text", "unknown"),
+    [
+        # Every required key intact, plus one the loader does not know.
+        (VALID + "bogus_key = 3\n", "bogus_key"),
+        (VALID + "bands_row = [[8, 28]]\n", "bands_row"),
+        # The optional key misspelt: nothing required is missing, so only the unknown-key check
+        # can stop it, and without it the light dome would silently be switched off.
+        (VALID.replace("light_dome_columns", "light_dome_column"), "light_dome_column"),
+        (VALID.replace("light_dome_columns", "light_dome_cols"), "light_dome_cols"),
+    ],
+    ids=["extra-key", "extra-bands-row", "typo-light-dome-column", "typo-light-dome-cols"],
+)
+def test_an_unknown_contrast_key_is_rejected_by_name_so_a_typo_cannot_hide(
+    text: str, unknown: str
+) -> None:
+    # The whole list is matched, quoted, so that a longer or shorter sibling name (the real
+    # `light_dome_columns` contains `light_dome_column`) cannot satisfy the match.
+    with pytest.raises(
+        RegistryError, match=rf"TEST1.*contrast has unknown key\(s\) \['{unknown}'\]"
+    ):
+        parse_registry(text)
+
+
+def test_the_valid_fixture_has_every_key_the_unknown_key_tests_rely_on() -> None:
+    # Guard for the tests above: with nothing added or renamed the table parses, so the refusals
+    # there are caused by the added or misspelt key alone.
+    assert parse_registry(VALID)["TEST1"].contrast is not None
+    assert "light_dome_columns = [[500, 800]]" in VALID
 
 
 @pytest.mark.parametrize(

@@ -42,6 +42,7 @@ from lastlight.observe.contrast import (
     MIN_VALID_PIXELS,
     SATURATION_LEVEL,
     contrast_profile,
+    srgb_to_linear,
 )
 
 SUN = 0.0  # a sun elevation with no light-dome exclusion
@@ -161,6 +162,39 @@ def test_a_band_value_is_a_median_not_a_mean() -> None:
     assert dirty.bands[0].log_rg == pytest.approx(clean.bands[0].log_rg, abs=1e-9)
     assert dirty.bands[0].log_bg == pytest.approx(clean.bands[0].log_bg, abs=1e-9)
     assert dirty.bands[0].n_pixels == BAND_SIZE
+
+
+def _colour_from_logs(log_r: float, log_g: float, log_b: float) -> np.ndarray:
+    """The encoded colour of a pixel whose linear channels are 0.05 * exp(log_r, log_g, log_b)."""
+    return srgb_encode(0.05 * np.exp([log_r, log_g, log_b]))
+
+
+def test_a_band_value_is_the_median_of_each_pixels_ratio_not_the_ratio_of_the_medians() -> None:
+    # Green varies from pixel to pixel here (the gradient holds it constant, where the median of
+    # the ratios and the ratio of the medians coincide). Band 0 is three groups of columns with
+    # these (log R, log G, log B) in linear light, so the per-pixel log(R/G) is -2, +1, +1 and
+    # log(B/G) is -1, +2, -1, while the median of each channel alone is 1 in every channel.
+    groups = [
+        (slice(0, 267), (0.0, 2.0, 1.0)),
+        (slice(267, 534), (1.0, 0.0, 2.0)),
+        (slice(534, 800), (2.0, 1.0, 0.0)),
+    ]
+    frame = grey_frame()
+    for columns, logs in groups:
+        frame = paint_band(frame, BANDS.bands_rows[0], _colour_from_logs(*logs), columns=columns)
+    band = profile(frame).bands[0]
+    assert band.n_pixels == BAND_SIZE
+
+    # Positive control: the rival statistic (the median of each channel, then the ratio) is 0 for
+    # both contrasts on these pixels, far from the median of the ratios, so the test can tell them
+    # apart; and so can it tell a mean (about 0) from the median.
+    sizes = [(columns.stop - columns.start) * 20 for columns, _ in groups]
+    channel = [np.repeat([logs[i] for _, logs in groups], sizes) for i in range(3)]
+    assert np.median(channel[0]) - np.median(channel[1]) == pytest.approx(0.0)
+    assert np.median(channel[2]) - np.median(channel[1]) == pytest.approx(0.0)
+
+    assert band.log_rg == pytest.approx(1.0, abs=1e-9)
+    assert band.log_bg == pytest.approx(-1.0, abs=1e-9)
 
 
 # --- the skyline is read column by column --------------------------------------------------------
@@ -477,4 +511,34 @@ def test_the_linearisation_is_the_srgb_transfer_function() -> None:
     frame = paint_band(frame, BANDS.bands_rows[0], bumped)
     band = profile(frame).bands[0]
     assert band.log_rg == pytest.approx(math.log(2.0), abs=1e-12)
+    assert band.log_bg == pytest.approx(0.0, abs=1e-12)
+
+
+# --- the toe of the sRGB curve --------------------------------------------------------------------
+# Channel codes 6 to 10 (the lowest that are kept) lie on the linear segment of the curve, where
+# linear light is code / 255 / 12.92; code 11 is the first on the power segment.
+
+
+@pytest.mark.parametrize("code", [6, 7, 8, 9, 10])
+def test_codes_6_to_10_are_on_the_linear_toe_of_the_srgb_curve(code: int) -> None:
+    linear = srgb_to_linear(np.array([float(code)]))[0]
+    assert linear == pytest.approx(code / 255 / 12.92, rel=1e-12)
+
+
+def test_code_11_is_the_first_on_the_power_segment_of_the_srgb_curve() -> None:
+    linear = srgb_to_linear(np.array([11.0]))[0]
+    assert linear == pytest.approx(((11 / 255 + 0.055) / 1.055) ** 2.4, rel=1e-12)
+    assert srgb_to_linear(np.array([10.0]))[0] < linear  # still rising across the knee
+
+
+@pytest.mark.parametrize("code", [6, 7, 8, 9, 10])
+def test_a_toe_pixel_is_linearised_with_the_toe_in_the_contrast_it_gives(code: int) -> None:
+    # Band 0 has red on the toe and green and blue at code 100; the grey reference has log(R/G) 0,
+    # so the contrast is log(red / green) in linear light, with red = code / 255 / 12.92. (A pair
+    # of toe channels would hide the slope, which cancels in their ratio.)
+    green = ((100 / 255 + 0.055) / 1.055) ** 2.4
+    frame = paint_band(grey_frame(), BANDS.bands_rows[0], (float(code), 100.0, 100.0))
+    band = profile(frame).bands[0]
+    assert band.n_pixels == BAND_SIZE and band.excluded.too_dark == 0
+    assert band.log_rg == pytest.approx(math.log(code / 255 / 12.92 / green), abs=1e-9)
     assert band.log_bg == pytest.approx(0.0, abs=1e-12)

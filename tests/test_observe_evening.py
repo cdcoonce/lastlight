@@ -11,17 +11,21 @@ import dataclasses
 import datetime as dt
 import hashlib
 import json
+import math
 import re
 from pathlib import Path
 
 import pytest
+from camgeom_synthetic import WIDTH
 from observe_archive import EVENING, fill_archive, instant_at_sun, whtm1, write_jpeg
-from observe_support import grey_frame, to_uint8
+from observe_support import BAND_CENTRES, flat_fit, gradient_frame, grey_frame, to_uint8
 
 from lastlight.cameras import ContrastBands, load_registry
 from lastlight.cameras.archive import EveningArchive, frame_stem
-from lastlight.camgeom.fitfile import GEOMETRY_DIR
+from lastlight.camgeom.fitfile import GEOMETRY_DIR, Uncertainty, write_fit
 from lastlight.camgeom.frames import parse_frame_time
+from lastlight.camgeom.model import pixels_per_degree
+from lastlight.camgeom.orientation import Orientation
 from lastlight.geometry import solar_position
 from lastlight.observe.evening import (
     DROP_REASONS,
@@ -78,8 +82,32 @@ def test_an_inverted_window_is_refused(archive: Path) -> None:
         observe(archive, min_sun_elev=3.0, max_sun_elev=-3.0)
 
 
-def test_every_drop_reason_is_always_present_so_a_zero_is_a_recorded_zero(archive: Path) -> None:
-    assert set(observe(archive).dropped) == set(DROP_REASONS)
+def test_every_drop_reason_is_always_present_so_a_zero_is_a_recorded_zero(
+    archive: Path, tmp_path: Path
+) -> None:
+    named = {"no_time_in_name", "unreadable", "wrong_size", "sun_above_window", "sun_below_window"}
+    assert set(DROP_REASONS) == named
+    observation = observe(archive)
+    assert set(observation.dropped) == named
+
+    # In the document the unused reasons are there with a zero, not left out (the document, and
+    # the file written from it, not only the dataclass).
+    expected = {
+        "no_time_in_name": 0,
+        "unreadable": 0,
+        "wrong_size": 0,
+        "sun_above_window": 1,
+        "sun_below_window": 1,
+    }
+    assert observation.to_json()["frames_dropped"] == expected
+    written = json.loads(write_observed(observation, tmp_path / "observed.json").read_text())
+    assert written["frames_dropped"] == expected
+
+    # An evening in which nothing is dropped still records all five, as zeros.
+    nothing = observe(archive, min_sun_elev=-10.0, max_sun_elev=10.0)
+    assert nothing.to_json()["frames_dropped"] == dict.fromkeys(named, 0)
+    clean = json.loads(write_observed(nothing, tmp_path / "clean.json").read_text())
+    assert clean["frames_dropped"] == dict.fromkeys(named, 0)
 
 
 # --- the sun elevation is computed, from the name, at the registry position ----------------------
@@ -282,6 +310,89 @@ def test_the_view_elevation_is_labelled_nominal_in_the_document(archive: Path) -
     band = document["frames"][0]["bands"][0]
     assert set(band["view_elevation_deg"]) == {"nominal", "range"}
     assert "nominal" in document["view_elevation_note"]
+
+
+FRACTIONAL = [4.63, 1.27, -0.81, -3.44]  # sun elevations that a whole degree would lose
+
+
+def test_the_sun_elevation_of_each_frame_in_the_written_file_is_the_computed_one_to_2_decimals(
+    tmp_path: Path,
+) -> None:
+    fill_archive(tmp_path / "frames", FRACTIONAL)
+    out = write_observed(observe(tmp_path / "frames"), tmp_path / "observed.json")
+    document = json.loads(out.read_text())
+
+    camera = whtm1()
+    names = (tmp_path / "frames" / "WHTM1" / EVENING.isoformat()).glob("*.jpg")
+    expected = sorted(
+        (
+            solar_position(
+                parse_frame_time(p), camera.position.lat, camera.position.lon
+            ).elevation_deg
+            for p in names
+        ),
+        reverse=True,
+    )
+    written = [frame["sun_elevation_deg"] for frame in document["frames"]]
+    assert written == [round(value, 2) for value in expected]
+    # Not vacuous: each carries decimals that rounding to a whole degree or to one decimal loses.
+    assert all(abs(value - round(value, 1)) > 0.004 for value in written), written
+    assert all(abs(value - round(value)) > 0.1 for value in written), written
+
+
+LENS = Orientation(274.0, 2.0, 0.0, 20.0)  # a pinhole camera 2 degrees up with a 20 degree lens
+PX_PER_DEG = (30.0, 50.0)  # the fit's uncertainty in the pixel scale (the nominal is about 39.6)
+
+
+def _pinhole_elevation(rows_above_the_skyline: float, top: float = 200.0) -> float:
+    """Elevation of the middle column at a row, by the plain pinhole formula."""
+    focal = (WIDTH / 2.0) / math.tan(math.radians(20.0) / 2.0)
+    row = top - rows_above_the_skyline
+    return 2.0 + math.degrees(math.atan((149.5 - row) / focal))
+
+
+def test_the_view_elevation_in_the_written_file_is_the_nominal_value_and_a_low_to_high_range(
+    tmp_path: Path,
+) -> None:
+    # A known fit: a flat skyline at row 200, a pinhole lens, and a pixel scale known to lie
+    # between 30 and 50 px/deg. The same fit is used to read the frames, so the numbers the file
+    # holds can be computed by hand.
+    geometry = tmp_path / "geometry"
+    uncertainty = Uncertainty((270.0, 278.0), (16.0, 24.0), PX_PER_DEG, "test", False)
+    fit = flat_fit(top=200.0, camera_id="WHTM1", orientation=LENS, uncertainty=uncertainty)
+    write_fit(fit, geometry / "WHTM1.json")
+    folder = EveningArchive(tmp_path / "frames", "WHTM1", EVENING).directory
+    for index, elevation in enumerate((4.63, 1.27)):
+        stem = frame_stem(instant_at_sun(elevation))
+        gains = (1.0 + 0.02 * index, 1.0, 1.0)  # frames must differ: a SHA-256 identifies each
+        write_jpeg(folder / f"{stem}.jpg", to_uint8(gradient_frame(top=200.0, gains=gains)))
+
+    observation = observe(tmp_path / "frames", geometry_dir=geometry)
+    assert len(observation.frames) == 2
+    document = json.loads(write_observed(observation, tmp_path / "observed.json").read_text())
+
+    scale = pixels_per_degree(20.0, WIDTH)
+    ridge = _pinhole_elevation(0.0)
+    for frame, kept in zip(document["frames"], observation.frames, strict=True):
+        for band, centre, profile in zip(
+            frame["bands"], BAND_CENTRES, kept.profile.bands, strict=True
+        ):
+            view = band["view_elevation_deg"]
+            low, high = view["range"]
+            nominal = view["nominal"]
+            # The range is written low to high, and strictly: it is a range, not a point.
+            assert low < nominal < high, view
+            # Each value is what a hand computation from the fit and its pixel scale gives
+            # (the pinhole formula, to the first order in the band's height above the skyline).
+            assert nominal == pytest.approx(ridge + centre / scale, abs=0.03), view
+            assert low == pytest.approx(ridge + centre / PX_PER_DEG[1], abs=0.03), view
+            assert high == pytest.approx(ridge + centre / PX_PER_DEG[0], abs=0.03), view
+            # ... held to 2 decimals, not rounded to a whole degree, and the same numbers the
+            # profile computed.
+            assert nominal != round(nominal) and low != round(low) and high != round(high)
+            model = profile.view_elevation
+            assert nominal == round(model.nominal_deg, 2)
+            assert [low, high] == [round(model.range_deg[0], 2), round(model.range_deg[1], 2)]
 
 
 # --- the file is derived numbers only ------------------------------------------------------------
