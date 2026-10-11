@@ -356,6 +356,18 @@ def test_the_home_page_of_a_ledger_with_nothing_verified_says_so(
     assert len(home.find("li", "evening")) == 1
 
 
+def test_the_archive_says_how_many_index_lines_could_not_be_read(
+    ledger_dir: Path, tmp_path: Path
+) -> None:
+    with (ledger_dir / "index.jsonl").open("a") as index:
+        index.write("garbage\n")
+    out = tmp_path / "site"
+    assert build_site(ledger_dir, out).ok
+    notice = read_page(out, "archive.html").find("p", "notice")[0].text
+    assert "1 line" in notice and "could not be read" in notice
+    assert len(read_page(out, "archive.html").find("li", "evening")) == 3
+
+
 def test_the_page_probe_is_a_real_html_parser() -> None:
     probe = Probe('<ul><li class="a b">x <b>y</b></li><li>z</li></ul><img src="p.png" alt="q">')
     assert probe.texts("li") == ["x y", "z"]

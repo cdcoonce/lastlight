@@ -1,0 +1,90 @@
+:root {
+  color-scheme: light dark;
+  --bg: #fbfaf7;
+  --card: #ffffff;
+  --fg: #1c1a19;
+  --muted: #57524d;
+  --link: #0a4c99;
+  --rule: #d8d2c9;
+  --ok-fg: #14532d;
+  --ok-bg: #dff3e4;
+  --bad-fg: #7f1d1d;
+  --bad-bg: #fde4e4;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15141a;
+    --card: #1e1d26;
+    --fg: #ece8e2;
+    --muted: #b5afa7;
+    --link: #8dbdff;
+    --rule: #3a3844;
+    --ok-fg: #b7f0c7;
+    --ok-bg: #153523;
+    --bad-fg: #ffc9c9;
+    --bad-bg: #3d1618;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 1rem/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+header, main, footer { max-width: 46rem; margin: 0 auto; padding: 0 1rem; }
+main { padding-bottom: 2rem; }
+
+a { color: var(--link); }
+a:focus-visible { outline: 3px solid var(--link); outline-offset: 2px; }
+
+.skip { position: absolute; left: -999rem; }
+.skip:focus { left: 1rem; top: 1rem; z-index: 1; padding: 0.5rem 1rem; background: var(--card); }
+
+.brand { margin: 1rem 0 0; font-size: 1.25rem; font-weight: 700; }
+.brand span { color: var(--muted); font-size: 1rem; font-weight: 400; }
+nav ul { display: flex; flex-wrap: wrap; gap: 1rem; margin: 0.5rem 0 1rem; padding: 0; list-style: none; }
+nav a[aria-current="page"] { color: var(--fg); font-weight: 700; text-decoration: none; }
+
+h1 { margin: 1.5rem 0 1rem; font-size: 1.75rem; line-height: 1.25; }
+h2 { margin: 2rem 0 0.75rem; font-size: 1.35rem; line-height: 1.3; }
+h3 { margin: 1.5rem 0 0.5rem; font-size: 1.1rem; }
+
+img { display: block; max-width: 100%; height: auto; }
+.painting { margin: 0 0 1rem; }
+.painting img { width: 100%; border: 1px solid var(--rule); }
+.axis { position: relative; height: 1.4rem; margin: 0.25rem 0 0; padding: 0; list-style: none; color: var(--muted); font-size: 0.85rem; }
+.axis li { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+figcaption { margin-top: 0.25rem; color: var(--muted); font-size: 0.9rem; }
+
+.status { margin: 1rem 0; padding: 0.6rem 0.9rem; border-radius: 0.5rem; font-weight: 600; overflow-wrap: anywhere; }
+.status.verified::before, .mark.verified::before { content: "\2713\00a0"; }
+.status.unverified::before, .mark.unverified::before { content: "\2717\00a0"; }
+.status.verified, .mark.verified { background: var(--ok-bg); color: var(--ok-fg); }
+.status.unverified, .mark.unverified { background: var(--bad-bg); color: var(--bad-fg); }
+.notice { margin: 1rem 0; padding: 0.6rem 0.9rem; border-left: 4px solid var(--link); background: var(--card); }
+.no-painting { display: flex; align-items: center; justify-content: center; min-height: 4.5rem; margin: 0; padding: 0.5rem; border: 1px dashed var(--rule); color: var(--muted); text-align: center; }
+
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 1rem 0; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9em; overflow-wrap: anywhere; }
+pre { margin: 1rem 0; padding: 0.8rem; overflow-x: auto; border: 1px solid var(--rule); background: var(--card); }
+pre code { overflow-wrap: normal; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: 1rem; margin: 1rem 0; padding: 0; list-style: none; }
+.evening a { display: flex; flex-direction: column; gap: 0.4rem; height: 100%; padding: 0.6rem; border: 1px solid var(--rule); border-radius: 0.5rem; background: var(--card); color: var(--fg); text-decoration: none; }
+.evening a:hover { border-color: var(--link); }
+.date { font-variant-numeric: tabular-nums; font-weight: 600; }
+.mark { align-self: flex-start; margin-top: auto; padding: 0.1rem 0.6rem; border-radius: 999px; font-size: 0.85rem; font-weight: 600; }
+
+footer { margin-top: 2rem; padding-top: 1rem; padding-bottom: 2rem; border-top: 1px solid var(--rule); color: var(--muted); font-size: 0.9rem; }
+
+@media (max-width: 30rem) {
+  .facts { grid-template-columns: 1fr; }
+  .facts dd { margin-bottom: 0.5rem; }
+}

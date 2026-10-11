@@ -19,6 +19,10 @@ htmlcov/
 # Anchored to the repo root so a future package data directory is not ignored by accident.
 /data/
 
+# The generated almanac (`lastlight site build --out site`) and its staging directory.
+/site/
+/.site-*.build/
+
 # Local environment
 .env
 
