@@ -1,0 +1,23 @@
+{
+  "notes": "stub forecast for the seal tests",
+  "vividness": {"sd": 0.07, "mean": 0.4200000001},
+  "curve": [
+    {"sun_elevation": 6.0, "view_elevation": 2.0, "L": 78.1234567, "a": 12.3456789, "b": 45.6789012},
+    {"sun_elevation": 0.0, "view_elevation": 2.0, "L": 65.4321098, "a": 20.0000004, "b": 38.1},
+    {"sun_elevation": -4.0, "view_elevation": 5.0, "L": 40.5555549, "a": 8.8888888, "b": 10},
+    {"sun_elevation": -8.0, "view_elevation": 10.0, "L": 10.1, "a": -1.234567891, "b": -2.5e-07}
+  ],
+  "inputs": [
+    {
+      "source": "hrrr",
+      "cycle_date": "2026-10-10",
+      "cycle_hour_utc": 18,
+      "forecast_hour": 6,
+      "digest": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+    }
+  ],
+  "reference_point": {"lat": 33.45, "lon": -112.07, "elev_m": 340},
+  "model": {"name": "lastlight-stub", "version": "0.0.1", "code_sha": "0123456789abcdef0123456789abcdef01234567"},
+  "date": "2026-10-11",
+  "schema_version": 1
+}

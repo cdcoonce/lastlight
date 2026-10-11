@@ -24,6 +24,8 @@ uv sync
 uv run lastlight --version
 uv run ruff check && uv run ruff format --check && uv run pytest
 uv run lastlight privacy-scan
+uv run lastlight seal FORECAST.json --ledger-dir ledger   # canonical JSON, SHA-256, RFC 3161 timestamp
+uv run lastlight verify 2026-10-11 --ledger-dir ledger    # PASS, or FAIL with the reason
 ```
 
 Tests run offline: a guard in `tests/conftest.py` refuses every socket connect. A test that really needs the network is marked `@pytest.mark.network`, skipped by default and run on purpose with `uv run pytest -m network`.
