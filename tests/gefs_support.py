@@ -39,17 +39,18 @@ REFERENCE_CELL = (10, 10)
 TOTAL_AT_REFERENCE = 0.024992790312500006
 DUST_AT_REFERENCE = 0.0021700384130859383
 
-# The crop's messages in file order, as byte ranges inside CROP_GRIB.
+# The crop's messages in file order, as byte ranges inside CROP_GRIB (the last one is open-ended,
+# as the idx makes the last message of a file).
 CROP_MESSAGES: dict[str, ByteRange] = {
     "TOTAL_AOD_550": ByteRange(0, 1481),
-    "DUST_AOD_550": ByteRange(1482, len(CROP_GRIB) - 1),
+    "DUST_AOD_550": ByteRange(1482, None),
 }
 
 
 def crop_message(name: str) -> bytes:
     byte_range = CROP_MESSAGES[name]
-    assert byte_range.end is not None
-    return CROP_GRIB[byte_range.start : byte_range.end + 1]
+    stop = len(CROP_GRIB) if byte_range.end is None else byte_range.end + 1
+    return CROP_GRIB[byte_range.start : stop]
 
 
 def edited(data: bytes, *, cycle: tuple[dt.date, int] | None = None, **keys: float) -> bytes:

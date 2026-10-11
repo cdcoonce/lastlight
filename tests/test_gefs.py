@@ -289,7 +289,9 @@ def test_a_wrong_wavelength_is_refused(tmp_path) -> None:
 def test_a_point_outside_the_grid_is_an_error_not_the_nearest_edge_cell(tmp_path) -> None:
     transport = support.crop_transport(CYCLE_DATE, 0)
     with pytest.raises(gefs.AerosolArchiveError, match="outside"):
-        gefs.fetch_aerosol(EVENING, 10.0, -60.0, tmp_path, transport=transport)
+        gefs.fetch_aerosol(
+            EVENING, 10.0, -60.0, tmp_path, transport=transport, run=gefs.RunPlan(CYCLE_DATE, 0, 0)
+        )
 
 
 def test_an_optical_depth_that_is_negative_or_not_a_number_is_refused() -> None:

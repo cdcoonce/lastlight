@@ -7,10 +7,11 @@ HRRR uses (simple, and complex with spatial differencing) and computes the Lambe
 latitudes and longitudes itself, and it can also write GRIB2, which the fixture builder uses to
 crop a message to a small sub-grid.
 
-A message is decoded in isolation: `decode_message` takes the bytes of exactly one message.
-Cells the file marks as missing (a bitmap, as for cloud base where there is no cloud) come back
-masked. The file's own missing-value code (9999 in HRRR) is replaced by a sentinel far outside
-any physical value before decoding, so it can never be mistaken for data.
+A message is decoded in isolation: `decode_message` (HRRR's Lambert-conformal grid) and
+`decode_latlon_message` (GEFS-Aerosols' regular latitude/longitude grid) take the bytes of exactly
+one message. Cells the file marks as missing (a bitmap, as for cloud base where there is no cloud)
+come back masked. The file's own missing-value code (9999 in HRRR) is replaced by a sentinel far
+outside any physical value before decoding, so it can never be mistaken for data.
 """
 
 from __future__ import annotations
@@ -59,8 +60,11 @@ class DecodedMessage:
     values: np.ma.MaskedArray  # shape (nj, ni), float64, masked where the file has no value
 
 
-def _open(data: bytes) -> int:
-    """An ecCodes handle for the single message in `data`; the caller must release it."""
+def _open(data: bytes, grid_type: str = "lambert", grid_name: str = "Lambert-conformal") -> int:
+    """An ecCodes handle for the single message in `data`; the caller must release it.
+
+    The message must be on a grid of `grid_type` (ecCodes' name), called `grid_name` in errors.
+    """
     if data[:4] != b"GRIB":
         raise GribError("not a GRIB message: it does not start with the GRIB marker")
     try:
@@ -70,8 +74,8 @@ def _open(data: bytes) -> int:
     try:
         if eccodes.codes_get_long(handle, "edition") != 2:
             raise GribError("only GRIB edition 2 is supported")
-        if eccodes.codes_get_string(handle, "gridType") != "lambert":
-            raise GribError("only Lambert-conformal grids are supported")
+        if eccodes.codes_get_string(handle, "gridType") != grid_type:
+            raise GribError(f"only {grid_name} grids are supported")
         size = eccodes.codes_get_message_size(handle)
         if size != len(data):
             raise GribError(
@@ -155,5 +159,86 @@ def grid_coordinates(data: bytes) -> tuple[np.ndarray, np.ndarray]:
         return lats.reshape(shape), ((lons + 180.0) % 360.0 - 180.0).reshape(shape)
     except eccodes.CodesInternalError as error:
         raise GribError(f"cannot read the grid: {error}") from error
+    finally:
+        eccodes.codes_release(handle)
+
+
+# --- a regular latitude/longitude grid (GEFS-Aerosols) ---------------------------------------
+
+
+@dataclass(frozen=True)
+class LatLonMessage:
+    """One decoded message on a regular latitude/longitude grid, with its aerosol labels.
+
+    `aerosol_type` (GRIB2 code table 4.233: 62000 total aerosol, 62001 dust) and `wavelength_nm`
+    (the band the optical depth is for, low and high) are None for a message with no aerosol
+    product definition. `lats` (degrees north) and `lons` (degrees east, in [-180, 180)) are the
+    grid's axes in the file's order, and `values` has shape (len(lats), len(lons)).
+    """
+
+    discipline: int
+    category: int
+    number: int
+    surface_type: int
+    reference_date: dt.date
+    reference_hour: int
+    step_hours: int
+    aerosol_type: int | None
+    wavelength_nm: tuple[float, float] | None
+    lats: np.ndarray
+    lons: np.ndarray
+    values: np.ma.MaskedArray
+
+
+def _optional_long(handle: int, key: str) -> int | None:
+    try:
+        return _long(handle, key)
+    except eccodes.CodesInternalError:
+        return None
+
+
+def _wavelength_nm(handle: int) -> tuple[float, float] | None:
+    """The aerosol wavelength band in nm, from the scaled values of the product definition."""
+    bounds = []
+    for ordinal in ("First", "Second"):
+        value = _optional_long(handle, f"scaledValueOf{ordinal}Wavelength")
+        factor = _optional_long(handle, f"scaleFactorOf{ordinal}Wavelength")
+        if value is None or factor is None:
+            return None
+        bounds.append(value * 10.0 ** (9 - factor))  # metres are value * 10^-factor
+    return bounds[0], bounds[1]
+
+
+def decode_latlon_message(data: bytes) -> LatLonMessage:
+    """Decode the single GRIB2 message in `data`, which must be on a regular lat/lon grid."""
+    handle = _open(data, "regular_ll", "latitude/longitude")
+    try:
+        ni, nj = _long(handle, "Ni"), _long(handle, "Nj")
+        if _long(handle, "scanningMode") != 0:
+            raise GribError("only west-to-east, north-to-south scanning is supported")
+        eccodes.codes_set(handle, "missingValue", _MISSING)
+        flat = np.asarray(eccodes.codes_get_values(handle), dtype=np.float64)
+        if flat.size != ni * nj:
+            raise GribError(f"{flat.size} values for a {ni} x {nj} grid")
+        lats = np.asarray(eccodes.codes_get_array(handle, "latitudes"), dtype=np.float64)
+        lons = np.asarray(eccodes.codes_get_array(handle, "longitudes"), dtype=np.float64)
+        values = np.ma.array(flat.reshape(nj, ni), mask=(flat == _MISSING).reshape(nj, ni))
+        date = _long(handle, "dataDate")
+        return LatLonMessage(
+            discipline=_long(handle, "discipline"),
+            category=_long(handle, "parameterCategory"),
+            number=_long(handle, "parameterNumber"),
+            surface_type=_long(handle, "typeOfFirstFixedSurface"),
+            reference_date=dt.date(date // 10000, date // 100 % 100, date % 100),
+            reference_hour=_long(handle, "dataTime") // 100,
+            step_hours=_long(handle, "step"),
+            aerosol_type=_optional_long(handle, "aerosolType"),
+            wavelength_nm=_wavelength_nm(handle),
+            lats=lats.reshape(nj, ni)[:, 0],
+            lons=((lons.reshape(nj, ni)[0, :] + 180.0) % 360.0) - 180.0,
+            values=values,
+        )
+    except eccodes.CodesInternalError as error:
+        raise GribError(f"cannot decode the message: {error}") from error
     finally:
         eccodes.codes_release(handle)
