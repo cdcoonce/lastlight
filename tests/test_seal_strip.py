@@ -16,6 +16,7 @@ import pytest
 import seal_helpers as helpers
 
 from lastlight.forecast import Forecast
+from lastlight.privacy.images import image_issues
 from lastlight.seal import tsa
 from lastlight.seal.ledger import (
     AlreadySealedError,
@@ -161,6 +162,39 @@ def test_a_strip_the_privacy_scanner_would_flag_is_never_sealed(
         seal(forecast, ledger, strip=png, tsa_url=TSA_URL)
     assert helpers.snapshot(ledger) == {}
     assert fake.calls == []
+
+
+@pytest.mark.parametrize(
+    "image",
+    [
+        pytest.param(image_factory.plain_jpeg(), id="jpeg"),
+        pytest.param(image_factory.plain_webp(), id="webp"),
+        pytest.param(image_factory.plain_tiff(), id="tiff"),
+    ],
+)
+def test_a_metadata_free_image_that_is_not_a_png_is_never_sealed_as_the_strip(
+    monkeypatch: pytest.MonkeyPatch, ledger: Path, image: bytes
+) -> None:
+    # The ledger names the painting `DD.strip.png` and the site serves it as a PNG. The scanner
+    # finds nothing in these images, and the digest matches the bytes, so only the format check
+    # can refuse them.
+    assert image_issues(image, ".png") == [], "the fixture must be clean to the scanner"
+    forecast = forecast_with(image)
+    fake = install_for(monkeypatch, forecast)
+    with pytest.raises(StripError, match="not a PNG image"):
+        seal(forecast, ledger, strip=image, tsa_url=TSA_URL)
+    assert helpers.snapshot(ledger) == {}
+    assert fake.calls == []
+
+
+@pytest.mark.parametrize("junk", [b"not a png at all", b""])
+def test_bytes_that_are_no_image_at_all_are_refused_as_not_a_png(
+    monkeypatch: pytest.MonkeyPatch, ledger: Path, junk: bytes
+) -> None:
+    forecast = forecast_with(junk)
+    install_for(monkeypatch, forecast)
+    with pytest.raises(StripError, match="not a PNG image"):
+        seal(forecast, ledger, strip=junk, tsa_url=TSA_URL)
 
 
 @pytest.mark.parametrize("existing", ["forecast", "timestamp", "strip", "index"])

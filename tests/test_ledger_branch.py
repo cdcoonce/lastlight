@@ -323,20 +323,66 @@ def test_the_token_is_sent_on_the_push_and_on_no_other_git_command(
     assert all(secret not in call for call in calls)
 
 
+@pytest.fixture
+def git_that_echoes_a_failed_push(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Put a `git` on PATH that runs real git, except that `push` prints its argv and fails.
+
+    Real git never prints the `-c` header in a rejected-push message, so only a git that does
+    (which a verbose or misbehaving one could) can show whether the error text is scrubbed.
+    """
+    assert REAL_GIT is not None
+    bin_dir = tmp_path / "echo-bin"
+    bin_dir.mkdir()
+    wrapper = bin_dir / "git"
+    wrapper.write_text(
+        "#!/bin/sh\n"
+        'for argument in "$@"; do\n'
+        '  if [ "$argument" = push ]; then echo "fatal: push failed: $*" >&2; exit 1; fi\n'
+        "done\n"
+        'exec "$REAL_GIT" "$@"\n'
+    )
+    wrapper.chmod(wrapper.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("REAL_GIT", REAL_GIT)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    return wrapper
+
+
+SECRET = "ghs_exampletokenvalue"
+ENCODED_SECRET = base64.b64encode(f"x-access-token:{SECRET}".encode()).decode()
+
+
 def test_a_failed_push_does_not_echo_the_token(
-    tmp_path: Path, checkout: Path, second_checkout: Path, remote: Path, worktree: Path
+    checkout: Path, worktree: Path, git_that_echoes_a_failed_push: Path
 ) -> None:
-    secret = "ghs_exampletokenvalue"
     open_worktree(checkout, worktree)
     write_seal(worktree)
-    other = tmp_path / "racer"
-    open_worktree(second_checkout, other)
-    write_seal(other, "2026-10-09", "cd" * 32)
-    publish_seal(other)
     with pytest.raises(LedgerBranchError) as caught:
-        publish_seal(worktree, token=secret)
-    assert secret not in str(caught.value)
-    assert base64.b64encode(f"x-access-token:{secret}".encode()).decode() not in str(caught.value)
+        publish_seal(worktree, token=SECRET)
+    message = str(caught.value)
+    # The fake git put the whole command line, header included, in its error: the scrub is
+    # what keeps it out (the placeholder shows the header really was there to scrub).
+    assert "push failed" in message and "***" in message
+    assert SECRET not in message and ENCODED_SECRET not in message
+    assert "AUTHORIZATION" in message, "only the secret is hidden, not the rest of the error"
+
+
+def test_the_command_reports_a_failed_push_without_the_token(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    checkout: Path,
+    worktree: Path,
+    git_that_echoes_a_failed_push: Path,
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", SECRET)
+    open_worktree(checkout, worktree)
+    write_seal(worktree)
+
+    assert main(["ledger-branch", "publish", "--worktree", str(worktree)]) == 1
+
+    shown = capsys.readouterr()
+    assert shown.err.startswith("ledger-branch: ") and "push failed" in shown.err
+    assert SECRET not in shown.out + shown.err
+    assert ENCODED_SECRET not in shown.out + shown.err
 
 
 # --- the command --------------------------------------------------------------------------

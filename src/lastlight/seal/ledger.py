@@ -33,7 +33,7 @@ from pydantic import ValidationError
 
 from lastlight.forecast import Forecast
 from lastlight.geometry import elevation_crossings
-from lastlight.privacy.images import image_issues
+from lastlight.privacy.images import PNG_SIGNATURE, image_issues
 from lastlight.seal import tsa
 from lastlight.seal.canonical import canonical_bytes, digest_hex
 from lastlight.seal.tsa import DEFAULT_TSA_URL, TsaError
@@ -149,9 +149,11 @@ def _check_strip(forecast: Forecast, strip: bytes | None) -> None:
         raise StripError("a strip was given but the forecast names none (strip_sha256 is null)")
     if digest_hex(strip) != declared:
         raise StripError("the strip is not the one the forecast names: its SHA-256 differs")
-    issues = image_issues(strip, ".png")
-    if issues is None:
+    if not strip.startswith(PNG_SIGNATURE):
+        # `image_issues` goes by the bytes, not the name: a clean JPEG or WebP passes it, and
+        # would be sealed as `DD.strip.png` and served as a PNG.
         raise StripError("the strip is not a PNG image")
+    issues = image_issues(strip, ".png")
     if issues:
         raise StripError(f"the strip carries image metadata the privacy rules forbid: {issues[0]}")
 
