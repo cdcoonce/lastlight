@@ -8,9 +8,11 @@
   into one GRIB2 file; and
 * the `.idx` of the crop, in the same format, so the whole fetch path runs against it offline.
 
-The crop is 141 rows by 151 columns of the 3 km grid: 420 km north to south, wide enough that a
-400 km transect toward any sunset azimuth of the year stays inside it. Its cell (70, 140) is the one
-nearest the public reference point, and cell (70, 74) lies about 200 km to the west.
+The crop is 141 rows by 151 columns of the 3 km grid: 150 km south and 270 km north of the
+reference point, 420 km west of it and 30 km east. That is wide enough for a 400 km transect toward
+any sunset azimuth of the year (southwest in winter, northwest in summer) to stay inside it. Its
+cell (50, 140) is the one nearest the public reference point, and cell (50, 74) lies about 200 km
+to the west.
 """
 
 from __future__ import annotations
@@ -33,11 +35,11 @@ CROP_IDX_TEXT = (FIXTURES / "hrrr.t22z.wrfsfcf00.crop.grib2.idx").read_text()
 CROP_GRIB = (FIXTURES / "hrrr.t22z.wrfsfcf00.crop.grib2").read_bytes()
 
 CROP_SHAPE = (141, 151)
-REFERENCE_CELL = (70, 140)
-WEST_CELL = (70, 74)
-WEST_EDGE_CELL = (70, 0)
+REFERENCE_CELL = (50, 140)
+WEST_CELL = (50, 74)
+WEST_EDGE_CELL = (50, 0)
 CORNER_CELL = (0, 0)  # cloud top has no value here: the model has no cloud there
-CLOUD_TOP_MASKED_CELLS = 7693
+CLOUD_TOP_MASKED_CELLS = 6771
 
 # What the real HRRR file holds at those two cells, decoded from the full 1799 x 1059 grid
 # before cropping (and cross-checked with a second, independent GRIB decoder). Both cells carry
@@ -72,8 +74,18 @@ CROP_MESSAGES: dict[str, ByteRange] = {}
 def _index_crop() -> None:
     rows = [line.split(":") for line in CROP_IDX_TEXT.splitlines() if line]
     offsets = [int(row[1]) for row in rows] + [len(CROP_GRIB)]
-    names = ["VIS", "PWAT", "AOTK", "LCDC", "MCDC", "HCDC", "TCDC", "HGT_CLOUD_BASE", "HGT_CLOUD_TOP"]
-    for name, start, stop in zip(names, offsets, offsets[1:], strict=True):
+    names = [
+        "VIS",
+        "PWAT",
+        "AOTK",
+        "LCDC",
+        "MCDC",
+        "HCDC",
+        "TCDC",
+        "HGT_CLOUD_BASE",
+        "HGT_CLOUD_TOP",
+    ]
+    for name, start, stop in zip(names, offsets[:-1], offsets[1:], strict=True):
         CROP_MESSAGES[name] = ByteRange(start, stop - 1)
 
 
@@ -122,7 +134,11 @@ class FakeTransport:
         total = 0
         for call in self.ranged_gets():
             assert call.byte_range is not None
-            stop = len(self.files[call.url]) if call.byte_range.end is None else call.byte_range.end + 1
+            stop = (
+                len(self.files[call.url])
+                if call.byte_range.end is None
+                else call.byte_range.end + 1
+            )
             total += stop - call.byte_range.start
         return total
 

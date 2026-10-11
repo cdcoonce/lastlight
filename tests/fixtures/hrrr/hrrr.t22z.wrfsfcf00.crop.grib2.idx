@@ -1,9 +1,9 @@
 1:0:d=2026101022:VIS:surface:anl:
-2:57077:d=2026101022:PWAT:entire atmosphere (considered as a single layer):anl:
-3:112297:d=2026101022:AOTK:entire atmosphere (considered as a single layer):anl:
-4:112485:d=2026101022:LCDC:low cloud layer:anl:
-5:169692:d=2026101022:MCDC:middle cloud layer:anl:
-6:203573:d=2026101022:HCDC:high cloud layer:anl:
-7:234190:d=2026101022:TCDC:entire atmosphere:anl:
-8:264149:d=2026101022:HGT:cloud base:anl:
-9:330857:d=2026101022:HGT:cloud top:anl:
+2:57615:d=2026101022:PWAT:entire atmosphere (considered as a single layer):anl:
+3:112920:d=2026101022:AOTK:entire atmosphere (considered as a single layer):anl:
+4:113108:d=2026101022:LCDC:low cloud layer:anl:
+5:170909:d=2026101022:MCDC:middle cloud layer:anl:
+6:203061:d=2026101022:HCDC:high cloud layer:anl:
+7:232844:d=2026101022:TCDC:entire atmosphere:anl:
+8:263303:d=2026101022:HGT:cloud base:anl:
+9:330026:d=2026101022:HGT:cloud top:anl:

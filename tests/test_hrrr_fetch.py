@@ -36,7 +36,7 @@ def _fetch(cache: Path, transport: support.FakeTransport, names: list[str] | Non
     return fetch_fields(DATE, HOUR, 0, fields, cache, transport=transport)
 
 
-# --- latest_run -----------------------------------------------------------------------------------------
+# --- latest_run -----------------------------------------------------------------------------------
 
 
 def _bucket_with_idx_for(*cycles: tuple[dt.date, int]) -> support.FakeTransport:
@@ -125,7 +125,7 @@ def test_latest_run_refuses_a_naive_datetime() -> None:
         latest_run(dt.datetime(2026, 10, 11, 0, 27), transport=support.FakeTransport({}))
 
 
-# --- fetch_idx -----------------------------------------------------------------------------------------
+# --- fetch_idx ------------------------------------------------------------------------------------
 
 
 def test_fetch_idx_reads_and_parses_the_idx_of_the_requested_file() -> None:
@@ -139,7 +139,7 @@ def test_fetch_idx_reads_and_parses_the_idx_of_the_requested_file() -> None:
     assert call.byte_range is None
 
 
-# --- fetch_messages: byte ranges and the cache --------------------------------------------------------------
+# --- fetch_messages: byte ranges and the cache ----------------------------------------------------
 
 
 def test_fetch_messages_asks_for_each_wanted_message_by_exact_byte_range(tmp_path: Path) -> None:
@@ -148,7 +148,13 @@ def test_fetch_messages_asks_for_each_wanted_message_by_exact_byte_range(tmp_pat
     messages = fetch_messages(DATE, HOUR, 0, DEFAULT_FIELDS, tmp_path, transport=transport)
 
     asked = {call.byte_range for call in transport.ranged_gets()}
-    assert asked == set(support.CROP_MESSAGES.values())
+    # The idx gives the last message no end; every other range closes where the next begins.
+    last = support.CROP_MESSAGES["HGT_CLOUD_TOP"]
+    expected = {
+        ByteRange(last.start, None) if byte_range == last else byte_range
+        for byte_range in support.CROP_MESSAGES.values()
+    }
+    assert asked == expected
     assert len(transport.ranged_gets()) == len(DEFAULT_FIELDS)
     for name, data in messages.items():
         assert data == support.crop_message(name)
@@ -163,8 +169,11 @@ def test_fetch_messages_downloads_only_the_wanted_bytes_never_the_whole_file(
 
     assert transport.bytes_served_by_ranges() == len(support.crop_message("TCDC"))
     assert transport.bytes_served_by_ranges() < len(support.CROP_GRIB) / 4
-    assert not [call for call in transport.calls if call.method == "GET" and not call.byte_range
-                and call.url == hrrr.grib_url(DATE, HOUR, 0)]
+    assert not [
+        call
+        for call in transport.calls
+        if call.method == "GET" and not call.byte_range and call.url == hrrr.grib_url(DATE, HOUR, 0)
+    ]
 
 
 def test_a_second_fetch_is_served_from_the_cache_and_asks_for_no_ranges(tmp_path: Path) -> None:
@@ -237,21 +246,17 @@ def test_a_range_that_is_not_a_grib_message_is_refused_and_not_cached(tmp_path: 
     transport.files[idx_url(DATE, HOUR, 0)] = stale.encode()
 
     with pytest.raises(HrrrError, match="GRIB"):
-        fetch_messages(
-            DATE, HOUR, 0, [hrrr.field_spec("PWAT")], tmp_path, transport=transport
-        )
+        fetch_messages(DATE, HOUR, 0, [hrrr.field_spec("PWAT")], tmp_path, transport=transport)
 
     assert list(tmp_path.iterdir()) == []
 
 
 def test_a_missing_file_surfaces_as_a_fetch_error(tmp_path: Path) -> None:
     with pytest.raises(FetchError, match="404"):
-        fetch_messages(
-            DATE, HOUR, 0, DEFAULT_FIELDS, tmp_path, transport=support.FakeTransport({})
-        )
+        fetch_messages(DATE, HOUR, 0, DEFAULT_FIELDS, tmp_path, transport=support.FakeTransport({}))
 
 
-# --- fetch_fields -------------------------------------------------------------------------------------------
+# --- fetch_fields ---------------------------------------------------------------------------------
 
 
 def test_fetch_fields_decodes_every_default_field_onto_one_grid(tmp_path: Path) -> None:
@@ -289,8 +294,12 @@ def test_fetch_fields_refuses_a_message_that_is_not_the_field_the_idx_promised(
     # Swap the labels of the first two idx lines: asking for VIS now downloads PWAT's bytes,
     # which are a perfectly good GRIB message of the wrong parameter.
     lines = support.CROP_IDX_TEXT.splitlines()
-    swapped = lines[0].replace(":VIS:surface:", ":PWAT:x:") + "\n" + lines[1].replace(
-        ":PWAT:entire atmosphere (considered as a single layer):", ":VIS:surface:"
+    swapped = (
+        lines[0].replace(":VIS:surface:", ":PWAT:x:")
+        + "\n"
+        + lines[1].replace(
+            ":PWAT:entire atmosphere (considered as a single layer):", ":VIS:surface:"
+        )
     )
     transport = support.crop_transport()
     transport.files[idx_url(DATE, HOUR, 0)] = ("\n".join([swapped, *lines[2:]]) + "\n").encode()
@@ -323,7 +332,8 @@ def test_fetch_fields_refuses_fields_on_different_grids(
         decoded = real_decode(data)
         if decoded.number == 3 and decoded.category == 1:  # PWAT
             return dataclasses.replace(
-                decoded, grid=dataclasses.replace(decoded.grid, first_lat=decoded.grid.first_lat + 1)
+                decoded,
+                grid=dataclasses.replace(decoded.grid, first_lat=decoded.grid.first_lat + 1),
             )
         return decoded
 

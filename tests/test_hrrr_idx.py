@@ -76,7 +76,7 @@ def test_default_fields_carry_the_idx_labels_and_units() -> None:
     }
 
 
-# --- parsing ---------------------------------------------------------------------------------------
+# --- parsing --------------------------------------------------------------------------------------
 
 
 def test_parse_idx_reads_every_message_of_a_real_idx() -> None:
@@ -126,7 +126,7 @@ def test_parse_idx_refuses_offsets_that_do_not_increase() -> None:
         parse_idx(text)
 
 
-# --- selecting byte ranges ---------------------------------------------------------------------------
+# --- selecting byte ranges ------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("name", list(EXPECTED_RANGES))
@@ -195,11 +195,13 @@ def test_a_field_that_matches_two_messages_is_a_loud_error() -> None:
         select_ranges(parse_idx(text), [_spec("VIS")])
 
 
-# --- URLs --------------------------------------------------------------------------------------------
+# --- URLs -----------------------------------------------------------------------------------------
 
 
 def test_grib_and_idx_urls_name_the_public_bucket_layout() -> None:
-    grib = "https://noaa-hrrr-bdp-pds.s3.amazonaws.com/hrrr.20261010/conus/hrrr.t22z.wrfsfcf00.grib2"
+    grib = (
+        "https://noaa-hrrr-bdp-pds.s3.amazonaws.com/hrrr.20261010/conus/hrrr.t22z.wrfsfcf00.grib2"
+    )
 
     assert grib_url(dt.date(2026, 10, 10), 22, 0) == grib
     assert idx_url(dt.date(2026, 10, 10), 22, 0) == grib + ".idx"

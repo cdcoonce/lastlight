@@ -51,9 +51,10 @@ def _nearest_cell_by_brute_force(
 ) -> tuple[tuple[int, int], float]:
     p1 = math.radians(lat)
     p2 = np.radians(fields.grid.lats)
-    a = np.sin((p2 - p1) / 2) ** 2 + math.cos(p1) * np.cos(p2) * np.sin(
-        np.radians(fields.grid.lons - lon) / 2
-    ) ** 2
+    a = (
+        np.sin((p2 - p1) / 2) ** 2
+        + math.cos(p1) * np.cos(p2) * np.sin(np.radians(fields.grid.lons - lon) / 2) ** 2
+    )
     distance = 2 * 6371.0 * np.arcsin(np.sqrt(a))
     cell = np.unravel_index(np.argmin(distance), distance.shape)
     return (int(cell[0]), int(cell[1])), float(distance[cell])
@@ -63,7 +64,7 @@ def _transect_points(distances: list[float]) -> list[tuple[float, float]]:
     return geometry.transect(EVENING, REF_LAT, REF_LON, distances)
 
 
-# --- shape of the result ------------------------------------------------------------------------------
+# --- shape of the result --------------------------------------------------------------------------
 
 
 def test_one_row_per_point_and_field_in_point_then_field_order(fields: HrrrFields) -> None:
@@ -98,11 +99,11 @@ def test_no_points_gives_no_rows(fields: HrrrFields) -> None:
 
 
 def test_the_default_transect_is_every_25_km_out_to_400_km() -> None:
-    assert TRANSECT_DISTANCES_KM == tuple(range(0, 401, 25))
+    assert tuple(range(0, 401, 25)) == TRANSECT_DISTANCES_KM
     assert len(TRANSECT_DISTANCES_KM) == 17
 
 
-# --- values ---------------------------------------------------------------------------------------------
+# --- values ---------------------------------------------------------------------------------------
 
 
 def test_the_reference_point_samples_the_cell_the_real_file_holds_there(fields: HrrrFields) -> None:
@@ -122,9 +123,7 @@ def test_a_point_on_the_second_cell_samples_the_second_cell(fields: HrrrFields) 
 
     assert {s.cell for s in samples} == {support.WEST_CELL}
     for sample in samples:
-        assert sample.value == pytest.approx(
-            support.EXPECTED_AT_WEST_CELL[sample.field], abs=1e-3
-        )
+        assert sample.value == pytest.approx(support.EXPECTED_AT_WEST_CELL[sample.field], abs=1e-3)
 
 
 def test_each_transect_point_takes_the_value_of_its_brute_force_nearest_cell(
@@ -141,7 +140,10 @@ def test_each_transect_point_takes_the_value_of_its_brute_force_nearest_cell(
         assert sample.cell_distance_km == pytest.approx(distance, abs=1e-6)
         assert sample.cell_distance_km < 2.2
         expected = fields.fields[sample.field].values[cell]
-        assert sample.value == pytest.approx(float(expected))
+        if np.ma.is_masked(expected):
+            assert sample.value is None
+        else:
+            assert sample.value == pytest.approx(float(expected))
 
 
 def test_the_transect_moves_through_the_grid_so_the_samples_change(fields: HrrrFields) -> None:
@@ -161,11 +163,13 @@ def test_the_full_400_km_transect_lies_inside_the_crop_on_every_season(fields: H
         assert len(sample_transect(fields, points)) == 17 * len(DEFAULT_FIELDS)
 
 
-# --- cells the model leaves empty -----------------------------------------------------------------------
+# --- cells the model leaves empty -----------------------------------------------------------------
 
 
 def test_a_cell_the_model_masks_out_gives_none_with_its_units(fields: HrrrFields) -> None:
-    point = _cell_point(fields, support.CORNER_CELL)  # cloud top has no value in this corner of the crop
+    point = _cell_point(
+        fields, support.CORNER_CELL
+    )  # cloud top has no value in this corner of the crop
 
     samples = {s.field: s for s in sample_transect(fields, [point])}
 
@@ -198,7 +202,7 @@ def test_a_nan_in_the_decoded_data_is_an_error_not_a_nan_sample(fields: HrrrFiel
         sample_transect(broken, [(REF_LAT, REF_LON)])
 
 
-# --- outside the grid ----------------------------------------------------------------------------------
+# --- outside the grid -----------------------------------------------------------------------------
 
 
 def test_a_point_far_outside_the_grid_fails_loudly(fields: HrrrFields) -> None:
@@ -260,7 +264,7 @@ def test_longitudes_given_east_of_greenwich_as_0_to_360_are_not_accepted_silentl
         sample_transect(fields, [(REF_LAT, 247.93)])
 
 
-# --- end to end ----------------------------------------------------------------------------------------
+# --- end to end -----------------------------------------------------------------------------------
 
 
 def test_a_fresh_fetch_samples_the_same_as_the_module_fixture(tmp_path: Path) -> None:

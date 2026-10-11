@@ -33,9 +33,10 @@ IDENTITIES = {
 
 def _haversine_km(lat1: float, lon1: float, lat2: np.ndarray, lon2: np.ndarray) -> np.ndarray:
     p1, p2 = math.radians(lat1), np.radians(lat2)
-    a = np.sin((p2 - p1) / 2) ** 2 + math.cos(p1) * np.cos(p2) * np.sin(
-        np.radians(lon2 - lon1) / 2
-    ) ** 2
+    a = (
+        np.sin((p2 - p1) / 2) ** 2
+        + math.cos(p1) * np.cos(p2) * np.sin(np.radians(lon2 - lon1) / 2) ** 2
+    )
     return 2 * 6371.0 * np.arcsin(np.sqrt(a))
 
 
@@ -79,7 +80,7 @@ def test_the_crop_is_a_small_sub_grid_well_inside_the_two_megabyte_budget() -> N
     assert decoded.values.shape == support.CROP_SHAPE
 
 
-# --- identity and grid ------------------------------------------------------------------------------
+# --- identity and grid ----------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("name", list(IDENTITIES))
@@ -147,7 +148,7 @@ def test_the_grid_runs_west_to_east_and_south_to_north() -> None:
     assert (np.diff(lats[:, column]) > 0).all()
 
 
-# --- masked cells -------------------------------------------------------------------------------------
+# --- masked cells ---------------------------------------------------------------------------------
 
 
 def test_cells_the_file_masks_out_are_masked_not_a_sentinel_number() -> None:
@@ -173,7 +174,7 @@ def test_values_are_plain_finite_floats_where_not_masked() -> None:
         assert np.isfinite(decoded.values.compressed()).all()
 
 
-# --- bad input ----------------------------------------------------------------------------------------
+# --- bad input ------------------------------------------------------------------------------------
 
 
 def test_bytes_that_are_not_grib_are_refused() -> None:

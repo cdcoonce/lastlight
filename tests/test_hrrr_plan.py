@@ -39,14 +39,20 @@ def _no_network() -> support.FakeTransport:
 LONG_AFTER = dt.datetime(2026, 12, 1, tzinfo=UTC)
 
 
-# --- an evening that is already over --------------------------------------------------------------------
+# --- an evening that is already over --------------------------------------------------------------
 
 
 def test_a_past_evening_reads_the_analysis_of_the_target_hour_with_no_network() -> None:
     transport = _no_network()
 
     plan = plan_run(
-        EVENING, cycle_hour=None, forecast_hour=None, now_utc=LONG_AFTER, transport=transport
+        EVENING,
+        REF_LAT,
+        REF_LON,
+        cycle_hour=None,
+        forecast_hour=None,
+        now_utc=LONG_AFTER,
+        transport=transport,
     )
 
     assert _cycle_instant(plan) == _target_hour(EVENING)
@@ -56,7 +62,13 @@ def test_a_past_evening_reads_the_analysis_of_the_target_hour_with_no_network() 
 
 def test_the_plan_is_a_frozen_run_plan() -> None:
     plan = plan_run(
-        EVENING, cycle_hour=None, forecast_hour=None, now_utc=LONG_AFTER, transport=_no_network()
+        EVENING,
+        REF_LAT,
+        REF_LON,
+        cycle_hour=None,
+        forecast_hour=None,
+        now_utc=LONG_AFTER,
+        transport=_no_network(),
     )
 
     assert isinstance(plan, RunPlan)
@@ -64,10 +76,10 @@ def test_the_plan_is_a_frozen_run_plan() -> None:
         plan.cycle_hour = 1  # type: ignore[misc]
 
 
-# --- an explicit cycle hour or forecast hour ----------------------------------------------------------------
+# --- an explicit cycle hour or forecast hour ------------------------------------------------------
 
 
-@pytest.mark.parametrize("cycle_hour", [0, 5, 12, 18, 23])
+@pytest.mark.parametrize("cycle_hour", [0, 6, 10, 12, 18, 22, 23])
 def test_an_explicit_cycle_hour_is_the_latest_such_cycle_at_or_before_the_target(
     cycle_hour: int,
 ) -> None:
@@ -75,6 +87,8 @@ def test_an_explicit_cycle_hour_is_the_latest_such_cycle_at_or_before_the_target
 
     plan = plan_run(
         EVENING,
+        REF_LAT,
+        REF_LON,
         cycle_hour=cycle_hour,
         forecast_hour=None,
         now_utc=LONG_AFTER,
@@ -90,7 +104,13 @@ def test_an_explicit_cycle_hour_is_the_latest_such_cycle_at_or_before_the_target
 
 def test_an_explicit_forecast_hour_picks_the_cycle_that_makes_it_valid_at_the_target() -> None:
     plan = plan_run(
-        EVENING, cycle_hour=None, forecast_hour=5, now_utc=LONG_AFTER, transport=_no_network()
+        EVENING,
+        REF_LAT,
+        REF_LON,
+        cycle_hour=None,
+        forecast_hour=5,
+        now_utc=LONG_AFTER,
+        transport=_no_network(),
     )
 
     assert plan.forecast_hour == 5
@@ -99,7 +119,13 @@ def test_an_explicit_forecast_hour_picks_the_cycle_that_makes_it_valid_at_the_ta
 
 def test_an_explicit_cycle_and_forecast_hour_are_taken_as_given() -> None:
     plan = plan_run(
-        EVENING, cycle_hour=22, forecast_hour=3, now_utc=LONG_AFTER, transport=_no_network()
+        EVENING,
+        REF_LAT,
+        REF_LON,
+        cycle_hour=22,
+        forecast_hour=3,
+        now_utc=LONG_AFTER,
+        transport=_no_network(),
     )
 
     assert (plan.cycle_hour, plan.forecast_hour) == (22, 3)
@@ -109,26 +135,36 @@ def test_an_explicit_cycle_and_forecast_hour_are_taken_as_given() -> None:
 def test_an_explicit_cycle_and_forecast_hour_need_not_land_on_the_target() -> None:
     # Asking for run 22 at forecast hour 0 is a deliberate choice, whatever hour that is valid.
     plan = plan_run(
-        EVENING, cycle_hour=22, forecast_hour=0, now_utc=LONG_AFTER, transport=_no_network()
+        EVENING,
+        REF_LAT,
+        REF_LON,
+        cycle_hour=22,
+        forecast_hour=0,
+        now_utc=LONG_AFTER,
+        transport=_no_network(),
     )
 
     assert (plan.cycle_hour, plan.forecast_hour) == (22, 0)
     assert plan.cycle_date == EVENING  # the 22 cycle just before the sun reaches the horizon
 
 
-# --- an evening still to come ----------------------------------------------------------------------------
+# --- an evening still to come ---------------------------------------------------------------------
 
 
 def test_an_evening_still_ahead_uses_the_newest_complete_run_and_counts_forward_to_it() -> None:
     target = _target_hour(EVENING)
     now = target - timedelta(hours=6, minutes=27)
     newest = (now - timedelta(hours=2)).replace(minute=0, second=0, microsecond=0)
-    transport = support.FakeTransport(
-        {hrrr.idx_url(newest.date(), newest.hour, 18): b""}
-    )
+    transport = support.FakeTransport({hrrr.idx_url(newest.date(), newest.hour, 18): b""})
 
     plan = plan_run(
-        EVENING, cycle_hour=None, forecast_hour=None, now_utc=now, transport=transport
+        EVENING,
+        REF_LAT,
+        REF_LON,
+        cycle_hour=None,
+        forecast_hour=None,
+        now_utc=now,
+        transport=transport,
     )
 
     assert _cycle_instant(plan) == newest
@@ -143,7 +179,13 @@ def test_a_target_hour_that_is_only_just_past_is_still_read_from_the_newest_run(
     transport = support.FakeTransport({hrrr.idx_url(newest.date(), newest.hour, 18): b""})
 
     plan = plan_run(
-        EVENING, cycle_hour=None, forecast_hour=None, now_utc=now, transport=transport
+        EVENING,
+        REF_LAT,
+        REF_LON,
+        cycle_hour=None,
+        forecast_hour=None,
+        now_utc=now,
+        transport=transport,
     )
 
     assert _cycle_instant(plan) == newest
@@ -157,7 +199,15 @@ def test_a_target_hour_beyond_the_forecast_range_is_a_clear_error() -> None:
     transport = support.FakeTransport({hrrr.idx_url(newest.date(), newest.hour, 18): b""})
 
     with pytest.raises(HrrrError, match="forecast hour"):
-        plan_run(EVENING, cycle_hour=None, forecast_hour=None, now_utc=now, transport=transport)
+        plan_run(
+            EVENING,
+            REF_LAT,
+            REF_LON,
+            cycle_hour=None,
+            forecast_hour=None,
+            now_utc=now,
+            transport=transport,
+        )
 
 
 def test_an_explicit_forecast_hour_the_cycle_cannot_reach_is_a_clear_error() -> None:
@@ -170,6 +220,8 @@ def test_an_explicit_forecast_hour_the_cycle_cannot_reach_is_a_clear_error() -> 
     with pytest.raises(HrrrError, match="forecast hour"):
         plan_run(
             EVENING,
+            REF_LAT,
+            REF_LON,
             cycle_hour=None,
             forecast_hour=forecast_hour,
             now_utc=LONG_AFTER,
@@ -181,6 +233,8 @@ def test_naive_now_is_refused() -> None:
     with pytest.raises(ValueError, match="timezone"):
         plan_run(
             EVENING,
+            REF_LAT,
+            REF_LON,
             cycle_hour=None,
             forecast_hour=None,
             now_utc=dt.datetime(2026, 12, 1),

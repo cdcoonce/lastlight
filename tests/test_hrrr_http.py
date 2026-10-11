@@ -62,7 +62,7 @@ def _http_error(code: int) -> urllib.error.HTTPError:
     return urllib.error.HTTPError(URL, code, "reason", Message(), None)
 
 
-# --- ByteRange ---------------------------------------------------------------------------------------
+# --- ByteRange ------------------------------------------------------------------------------------
 
 
 def test_a_closed_range_renders_as_an_inclusive_range_header() -> None:
@@ -79,7 +79,7 @@ def test_a_range_must_be_ordered_and_not_negative(start: int, end: int) -> None:
         ByteRange(start, end)
 
 
-# --- get -----------------------------------------------------------------------------------------------
+# --- get ------------------------------------------------------------------------------------------
 
 
 def test_get_with_a_range_sends_one_range_header_and_returns_the_slice(
@@ -163,7 +163,7 @@ def test_get_turns_a_timeout_into_a_fetch_error(monkeypatch: pytest.MonkeyPatch)
         UrllibTransport().get(URL)
 
 
-# --- exists --------------------------------------------------------------------------------------------
+# --- exists ---------------------------------------------------------------------------------------
 
 
 def test_exists_sends_a_head_request(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -13,6 +13,7 @@ Regenerate them with `uv run python tools/make_hrrr_fixture.py` (needs the netwo
 into this directory). The script prints the value of every field at the two anchor cells the
 tests assert, and fails if a cropped value differs from the original.
 
-The sub-grid is 420 km north to south and 151 cells wide, so that the default 400 km transect
-toward any sunset azimuth of the year stays inside it. Nothing here locates anything beyond the
+The sub-grid reaches 150 km south, 270 km north and 420 km west of the reference point (151 by
+141 cells), so that the default 400 km transect toward any sunset azimuth of the year (southwest
+in winter, northwest in summer) stays inside it. Nothing here locates anything beyond the
 public reference point's metro area.
