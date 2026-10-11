@@ -80,6 +80,10 @@ class Probe(HTMLParser):
     def headings(self) -> list[str]:
         return [element.text for element in self.elements if element.tag in {"h1", "h2", "h3"}]
 
+    def ids(self) -> list[str]:
+        """Every `id` attribute on the page, in document order."""
+        return [element.attrs["id"] for element in self.elements if element.attrs.get("id")]
+
     def hrefs(self) -> list[str]:
         return [element.attrs["href"] for element in self.find("a") if "href" in element.attrs]
 

@@ -320,6 +320,28 @@ def test_the_internal_links_all_resolve_and_the_external_ones_are_the_public_rep
                 assert (site / href.split("#")[0]).is_file(), (page.name, href)
 
 
+def test_every_fragment_link_points_at_an_id_on_the_page_it_names(site: Path) -> None:
+    checked = 0
+    for page in html_pages(site):
+        probe = read_page(site, page.name)
+        for href in probe.hrefs():
+            target, _, fragment = href.partition("#")
+            if not fragment:
+                continue
+            checked += 1
+            ids = probe.ids() if not target else read_page(site, target).ids()
+            assert fragment in ids, f"{page.name}: {href} points at no element"
+    assert checked >= len(html_pages(site)), "every page has at least its skip link"
+
+
+def test_the_skip_link_leads_to_the_main_landmark(site: Path) -> None:
+    for page in html_pages(site):
+        probe = read_page(site, page.name)
+        assert probe.hrefs()[0] == "#main", page.name
+        (main,) = probe.find("main")
+        assert main.attrs.get("id") == "main", page.name
+
+
 def _luminance(color: str) -> float:
     channels = [int(color[index : index + 2], 16) / 255 for index in (1, 3, 5)]
     linear = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
@@ -446,3 +468,7 @@ def test_the_page_probe_is_a_real_html_parser() -> None:
     assert probe.texts("li") == ["x y", "z"]
     assert probe.find("li", "b")[0].attrs["class"] == "a b"
     assert probe.find("img")[0].attrs == {"src": "p.png", "alt": "q"}
+    assert Probe('<main id="m"><p id="">x</p><a id="top" href="#m">y</a></main>').ids() == [
+        "m",
+        "top",
+    ]
