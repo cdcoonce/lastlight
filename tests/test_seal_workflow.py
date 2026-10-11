@@ -4,7 +4,7 @@ The behaviour of the seal (idempotence, never late, verification) is tested wher
 Python (`test_daily.py`, `test_ledger_branch.py`). What only the YAML can get wrong is checked
 here: the trigger, who may write, that runs queue instead of cancelling, that every action is
 pinned, and that the steps run in the order the honesty rules need (scan before commit, push
-only with the token, the almanac rebuild only after a push that happened).
+only with the token).
 """
 
 from __future__ import annotations
@@ -95,10 +95,16 @@ def test_runs_queue_instead_of_cancelling_each_other(workflow: dict[Any, Any]) -
     assert workflow["concurrency"] == {"group": "seal", "cancel-in-progress": False}
 
 
-def test_the_token_can_write_contents_and_dispatch_workflows_and_nothing_else(
+def test_the_workflow_is_named_seal_because_the_site_deploy_waits_on_that_name(
     workflow: dict[Any, Any],
 ) -> None:
-    assert workflow["permissions"] == {"contents": "write", "actions": "write"}
+    # The almanac's deploy runs on `workflow_run` of the workflow named `seal`; renaming this
+    # one would silently stop the site from ever rebuilding.
+    assert workflow["name"] == "seal"
+
+
+def test_the_token_can_write_contents_and_nothing_else(workflow: dict[Any, Any]) -> None:
+    assert workflow["permissions"] == {"contents": "write"}
 
 
 def test_there_is_one_ubuntu_job_with_a_fifteen_minute_limit(workflow: dict[Any, Any]) -> None:
@@ -173,17 +179,14 @@ def test_the_token_is_given_to_the_publish_step_alone(steps: list[dict[str, Any]
     assert carrying[0]["env"]["GITHUB_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
 
 
-def test_the_almanac_is_rebuilt_only_after_a_push_and_only_if_the_workflow_exists(
-    steps: list[dict[str, Any]],
-) -> None:
+def test_the_seal_does_not_know_the_site_exists(steps: list[dict[str, Any]]) -> None:
+    # The site rebuilds itself when this workflow completes (`workflow_run`), so the seal job
+    # neither dispatches it nor holds the permission that would let it.
+    text = SEAL.read_text()
+    assert "gh workflow" not in text and "pages" not in text.lower()
+    assert "actions: write" not in text
     publish = steps[step_index(steps, "lastlight ledger-branch publish")]
-    assert publish["id"] == "publish"
-    rebuild = steps[step_index(steps, "gh workflow run pages.yml --ref main")]
-    assert steps.index(rebuild) > steps.index(publish)
-    assert rebuild["if"] == "steps.publish.outputs.pushed == 'true'"
-    assert "[ -f .github/workflows/pages.yml ]" in rebuild["run"]
-    assert rebuild["env"]["GH_TOKEN"] == "${{ github.token }}"
-    assert "else" in rebuild["run"], "a missing pages.yml must not fail the seal"
+    assert publish is steps[-1], "pushing the ledger is the last thing the job does"
 
 
 def test_no_step_moves_git_history_by_hand_or_forces_anything() -> None:
