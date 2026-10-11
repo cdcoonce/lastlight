@@ -147,7 +147,6 @@ def _read_evening(row: _Row, ledger_dir: Path) -> Evening:
     mean, spread = _number(vividness.get("mean")), _number(vividness.get("sd"))
     points = document.get("curve")
     curve = [_mapping(point) for point in points] if isinstance(points, list) else []
-    painting = strip_path(ledger_dir, row.date)
     return Evening(
         date=row.date,
         digest=digest,
@@ -159,8 +158,22 @@ def _read_evening(row: _Row, ledger_dir: Path) -> Evening:
         notes=_text(document.get("notes")),
         verified=verified,
         reason=reason,
-        strip=painting if painting.is_file() and not painting.is_symlink() else None,
+        strip=_painting(ledger_dir, row.date),
     )
+
+
+def _painting(ledger_dir: Path, date: dt.date) -> Path | None:
+    """The painting of `date` if it is a plain file that really lives inside the ledger.
+
+    A painting that is itself a symlink is never used, and a symlinked directory above it may not
+    lead out of the ledger, or a ledger could publish whatever image its links point at.
+    """
+    painting = strip_path(ledger_dir, date)
+    if not painting.is_file() or painting.is_symlink():
+        return None
+    if not painting.resolve().is_relative_to(ledger_dir.resolve()):
+        return None
+    return painting
 
 
 def _document(sealed: bytes | None) -> dict[str, Any]:

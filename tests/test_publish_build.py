@@ -170,6 +170,20 @@ def test_an_unreadable_strip_is_a_warning_and_a_placeholder_not_a_failed_build(
     assert "No painting for this date" in (out / "2026-10-12.html").read_text(encoding="utf-8")
 
 
+def test_a_painting_behind_a_symlinked_directory_is_not_published(
+    ledger_dir: Path, tmp_path: Path
+) -> None:
+    month = ledger_dir / "2026" / "10"
+    moved = tmp_path / "outside-month"
+    month.rename(moved)
+    month.symlink_to(moved, target_is_directory=True)
+    out = tmp_path / "site"
+    assert build_site(ledger_dir, out).ok
+    assert [path for path in out.rglob("*.png")] == []
+    page = (out / "2026-10-13.html").read_text(encoding="utf-8")
+    assert "No painting for this date" in page and "<img" not in page
+
+
 def test_a_missing_ledger_is_a_warning_and_an_empty_site(tmp_path: Path) -> None:
     report = build_site(tmp_path / "absent", tmp_path / "site")
     assert report.ok and report.evenings == 0

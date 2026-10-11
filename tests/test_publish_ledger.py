@@ -101,6 +101,45 @@ def test_a_missing_painting_is_none_and_a_present_one_is_its_path(ledger_dir: Pa
     assert evening_of(ledger_dir, 1).strip is not None
 
 
+@pytest.mark.parametrize("target", ["outside", "inside"])
+def test_a_painting_that_is_a_symlink_is_left_out(
+    ledger_dir: Path, tmp_path: Path, target: str
+) -> None:
+    """Whether the link leads out of the ledger or to another file inside it."""
+    if target == "outside":
+        real = tmp_path / "elsewhere.png"
+        real.write_bytes(factory.strip_png((1, 2, 3)))
+    else:
+        real = factory.strip_path(ledger_dir, OLDEST)
+    painting = factory.strip_path(ledger_dir, NEWEST)
+    painting.unlink()
+    painting.symlink_to(real)
+    assert evening_of(ledger_dir).strip is None
+    assert evening_of(ledger_dir, 1).strip is not None
+
+
+@pytest.mark.parametrize("linked", ["2026", "2026/10"])
+def test_a_painting_reached_through_a_symlinked_directory_is_left_out(
+    ledger_dir: Path, tmp_path: Path, linked: str
+) -> None:
+    moved = tmp_path / "outside" / linked.replace("/", "-")
+    moved.parent.mkdir()
+    (ledger_dir / linked).rename(moved)
+    (ledger_dir / linked).symlink_to(moved, target_is_directory=True)
+    ledger = read_ledger(ledger_dir)
+    assert [evening.date for evening in ledger.evenings] == list(reversed(factory.DATES))
+    assert [evening.strip for evening in ledger.evenings] == [None, None, None]
+
+
+def test_a_ledger_directory_that_is_itself_a_symlink_still_has_its_paintings(
+    ledger_dir: Path, tmp_path: Path
+) -> None:
+    link = tmp_path / "linked-ledger"
+    link.symlink_to(ledger_dir, target_is_directory=True)
+    ledger = read_ledger(link)
+    assert all(evening.strip is not None for evening in ledger.evenings)
+
+
 def test_an_indexed_date_without_its_files_is_listed_unverified(ledger_dir: Path) -> None:
     ledger_paths(ledger_dir, NEWEST).forecast.unlink()
     gone = evening_of(ledger_dir)
