@@ -62,6 +62,7 @@ Python 3.12, `uv`, `src/lastlight/`, pytest, ruff. Small modules with one job ea
 | `geometry` | Solar position (own NOAA-equation implementation, pvlib used only as a test oracle), sun-elevation series, elevation bins, sightline transect points along the solar azimuth |
 | `site` | Public reference point; private site loader that refuses to run in CI |
 | `inputs.hrrr` | Byte-range fetch of selected HRRR fields from the public AWS bucket via `.idx`; sample along the transect |
+| `inputs.http`, `inputs.grib` | Shared by the input modules: the HTTP transport (existence checks, byte ranges, loud failures) and the one place a GRIB2 library is imported (ecCodes) |
 | `inputs.goes` | GOES-18 ABI clear-sky mask along the transect at twilight (regime labels) |
 | `inputs.*` | Later: RRFS-SD dust and smoke, CAMS aerosol and ozone, AirNow PM |
 | `render` | Spectral atmosphere model → radiance per (sun elevation, view elevation) → CIE XYZ → camera RGB and sRGB; v0 single scattering, v1 Bruneton precomputed-scattering lookup table |
