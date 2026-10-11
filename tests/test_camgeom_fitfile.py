@@ -33,7 +33,7 @@ from lastlight.camgeom.fitfile import (
 )
 from lastlight.camgeom.mask import sky_mask, write_mask_png
 from lastlight.camgeom.model import CameraModel, pixels_per_degree
-from lastlight.camgeom.orientation import hfov_is_pinned
+from lastlight.camgeom.orientation import Orientation, hfov_is_pinned
 from lastlight.privacy.rules import text_hits
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -294,6 +294,18 @@ def test_the_mask_is_sky_above_the_skyline_minus_a_margin() -> None:
     boundary = int(150.0 - margin_px)
     assert mask[: boundary - 1, :500].all()
     assert not mask[boundary + 2 :, :500].any()
+
+
+@pytest.mark.parametrize("hfov", [66.0, 19.0])
+def test_the_margin_is_converted_to_rows_at_the_pixel_scale_of_the_fitted_lens(
+    hfov: float,
+) -> None:
+    fit = flat_skyline_fit(150.0, orientation=Orientation(274.0, 2.0, 0.4, hfov))
+    pixels_per_degree_here = (WIDTH / 2) / math.tan(math.radians(hfov / 2)) * math.pi / 180.0
+    for margin in (0.5, 1.0, 2.0):
+        limit = 150.0 - margin * pixels_per_degree_here
+        assert limit > 1, "the margin must leave some sky in the test frame"
+        assert sky_mask(fit, margin_deg=margin)[:, 100].sum() == math.ceil(limit)
 
 
 def test_a_wider_margin_removes_more_sky() -> None:
