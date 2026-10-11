@@ -8,7 +8,11 @@ figures. Everything is derived from the study alone, so the same study gives the
 
 Privacy (`docs/design.md` section 3): the outputs carry dates, sun elevations and derived numbers
 only. No clock time, no HRRR or GEFS cycle hour of any date (the run-selection rules are stated
-as rules), no sun azimuth, no coordinate other than the public reference point. The tests run the
+as rules), no per-date sun azimuth, no coordinate other than the public reference point. The
+camera's azimuth relative to the sun, which the renderer needs at every sweep elevation of every
+date, is computed internally and never written here. The build log gives its monthly ranges, and
+the fit's centre azimuth is in the report: both are functions of the public reference point and
+a public camera's fit, so neither says more than those inputs already do. The tests run the
 repository's own scanner over everything written here.
 """
 
@@ -24,7 +28,7 @@ import numpy as np
 
 from lastlight.cameras import load_registry
 from lastlight.g0 import stats
-from lastlight.g0.analysis import CHANNEL_NAMES, NOMINAL, Study
+from lastlight.g0.analysis import CHANNEL_NAMES, NOMINAL, ScaleOutcome, Study
 from lastlight.g0.figures import FIGURES
 from lastlight.g0.record import DROP_REASONS, RENDER_SCALES
 from lastlight.g0.view import SkyView
@@ -59,6 +63,12 @@ RESULTS_COLUMNS: Final = (
 """The columns of `results.csv`, in order. Dropped dates leave everything after `reason` empty."""
 
 _CRITERION_FILE: Final = "docs/gates/G0/criterion.md"
+
+OBSERVED_CONTRAST_RANGE: Final = (-0.21, 0.14)
+"""The lowest and highest of the eight lowest-band contrasts (log(R/G) and log(B/G)) of the four
+usable frames of the first observed evening, an overcast one, for sun elevations from +5 to -4.
+Cited from the real-run table of `docs/log/2026-10-11-observed-contrasts.md` (PR #29), not read:
+the report generator has no observation to read."""
 
 
 def _percent(fraction: float) -> str:
@@ -135,6 +145,8 @@ def _verdict_section(study: Study) -> str:
         "",
         f"**{_word(verdict.passed)}** against the pre-registered criterion.",
         "",
+        _caveat(study),
+        "",
         f"{verdict.meeting} of the {verdict.dates} dates used ({_percent(verdict.fraction)}) "
         f"meet the rule: the rendered contrast differs from the period median by a D(d, s) of at "
         f"least {stats.THRESHOLD} in at least {stats.MIN_BANDS} of the "
@@ -150,6 +162,89 @@ def _verdict_section(study: Study) -> str:
         "",
     ]
     return "\n".join(lines)
+
+
+def _carrier(outcomes: Mapping[str, ScaleOutcome]) -> str | None:
+    """The one channel that meets the rule's share alone; None when no channel or both do."""
+    carriers = [name for name, outcome in outcomes.items() if outcome.verdict.passed]
+    return carriers[0] if len(carriers) == 1 else None
+
+
+def _smoke_values(study: Study) -> list[float]:
+    return [record.atmosphere.aod_smoke for record in study.used if record.atmosphere]
+
+
+def _horizon_contrast(study: Study) -> tuple[float, float]:
+    """The median over the dates used of the lowest band's contrast at a sun elevation of 0:
+    (log(R/G), log(B/G))."""
+    horizon = list(ELEVATION_SWEEP).index(0.0)
+    red, blue = (
+        float(np.median([record.contrast[NOMINAL][horizon, 0, channel] for record in study.used]))
+        for channel in (0, 1)
+    )
+    return red, blue
+
+
+def _caveat(study: Study) -> str:
+    """What the verdict is made of, directly under it: renderer units, one channel, a model.
+
+    Every number is computed from the study except the observed range, which is cited
+    (`OBSERVED_CONTRAST_RANGE`). The claims that depend on the data (that one channel carries the
+    result, that the seasonal control rests on the same one, that HRRR's smoke was zero) are
+    made only when the data say so.
+    """
+    passed = study.verdict.passed
+    word = _word(passed)
+    red, blue = CHANNEL_NAMES
+    share = {name: _percent(study.channels[name].verdict.fraction) for name in CHANNEL_NAMES}
+    split = f"{blue} alone meets the rule on {share[blue]} of dates and {red} alone on {share[red]}"
+    carrier = _carrier(study.channels)
+    channels = (
+        f"the {word} rests on one channel: {split}"
+        if passed and carrier
+        else (f"by channel, {split}")
+    )
+    seasonal = {
+        name: _percent(study.seasonal_channels[name].verdict.fraction) for name in CHANNEL_NAMES
+    }
+    seasonal_split = f"{blue} alone {seasonal[blue]}, {red} alone {seasonal[red]}"
+    control = (
+        f"the seasonal control rests on the same channel ({seasonal_split})"
+        if passed and carrier and _carrier(study.seasonal_channels) == carrier
+        else f"for the seasonal control, {seasonal_split}"
+    )
+    low, high = OBSERVED_CONTRAST_RANGE
+    smoke = (
+        "HRRR's smoke field was exactly zero in the analyses"
+        if not any(value > 0.0 for value in _smoke_values(study))
+        else "HRRR's smoke was recorded and not rendered"
+    )
+    first = (
+        f"**Read this {word} in renderer-v0 units.** D(d, s) is computed on the "
+        f"single-scattering renderer's contrast, not on camera pixels, and {channels}; {control}. "
+        f"At a sun elevation of 0 the rendered lowest-band {blue} contrast is "
+        f"{_horizon_contrast(study)[1]:+.2f}, where the four usable frames of the one camera "
+        f"evening so far (overcast) read between {low:+.2f} and {high:+.2f}, so "
+        f"{stats.THRESHOLD} in these units is not {stats.THRESHOLD} on a webcam. All aerosol "
+        f"variation comes from GEFS-Aerosols' modelled optical depth; {smoke}."
+    )
+    if passed:
+        last = (
+            f"This PASS says the renderer's output moves from day to day by more than "
+            f"{stats.THRESHOLD} in its own units. It does not show that a camera can see that "
+            "movement (G1, issue #31, measures that), and it does not yet support a claim that "
+            "the forecast can beat climatology or persistence; a multiple-scattering renderer "
+            "(issue #32) re-runs this gate."
+        )
+    else:
+        last = (
+            f"This FAIL says the renderer's output moves from day to day by less than "
+            f"{stats.THRESHOLD} in its own units on too many dates. It does not show that a "
+            "camera cannot see aerosol-driven movement (G1, issue #31, measures that), and it "
+            "does not show that the forecast cannot beat climatology or persistence; a "
+            "multiple-scattering renderer (issue #32) re-runs this gate."
+        )
+    return f"{first} {last}"
 
 
 def _criterion_section() -> str:
@@ -207,6 +302,12 @@ def _inputs_section(study: Study) -> str:
         "measured is the spread of the real atmosphere as the models see it, without forecast "
         "error mixed in."
     )
+    model = (
+        "- **The aerosol input is a model.** It is a modelled optical depth at one 25 km grid "
+        "cell, not a measurement (the 0.25 degree cell nearest the public reference point), so "
+        "the verdict is about a model's day-to-day variation. Whether the hour-0 state of "
+        "GEFS-Aerosols assimilates aerosol observations was not verified."
+    )
     geos = (
         "- **Tried first and not usable.** NASA GEOS-FP through the NCCS OPeNDAP server. Its "
         "assimilation collection of primary aerosol diagnostics (`tavg3_2d_aer_Nx`; the "
@@ -224,12 +325,17 @@ def _inputs_section(study: Study) -> str:
         "than the fixed aerosol, so a dusty day is rendered as more of the same aerosol, not as "
         "dust. These omissions bias the spread low."
     )
-    bullets = [hrrr, aerosol, ozone, analyses, geos, fixed]
+    attribution = (
+        "- **Attribution.** GEFS-Aerosols and HRRR data are from NOAA, through the AWS Open Data "
+        "registry (`noaa-gefs-pds` and `noaa-hrrr-bdp-pds`). The numbers here are derived "
+        "values, not NOAA data products, and no endorsement by NOAA is implied."
+    )
+    bullets = [hrrr, aerosol, ozone, analyses, model, geos, fixed, attribution]
     return "## Inputs actually used\n\n" + "\n".join(bullets) + "\n"
 
 
 def _smoke_sentence(study: Study) -> str:
-    smoke = [record.atmosphere.aod_smoke for record in study.used if record.atmosphere]
+    smoke = _smoke_values(study)
     nonzero = sum(1 for value in smoke if value > 0.0)
     if nonzero == 0:
         return (
@@ -472,6 +578,11 @@ def _sensitivity_section(study: Study, views: Mapping[str, SkyView]) -> str:
 
 def _seasonal_section(study: Study) -> str:
     seasonal = study.seasonal.verdict
+    by_channel = " and ".join(
+        f"{name} alone, {outcome.verdict.meeting} of {outcome.verdict.dates} dates "
+        f"({_percent(outcome.verdict.fraction)})"
+        for name, outcome in study.seasonal_channels.items()
+    )
     lines = [
         "## Seasonal control",
         "",
@@ -482,8 +593,8 @@ def _seasonal_section(study: Study) -> str:
         f"{stats.HALF_WINDOW_DAYS} days of each date. {seasonal.meeting} of the "
         f"{seasonal.dates} dates ({_percent(seasonal.fraction)}) meet the rule that way; against "
         f"the same {_percent(stats.MIN_FRACTION)} it would be a {_word(seasonal.passed)}. "
-        "This is the closer measure of what a forecast has to beat if it is to do better than "
-        "a seasonal climatology.",
+        f"By channel the same control gives {by_channel}. "
+        "This is the closer measure of what a forecast would have to beat, in renderer units.",
         "",
     ]
     return "\n".join(lines)
@@ -576,11 +687,8 @@ def _reading_section(study: Study) -> str:
     red = float(np.mean(study.channels[CHANNEL_NAMES[0]].distances[:, columns]))
     blue = float(np.mean(study.channels[CHANNEL_NAMES[1]].distances[:, columns]))
     blue_share = 100.0 * blue / (red + blue) if red + blue > 0.0 else 0.0
-    horizon = list(ELEVATION_SWEEP).index(0.0)
-    at_horizon = [
-        float(np.median([record.contrast[NOMINAL][horizon, 0, channel] for record in study.used]))
-        for channel in (0, 1)
-    ]
+    at_horizon = _horizon_contrast(study)
+    observed_low, observed_high = OBSERVED_CONTRAST_RANGE
     bullets = [
         "- The verdict is about the **model's** curve: it asks whether the real atmosphere's "
         "day-to-day variation, as the archives carry it, moves the rendered contrast by more "
@@ -593,8 +701,9 @@ def _reading_section(study: Study) -> str:
         "light: the choice of a webcam proxy matters to this statistic.",
         f"- At a sun elevation of 0 the median, over the dates used, of the lowest band's contrast "
         f"is {at_horizon[0]:+.2f} in log(R/G) and {at_horizon[1]:+.2f} in log(B/G). The four "
-        "usable frames of the first observed evening, an overcast one, read between -0.21 and "
-        "+0.14 for sun elevations from +5 to -4 (`docs/log/2026-10-11-observed-contrasts.md`). "
+        "usable frames of the first observed evening, an overcast one, read between "
+        f"{observed_low:+.2f} and {observed_high:+.2f} for sun elevations from +5 to -4 "
+        "(`docs/log/2026-10-11-observed-contrasts.md`). "
         "A single-scattering model leaves out the multiple scattering that fills the blue of a "
         "twilight sky, which is likely to exaggerate the rendered blue contrast; matching the "
         "camera is for the scoring milestone, not for G0.",

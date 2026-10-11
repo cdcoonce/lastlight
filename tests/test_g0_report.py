@@ -19,8 +19,10 @@ from PIL import Image
 
 from lastlight.g0 import stats
 from lastlight.g0.analysis import build_study
+from lastlight.g0.record import RENDER_SCALES
 from lastlight.g0.report import (
     FIGURE_FILES,
+    OBSERVED_CONTRAST_RANGE,
     RESULTS_COLUMNS,
     write_outputs,
 )
@@ -370,3 +372,201 @@ def test_the_channel_floor_sentence_reads_cleanly(outputs) -> None:
     floor = text.split("## The channel floor")[1].split("\n## ")[0]
     assert "of the rendered channels at the nominal scale" in floor
     assert "can only hide variation" not in floor
+
+
+# --- the verdict section says what the PASS or FAIL is made of ---------------------------------
+
+BLUE_OFFSET, RED_OFFSET = -2.62, 0.5
+
+
+def make_blue_study(*, moved: int = 14, n: int = 40, smoke: float = 0.0, spread: bool = True):
+    """Dates that differ only in log(B/G): `moved` of them are 0.2 away in golden and early.
+
+    With `spread` the moved dates are every third one (a minority in every window, so the
+    seasonal control sees them too); otherwise they are the first `moved` dates, a block that the
+    windowed median partly absorbs. Every date also carries the same constant offset in each
+    channel (no effect on D), so the contrast at a sun elevation of 0 is known: +0.5 in
+    log(R/G) and -2.62 in log(B/G).
+    """
+    days = dates(START, n)
+    records = [synthetic_record(day, {}, smoke=smoke) for day in days]
+    shifted = range(0, n, 3) if spread else range(moved)
+    for i, record in enumerate(records):
+        for scale in RENDER_SCALES:
+            record.contrast[scale][:, :, 0] += RED_OFFSET
+            record.contrast[scale][:, :, 1] += BLUE_OFFSET
+        if i in shifted:
+            for band in ("golden", "early"):
+                record.contrast["nominal"][list(stats.band_members(band)), :, 1] += 0.2
+    return build_study(records, START, days[-1])
+
+
+def verdict_section_of(study, tmp_path) -> str:
+    write_outputs(study, tmp_path, views=whtm1_views())
+    text = (tmp_path / "report.md").read_text(encoding="utf-8")
+    return text.split("## Verdict")[1].split("\n## ")[0]
+
+
+@pytest.fixture(scope="module")
+def blue_pass(tmp_path_factory):
+    study = make_blue_study()  # 14 of 40 dates (35 percent): a PASS, carried by blue alone
+    return study, verdict_section_of(study, tmp_path_factory.mktemp("blue_pass"))
+
+
+def test_a_pass_is_read_in_renderer_units_right_after_the_pass_line(blue_pass) -> None:
+    study, section = blue_pass
+    assert study.verdict.passed
+    pass_line = section.index("**PASS** against the pre-registered criterion.")
+    caveat = section.index("**Read this PASS in renderer-v0 units.**")
+    numbers = section.index(f"{study.verdict.meeting} of the {study.verdict.dates} dates used")
+    assert pass_line < caveat < numbers
+    assert "FAIL" not in section
+
+
+def test_the_caveat_names_the_one_channel_the_pass_rests_on_and_each_channels_share(
+    blue_pass,
+) -> None:
+    _, section = blue_pass
+    assert (
+        "the PASS rests on one channel: log(B/G) alone meets the rule on 35.0 percent of dates"
+        in (section)
+    )
+    assert "and log(R/G) alone on 0.0 percent" in section
+
+
+def test_the_caveat_gives_the_seasonal_controls_channel_shares(blue_pass) -> None:
+    study, section = blue_pass
+    blue = study.seasonal_channels["log(B/G)"].verdict
+    red = study.seasonal_channels["log(R/G)"].verdict
+    assert (blue.meeting, red.meeting) == (
+        14,
+        0,
+    )  # a third of the dates are in no window's majority
+    assert (
+        "the seasonal control rests on the same channel (log(B/G) alone 35.0 percent, "
+        "log(R/G) alone 0.0 percent)" in section
+    )
+
+
+def test_the_seasonal_control_is_not_said_to_rest_on_the_channel_when_it_does_not_meet_the_bar(
+    tmp_path,
+) -> None:
+    # The first 14 dates are a block: the median of the dates around each of them is the shifted
+    # value, so the control finds only 2 of 40 dates away from it. It does not pass on blue alone.
+    study = make_blue_study(spread=False)
+    section = verdict_section_of(study, tmp_path)
+    assert "the PASS rests on one channel: log(B/G) alone meets the rule on 35.0 percent" in section
+    assert "the seasonal control rests on the same channel" not in section
+    assert "for the seasonal control, log(B/G) alone 5.0 percent, log(R/G) alone 0.0 percent" in (
+        section
+    )
+
+
+def test_the_caveat_gives_the_rendered_contrast_at_the_horizon_beside_the_observed_range(
+    blue_pass,
+) -> None:
+    _, section = blue_pass
+    assert OBSERVED_CONTRAST_RANGE == (-0.21, 0.14)
+    assert "At a sun elevation of 0 the rendered lowest-band log(B/G) contrast is -2.62" in section
+    assert "read between -0.21 and +0.14" in section
+    assert "so 0.05 in these units is not 0.05 on a webcam" in section
+
+
+def test_the_caveat_says_where_the_aerosol_variation_comes_from(blue_pass) -> None:
+    _, section = blue_pass
+    assert "All aerosol variation comes from GEFS-Aerosols' modelled optical depth" in section
+    assert "HRRR's smoke field was exactly zero in the analyses" in section
+
+
+def test_the_caveat_says_what_the_pass_does_not_show(blue_pass) -> None:
+    _, section = blue_pass
+    assert "moves from day to day by more than 0.05 in its own units" in section
+    assert "does not show that a camera can see that movement (G1, issue #31, measures that)" in (
+        section
+    )
+    assert "does not yet support a claim that the forecast can beat climatology or persistence" in (
+        section
+    )
+    assert "a multiple-scattering renderer (issue #32) re-runs this gate" in section
+
+
+def test_the_verdict_section_keeps_the_numbers_and_the_rule_as_registered(blue_pass) -> None:
+    study, section = blue_pass
+    assert (
+        f"{study.verdict.meeting} of the {study.verdict.dates} dates used (35.0 percent)" in section
+    )
+    assert "The rule is applied as it was written before any result existed." in section
+
+
+def test_a_fail_is_read_in_renderer_units_too_and_claims_nothing_about_the_forecast(
+    tmp_path,
+) -> None:
+    study = make_blue_study(moved=5, spread=False)  # 5 of 40 dates (12.5 percent)
+    assert not study.verdict.passed
+    section = verdict_section_of(study, tmp_path)
+    assert section.index("**FAIL** against the pre-registered criterion.") < section.index(
+        "**Read this FAIL in renderer-v0 units.**"
+    )
+    assert "This FAIL says the renderer's output moves from day to day by less than 0.05" in section
+    assert (
+        "does not show that a camera cannot see aerosol-driven movement (G1, issue #31" in section
+    )
+    assert "does not show that the forecast cannot beat climatology or persistence" in section
+    assert "PASS" not in section
+    assert "does not yet support a claim" not in section
+
+
+def test_when_both_channels_carry_the_result_it_is_not_said_to_rest_on_one(tmp_path) -> None:
+    study = make_study()  # the same shift in both channels
+    section = verdict_section_of(study, tmp_path)
+    assert "Read this PASS in renderer-v0 units" in section
+    assert "rests on one channel" not in section
+    assert "by channel, log(B/G) alone meets the rule on 35.0 percent of dates" in section
+    assert "log(R/G) alone on 35.0 percent" in section
+    assert "for the seasonal control, log(B/G) alone" in section
+
+
+def test_a_smoke_field_with_values_is_not_said_to_be_zero_in_the_caveat(tmp_path) -> None:
+    section = verdict_section_of(make_blue_study(smoke=0.05), tmp_path)
+    assert "HRRR's smoke field was exactly zero" not in section
+    assert "HRRR's smoke was recorded and not rendered" in section
+
+
+def test_the_caveat_adds_no_clock_time_cycle_hour_or_coordinate(tmp_path) -> None:
+    study = make_blue_study()
+    write_outputs(study, tmp_path, views=whtm1_views())
+    result = scan([tmp_path], root=tmp_path)
+    assert result.findings == [], [str(f) for f in result.findings]
+
+
+# --- the other additions: attribution, the aerosol input is a model, the seasonal channels -----
+
+
+def test_the_inputs_credit_noaa_and_say_the_numbers_are_derived_with_no_endorsement(
+    outputs,
+) -> None:
+    *_, text = outputs
+    inputs = text.split("## Inputs actually used")[1].split("\n## ")[0]
+    assert "GEFS-Aerosols and HRRR data are from NOAA, through the AWS Open Data registry" in inputs
+    assert "derived values" in inputs and "no endorsement by NOAA is implied" in inputs
+
+
+def test_the_inputs_say_the_aerosol_is_a_modelled_value_at_one_cell_not_a_measurement(
+    outputs,
+) -> None:
+    *_, text = outputs
+    inputs = text.split("## Inputs actually used")[1].split("\n## ")[0]
+    assert "a modelled optical depth at one 25 km grid cell, not a measurement" in inputs
+    assert "was not verified" in inputs and "assimilates aerosol observations" in inputs
+
+
+def test_the_seasonal_control_is_what_a_forecast_would_have_to_beat_in_renderer_units(
+    outputs,
+) -> None:
+    study, _, _, text = outputs
+    section = text.split("## Seasonal control")[1].split("\n## ")[0]
+    assert "what a forecast would have to beat, in renderer units" in section
+    assert "what a forecast has to beat" not in section
+    for name, outcome in study.seasonal_channels.items():
+        verdict = outcome.verdict
+        assert f"{name} alone, {verdict.meeting} of {verdict.dates}" in section
