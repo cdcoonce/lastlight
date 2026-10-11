@@ -26,6 +26,16 @@ uv run ruff check && uv run ruff format --check && uv run pytest
 uv run lastlight privacy-scan
 ```
 
+Camera geometry (issue #16) is fitted and used from the command line:
+
+```sh
+export LASTLIGHT_CAMERA_SITES=~/.workshop/lastlight/camera-sites.toml   # private, never committed
+uv run lastlight camgeom fit --camera WHTM1 --frames ~/.workshop/lastlight/frames/WHTM1 --position-box-km 8
+uv run lastlight camgeom mask --camera WHTM1
+```
+
+The first `fit` downloads one Copernicus GLO-30 DEM tile (about 40 MB) into `~/.cache/lastlight/dem`. The fit file it writes holds orientation only; the camera's position stays in the private site file, and a position search records only its offset from that file.
+
 Tests run offline: a guard in `tests/conftest.py` refuses every socket connect. A test that really needs the network is marked `@pytest.mark.network`, skipped by default and run on purpose with `uv run pytest -m network`.
 
 ## Privacy
