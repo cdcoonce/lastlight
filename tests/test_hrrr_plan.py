@@ -36,7 +36,7 @@ def _no_network() -> support.FakeTransport:
     return support.FakeTransport({})
 
 
-LONG_AFTER = dt.datetime(2026, 12, 1, tzinfo=UTC)
+LONG_AFTER = dt.datetime(2027, 6, 1, tzinfo=UTC)
 
 
 # --- an evening that is already over --------------------------------------------------------------
@@ -58,6 +58,25 @@ def test_a_past_evening_reads_the_analysis_of_the_target_hour_with_no_network() 
     assert _cycle_instant(plan) == _target_hour(EVENING)
     assert plan.forecast_hour == 0
     assert transport.calls == []
+
+
+@pytest.mark.parametrize("month", range(1, 13))
+def test_the_target_is_the_nearest_whole_hour_not_the_hour_before(month: int) -> None:
+    # Over a year the sun reaches the horizon at every minute past the hour; rounding down
+    # instead of to the nearest hour would be caught on the evenings that fall in its second half.
+    evening = dt.date(2026, month, 15)
+
+    plan = plan_run(
+        evening,
+        REF_LAT,
+        REF_LON,
+        cycle_hour=None,
+        forecast_hour=None,
+        now_utc=LONG_AFTER,
+        transport=_no_network(),
+    )
+
+    assert _cycle_instant(plan) == _target_hour(evening)
 
 
 def test_the_plan_is_a_frozen_run_plan() -> None:
@@ -237,7 +256,7 @@ def test_naive_now_is_refused() -> None:
             REF_LON,
             cycle_hour=None,
             forecast_hour=None,
-            now_utc=dt.datetime(2026, 12, 1),
+            now_utc=dt.datetime(2027, 6, 1),
             transport=_no_network(),
         )
 
