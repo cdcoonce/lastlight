@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
 import re
+import subprocess
 from pathlib import Path
 
 import daily_support as support
@@ -245,15 +247,63 @@ def test_missing_weather_data_fails_loudly_rather_than_painting_from_nothing(
 SHA = "ab" * 20
 
 
-def test_the_code_sha_comes_from_the_environment_in_ci() -> None:
-    assert current_code_sha(environ={"GITHUB_SHA": SHA}) == SHA
+def make_checkout(path: Path) -> str:
+    """A git checkout with one commit; returns that commit's id."""
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
+    path.mkdir()
+    for args in (
+        ["init", "--quiet", "-b", "main"],
+        ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit",
+         "--quiet", "--allow-empty", "-m", "code"],
+    ):  # fmt: skip
+        subprocess.run(["git", "-C", str(path), *args], check=True, capture_output=True, env=env)
+    done = subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "HEAD"],
+        check=True, capture_output=True, text=True, env=env,
+    )  # fmt: skip
+    return done.stdout.strip()
 
 
-def test_an_explicit_override_beats_the_ci_variable() -> None:
-    assert current_code_sha(environ={"LASTLIGHT_CODE_SHA": "c" * 40, "GITHUB_SHA": SHA}) == "c" * 40
+def test_the_code_sha_is_the_commit_of_the_checkout_that_is_running(tmp_path: Path) -> None:
+    head = make_checkout(tmp_path / "code")
+    assert re.fullmatch(r"[0-9a-f]{40}", head)
+    assert current_code_sha(environ={}, cwd=tmp_path / "code") == head
 
 
-def test_the_code_sha_falls_back_to_the_checkout_and_then_to_unknown(tmp_path: Path) -> None:
-    sha = current_code_sha(environ={})
-    assert sha == "unknown" or (len(sha) == 40 and set(sha) <= set("0123456789abcdef"))
+def test_this_repository_reports_its_own_head_by_default() -> None:
+    root = Path(__file__).resolve().parents[1]
+    done = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True
+    )
+    if done.returncode != 0:  # a source tree without git metadata has no commit to report
+        pytest.skip("not a git checkout")
+    assert current_code_sha(environ={}) == done.stdout.strip()
+
+
+def test_github_sha_is_not_the_code_sha_because_a_dispatch_from_another_ref_names_another_commit(
+    tmp_path: Path,
+) -> None:
+    # On a manual run from a feature branch GITHUB_SHA is that branch's commit, while the seal job
+    # checks out main: the sealed `code_sha` must name the code that ran, which is the checkout.
+    head = make_checkout(tmp_path / "code")
+    assert head != SHA
+    assert current_code_sha(environ={"GITHUB_SHA": SHA}, cwd=tmp_path / "code") == head
+
+
+def test_an_explicit_override_beats_the_checkout(tmp_path: Path) -> None:
+    make_checkout(tmp_path / "code")
+    assert (
+        current_code_sha(environ={"LASTLIGHT_CODE_SHA": "c" * 40}, cwd=tmp_path / "code")
+        == "c" * 40
+    )
+
+
+@pytest.mark.parametrize("override", ["", "abc123", "C" * 39, "g" * 40, "c" * 41])
+def test_an_override_that_is_not_a_full_commit_id_is_ignored(tmp_path: Path, override: str) -> None:
+    head = make_checkout(tmp_path / "code")
+    assert current_code_sha(environ={"LASTLIGHT_CODE_SHA": override}, cwd=tmp_path / "code") == head
+
+
+def test_the_code_sha_is_unknown_outside_any_checkout(tmp_path: Path) -> None:
     assert current_code_sha(environ={}, cwd=tmp_path) == "unknown"
+    assert current_code_sha(environ={"GITHUB_SHA": SHA}, cwd=tmp_path) == "unknown"

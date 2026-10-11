@@ -40,6 +40,7 @@ MODEL_NAME = "lastlight-v0"
 """The renderer generation: v0 is single scattering; v1 (Bruneton) will be a new model name."""
 
 _SHA = re.compile(r"[0-9a-f]{40}")
+_OVERRIDE_VARIABLE = "LASTLIGHT_CODE_SHA"
 _UNKNOWN_SHA = "unknown"
 
 
@@ -52,16 +53,19 @@ class Painting:
 
 
 def current_code_sha(*, environ: Mapping[str, str] | None = None, cwd: Path | None = None) -> str:
-    """The commit of the code that is running: `LASTLIGHT_CODE_SHA`, `GITHUB_SHA`, the checkout.
+    """The commit of the code that is running: `LASTLIGHT_CODE_SHA`, else the checkout's HEAD.
 
-    Each source counts only if it is a full 40-character commit id. `cwd` is the directory asked
+    The override counts only if it is a full 40-character commit id. `cwd` is the directory asked
     for `git rev-parse HEAD` (default: this package's own checkout). "unknown" if none answers.
+
+    `GITHUB_SHA` is deliberately not read: on a manual run from a branch other than `main` it
+    names that branch's commit, while the seal job checks out `main`, so it would seal a
+    `code_sha` that is not the code that ran.
     """
     environment = os.environ if environ is None else environ
-    for name in ("LASTLIGHT_CODE_SHA", "GITHUB_SHA"):
-        value = environment.get(name, "").strip().lower()
-        if _SHA.fullmatch(value):
-            return value
+    override = environment.get(_OVERRIDE_VARIABLE, "").strip().lower()
+    if _SHA.fullmatch(override):
+        return override
     where = Path(__file__).resolve().parent if cwd is None else cwd
     try:
         answer = subprocess.run(
