@@ -470,7 +470,7 @@ def test_the_caveat_gives_the_rendered_contrast_at_the_horizon_beside_the_observ
     _, section = blue_pass
     assert OBSERVED_CONTRAST_RANGE == (-0.21, 0.14)
     assert "At a sun elevation of 0 the rendered lowest-band log(B/G) contrast is -2.62" in section
-    assert "read between -0.21 and +0.14" in section
+    assert "read between -0.21 and +0.14 in either channel" in section
     assert "so 0.05 in these units is not 0.05 on a webcam" in section
 
 

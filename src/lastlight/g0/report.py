@@ -224,7 +224,7 @@ def _caveat(study: Study) -> str:
         f"single-scattering renderer's contrast, not on camera pixels, and {channels}; {control}. "
         f"At a sun elevation of 0 the rendered lowest-band {blue} contrast is "
         f"{_horizon_contrast(study)[1]:+.2f}, where the four usable frames of the one camera "
-        f"evening so far (overcast) read between {low:+.2f} and {high:+.2f}, so "
+        f"evening so far (overcast) read between {low:+.2f} and {high:+.2f} in either channel, so "
         f"{stats.THRESHOLD} in these units is not {stats.THRESHOLD} on a webcam. All aerosol "
         f"variation comes from GEFS-Aerosols' modelled optical depth; {smoke}."
     )
