@@ -33,6 +33,13 @@ def test_the_repository_allowlist_exists_and_every_entry_is_valid() -> None:
     assert all(entry.reason.strip() for entry in allowlist.entries)
 
 
+def test_the_repository_allowlist_never_exempts_the_private_site_marker() -> None:
+    # Only the site module and the scanner's own tests may name the sentinel, and both are
+    # exempt by path in code. An `[[allow]]` entry for P005 would open the same door anywhere.
+    allowlist = load_allowlist(ALLOWLIST, root=REPO_ROOT)
+    assert [entry.path for entry in allowlist.entries if entry.rule == "P005"] == []
+
+
 def test_the_scan_of_the_current_repository_tree_passes() -> None:
     allowlist = load_allowlist(ALLOWLIST, root=REPO_ROOT)
     result = scan(None, root=REPO_ROOT, allowlist=allowlist)

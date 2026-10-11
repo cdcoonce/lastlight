@@ -73,6 +73,31 @@ def test_p001_leak_is_one_finding_even_when_it_is_a_full_datetime(
     assert finding.excerpt == leak
 
 
+CLOCK_HOURS = [0, 9, 12, 19, 20, 23]
+CLOCK_FORMS = [
+    "{h}:59",
+    "{h:02d}:59",
+    "{h:02d}:59:59",
+    "{h:02d}h59",
+    "2026-10-10T{h:02d}:59:00Z",
+    "2026-10-10 {h:02d}:59",
+    "T{h:02d}:59Z",
+    "20261010T{h:02d}5900Z",
+]
+
+
+@pytest.mark.parametrize("form", CLOCK_FORMS)
+@pytest.mark.parametrize("hour", CLOCK_HOURS)
+def test_p001_flags_the_edges_of_the_hour_and_minute_ranges_in_every_form(
+    tmp_path: Path, form: str, hour: int
+) -> None:
+    # Hours 0, 9, 12, 19, 20 and 23 and minute 59 sit on the edges of each hour alternative
+    # (`[01]?\d` and `2[0-3]`) and of the minute class, so narrowing either one turns a form red.
+    leak = form.format(h=hour)
+    (finding,) = scan_text(tmp_path, f"taken at {leak} sharp\n")
+    assert (finding.rule, finding.excerpt) == ("P001", leak)
+
+
 def test_p001_reports_the_line_and_the_matched_text(tmp_path: Path) -> None:
     (finding,) = scan_text(tmp_path, "first line\nsecond line\nseal at 17:42 today\n")
     assert (finding.path, finding.line, finding.rule) == ("note.txt", 3, "P001")
@@ -309,6 +334,25 @@ def test_p005_flags_the_sentinel_key_in_a_text_file(tmp_path: Path) -> None:
 def test_p005_flags_the_sentinel_inside_a_binary_file(tmp_path: Path) -> None:
     blob = b"\x00\x01\x02" + PRIVATE_SITE_SENTINEL.encode() + b"\x00\xff"
     assert rule_ids(scan_text(tmp_path, blob, "blob.bin")) == ["P005"]
+
+
+def test_p005_reports_every_occurrence_not_only_the_first(tmp_path: Path) -> None:
+    # Lines 1, 3 (twice) and 4 (twice, back to back): five occurrences, five findings.
+    content = (
+        f"{PRIVATE_SITE_SENTINEL} = 1\nok\n{PRIVATE_SITE_SENTINEL} {PRIVATE_SITE_SENTINEL}\n"
+        f"{PRIVATE_SITE_SENTINEL}{PRIVATE_SITE_SENTINEL}\n"
+    )
+    findings = scan_text(tmp_path, content)
+    assert [(f.line, f.rule) for f in findings] == [(1, "P005")] + [(3, "P005")] * 2 + [
+        (4, "P005")
+    ] * 2
+
+
+def test_p005_reports_every_occurrence_inside_a_binary_file_too(tmp_path: Path) -> None:
+    sentinel = PRIVATE_SITE_SENTINEL.encode()
+    blob = b"\x00" + sentinel + b"\x01\x02" + sentinel + b"\x00\xff" + sentinel
+    findings = scan_text(tmp_path, blob, "blob.bin")
+    assert [f.rule for f in findings] == ["P005"] * 3
 
 
 def test_p005_does_not_flag_the_site_file_environment_variable(tmp_path: Path) -> None:

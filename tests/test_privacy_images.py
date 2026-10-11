@@ -161,6 +161,22 @@ def test_jpeg_xmp_app1_segment_is_flagged(tmp_path: Path, gps: bool) -> None:
 
 
 @pytest.mark.parametrize(
+    "payload",
+    [
+        b"neither exif nor xmp",
+        b"",
+        b"Exif\x00",  # a prefix of the EXIF header is not the header
+        b"http://ns.adobe.com/xap",  # nor is a prefix of the XMP namespace
+    ],
+)
+def test_any_jpeg_app1_segment_is_a_finding_even_when_it_is_neither_exif_nor_xmp(
+    tmp_path: Path, payload: bytes
+) -> None:
+    findings = scan_image(tmp_path, images.jpeg_with_segment(0xE1, payload), "odd.jpg")
+    assert reasons(findings) == [("P004", "APP1 segment (unrecognised)")]
+
+
+@pytest.mark.parametrize(
     ("marker", "label"),
     [(0xFE, "COM"), (0xED, "APP13")],
 )
@@ -295,6 +311,43 @@ def test_a_tiff_with_a_gps_tag_is_flagged_in_either_byte_order(
 def test_a_tiff_without_gps_tags_passes(tmp_path: Path) -> None:
     assert scan_image(tmp_path, images.tiff_bytes(gps=False), "plain.tiff") == []
     assert scan_image(tmp_path, images.plain_tiff(), "pillow.tif") == []
+
+
+GPS_INFO = 0x8825
+OTHER_TAGS = [0x0100, 0x0101, 0x0112]  # ImageWidth, ImageLength, Orientation
+
+
+@pytest.mark.parametrize("byte_order", [b"II", b"MM"])
+@pytest.mark.parametrize("position", [0, 1, 2, 3])
+def test_a_gps_tag_is_found_wherever_it_sits_in_a_multi_entry_ifd(
+    tmp_path: Path, position: int, byte_order: bytes
+) -> None:
+    tags = OTHER_TAGS[:position] + [GPS_INFO] + OTHER_TAGS[position:]
+    tiff = images.tiff_with_tags(tags, byte_order=byte_order)
+    findings = scan_image(tmp_path, tiff, "g.tif")
+    assert reasons(findings) == [("P004", "TIFF GPS tags")]
+
+
+@pytest.mark.parametrize("position", [1, 3])
+def test_a_gps_tag_that_is_not_first_is_found_in_jpeg_exif_too(
+    tmp_path: Path, position: int
+) -> None:
+    tags = OTHER_TAGS[:position] + [GPS_INFO] + OTHER_TAGS[position:]
+    jpeg = images.jpeg_with_segment(0xE1, b"Exif\x00\x00" + images.tiff_with_tags(tags))
+    findings = scan_image(tmp_path, jpeg, "g.jpg")
+    assert reasons(findings) == [("P004", "APP1 segment (EXIF with GPS tags)")]
+
+
+def test_a_multi_entry_ifd_without_a_gps_tag_passes(tmp_path: Path) -> None:
+    assert scan_image(tmp_path, images.tiff_with_tags(OTHER_TAGS), "plain.tif") == []
+
+
+@pytest.mark.parametrize("byte_order", [b"II", b"MM"])
+def test_a_bigtiff_fails_closed_in_either_byte_order(tmp_path: Path, byte_order: bytes) -> None:
+    # BigTIFF has 8-byte offsets, which the classic IFD reader cannot walk, so it cannot
+    # vouch for the file. Not "unreadable first IFD": the reason names the real cause.
+    findings = scan_image(tmp_path, images.bigtiff_bytes(byte_order=byte_order), "big.tif")
+    assert reasons(findings) == [("P004", "BigTIFF image cannot be checked for metadata")]
 
 
 # --- formats the scanner cannot read ---------------------------------------------------------

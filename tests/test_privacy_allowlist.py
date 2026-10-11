@@ -267,6 +267,7 @@ def test_only_the_site_module_and_the_scanner_tests_may_name_the_sentinel(tmp_pa
     plant(tmp_path, "tests/test_privacy_site.py", f'KEY = "{PRIVATE_SITE_SENTINEL}"\n')
     plant(tmp_path, "src/lastlight/privacy/rules.py", f'KEY = "{PRIVATE_SITE_SENTINEL}"\n')
     plant(tmp_path, "src/lastlight/other.py", f'KEY = "{PRIVATE_SITE_SENTINEL}"\n')
+    plant(tmp_path, "privacy-allowlist.toml", f"# {PRIVATE_SITE_SENTINEL}\n")
     results = {
         relative: [f.rule for f in findings_for(tmp_path, relative)]
         for relative in (
@@ -274,6 +275,7 @@ def test_only_the_site_module_and_the_scanner_tests_may_name_the_sentinel(tmp_pa
             "tests/test_privacy_site.py",
             "src/lastlight/privacy/rules.py",
             "src/lastlight/other.py",
+            "privacy-allowlist.toml",
         )
     }
     assert results == {
@@ -281,7 +283,15 @@ def test_only_the_site_module_and_the_scanner_tests_may_name_the_sentinel(tmp_pa
         "tests/test_privacy_site.py": [],
         "src/lastlight/privacy/rules.py": ["P005"],
         "src/lastlight/other.py": ["P005"],
+        "privacy-allowlist.toml": ["P005"],
     }
+
+
+def test_no_self_exemption_covers_p005_beyond_the_site_module_and_the_scanner_tests() -> None:
+    # The invariant stated in the allowlist module docstring, read off the exemption table
+    # itself so a new glob (or a new rule on an old one) cannot widen it unnoticed.
+    p005_globs = {glob for glob, rules in SELF_EXEMPT if "P005" in rules}
+    assert p005_globs == {"src/lastlight/site.py", "tests/test_privacy*.py"}
 
 
 def test_the_allowlist_file_may_quote_the_text_it_allows(tmp_path: Path) -> None:

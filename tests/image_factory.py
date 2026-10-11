@@ -97,6 +97,32 @@ def tiff_bytes(*, gps: bool, byte_order: bytes = b"II") -> bytes:
     return header + ifd0 + (gps_ifd if gps else b"")
 
 
+def tiff_with_tags(tags: list[int], *, byte_order: bytes = b"II") -> bytes:
+    """A minimal TIFF whose IFD0 holds one entry per tag, in the order given.
+
+    GPSInfo (0x8825) points at an empty GPS IFD; every other tag is a SHORT with value 8.
+    """
+    e = "<" if byte_order == b"II" else ">"
+    header = byte_order + struct.pack(e + "HI", 42, 8)
+    gps_ifd_offset = 8 + 2 + 12 * len(tags) + 4
+    entries = b""
+    for tag in tags:
+        if tag == 0x8825:
+            entries += struct.pack(e + "HHII", tag, 4, 1, gps_ifd_offset)
+        else:
+            entries += struct.pack(e + "HHI", tag, 3, 1) + struct.pack(e + "H", 8) + b"\x00\x00"
+    ifd0 = struct.pack(e + "H", len(tags)) + entries + struct.pack(e + "I", 0)
+    gps_ifd = struct.pack(e + "H", 0) + struct.pack(e + "I", 0)
+    return header + ifd0 + (gps_ifd if 0x8825 in tags else b"")
+
+
+def bigtiff_bytes(*, byte_order: bytes = b"II") -> bytes:
+    """A minimal BigTIFF (version 43, 8-byte offsets) with one empty IFD."""
+    e = "<" if byte_order == b"II" else ">"
+    header = byte_order + struct.pack(e + "HHHQ", 43, 8, 0, 16)
+    return header + struct.pack(e + "QQ", 0, 0)
+
+
 def png_with_exif(*, gps: bool) -> bytes:
     return png_with_chunk(b"eXIf", tiff_bytes(gps=gps))
 
