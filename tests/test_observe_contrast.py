@@ -297,6 +297,18 @@ def test_a_pixel_with_a_zero_channel_cannot_be_logged_and_is_excluded_as_too_dar
     assert math.isfinite(band.log_rg) and band.log_rg == pytest.approx(0.0, abs=1e-12)
 
 
+def test_a_pixel_both_saturated_and_with_a_zero_channel_is_charged_to_saturated_only() -> None:
+    # The four counts are disjoint: a pixel goes to the first reason that applies, and
+    # saturation comes before too dark, so (255, 0, 100) is saturated and not also too dark.
+    frame = paint_band(
+        grey_frame(), BANDS.bands_rows[0], (255.0, 0.0, 100.0), columns=slice(0, 480)
+    )
+    band = profile(frame).bands[0]
+    assert band.excluded.saturated == 480 * 20
+    assert band.excluded.too_dark == 0
+    assert band.n_pixels + band.n_excluded == BAND_SIZE
+
+
 def test_the_reference_band_is_cleaned_the_same_way() -> None:
     frame = paint_band(
         grey_frame(), BANDS.reference_rows, (255.0, 255.0, 255.0), columns=slice(0, 10)

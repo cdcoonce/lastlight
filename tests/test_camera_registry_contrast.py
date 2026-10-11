@@ -6,6 +6,7 @@ move them silently); the loader's refusals are tried one at a time against a val
 
 from __future__ import annotations
 
+import re
 from importlib import resources
 
 import pytest
@@ -83,9 +84,11 @@ def test_whtm1_light_dome_is_marked_provisional_and_the_registry_says_why() -> N
     for line in reversed(lines[:index]):
         if not line.startswith("#"):
             break
-        block.append(line)
+        block.append(line.lstrip("# ").strip())
     comment = " ".join(reversed(block)).lower()
-    assert "provisional" in comment and "overcast" in comment and "one" in comment, comment
+    # The word itself (not the key name `light_dome_provisional`), and the reason it rests on.
+    assert re.search(r"\bprovisional\b", comment), comment
+    assert "one overcast frame" in comment, comment
 
 
 def test_esmo1_has_no_contrast_table_until_it_has_a_frozen_fit() -> None:
