@@ -118,27 +118,51 @@ def test_the_report_counts_only_the_evenings_that_verify(
 
 # --- strips carry no metadata -----------------------------------------------------------------
 
+PLAIN = image_factory.plain_png()
+COLOUR_AND_DENSITY = image_factory.COLOUR_AND_DENSITY_CHUNKS
 PLANTED = {
-    "tEXt": image_factory.png_with_text(kind="tEXt"),
-    "zTXt": image_factory.png_with_text(kind="zTXt"),
-    "iTXt": image_factory.png_with_text(kind="iTXt"),
-    "tIME": image_factory.png_with_chunk(b"tIME"),
-    "eXIf": image_factory.png_with_chunk(b"eXIf"),
+    "tEXt": (image_factory.png_with_text(kind="tEXt"), {b"tEXt"}),
+    "zTXt": (image_factory.png_with_text(kind="zTXt"), {b"zTXt"}),
+    "iTXt": (image_factory.png_with_text(kind="iTXt"), {b"iTXt"}),
+    "tIME": (image_factory.png_with_chunk(b"tIME"), {b"tIME"}),
+    "eXIf": (image_factory.png_with_chunk(b"eXIf"), {b"eXIf"}),
+    **{
+        name.decode(): (
+            image_factory.png_with_chunks_after_ihdr(PLAIN, {name: payload}),
+            {name},
+        )
+        for name, payload in COLOUR_AND_DENSITY.items()
+    },
+    "all-colour-and-density": (
+        image_factory.png_with_chunks_after_ihdr(PLAIN, COLOUR_AND_DENSITY),
+        set(COLOUR_AND_DENSITY),
+    ),
 }
+
+
+def assert_pixels_only(png: bytes) -> None:
+    """The file holds IHDR, IDAT and IEND, plus PLTE and tRNS only if it is itself paletted."""
+    types = chunk_types(png)
+    paletted = image_factory.png_colour_type(png) == 3
+    allowed = {b"IHDR", b"IDAT", b"IEND"} | ({b"PLTE", b"tRNS"} if paletted else set())
+    assert set(types) <= allowed, types
+    assert types[0] == b"IHDR" and types[-1] == b"IEND", types
+    assert types.count(b"IHDR") == types.count(b"IEND") == 1, types
+    assert image_issues(png, ".png") == []
 
 
 @pytest.mark.parametrize("planted", sorted(PLANTED))
 def test_strips_in_the_site_are_re_encoded_without_metadata(
     ledger_dir: Path, tmp_path: Path, planted: str
 ) -> None:
-    source = PLANTED[planted]
-    assert planted.encode() in chunk_types(source), "the fixture must really carry the chunk"
+    source, planted_chunks = PLANTED[planted]
+    assert planted_chunks <= set(chunk_types(source)), "the fixture must really carry the chunk"
     factory.write_strip(ledger_dir, NEWEST, source)
     out = tmp_path / "site"
     assert build_site(ledger_dir, out).ok
     published = (out / "strips" / "2026-10-13.png").read_bytes()
     assert chunk_types(published) == [b"IHDR", b"IDAT", b"IEND"]
-    assert image_issues(published, ".png") == []
+    assert_pixels_only(published)
 
 
 def test_re_encoding_keeps_the_pixels(ledger_dir: Path, tmp_path: Path) -> None:
@@ -161,11 +185,17 @@ def test_a_paletted_strip_with_transparency_is_flattened_to_plain_rgb(
     palette.putpalette([255, 0, 0, 0, 255, 0] + [0] * 762)
     buffer = io.BytesIO()
     palette.save(buffer, format="PNG", transparency=0)
-    factory.write_strip(ledger_dir, NEWEST, buffer.getvalue())
+    source = image_factory.png_with_chunks_after_ihdr(
+        buffer.getvalue(), image_factory.COLOUR_AND_DENSITY_CHUNKS
+    )
+    carried = set(chunk_types(source))
+    assert {b"PLTE", b"tRNS", *image_factory.COLOUR_AND_DENSITY_CHUNKS} <= carried
+    factory.write_strip(ledger_dir, NEWEST, source)
     out = tmp_path / "site"
     assert build_site(ledger_dir, out).ok
     published = (out / "strips" / "2026-10-13.png").read_bytes()
     assert chunk_types(published) == [b"IHDR", b"IDAT", b"IEND"]
+    assert_pixels_only(published)
     assert Image.open(out / "strips" / "2026-10-13.png").mode == "RGB"
 
 
