@@ -70,6 +70,7 @@ def example_fit(**changes) -> CameraFit:
         frames_used=(FrameRecord("2026-10-10", 14.65, "ab" * 32),),
         sun_check={"status": "skipped", "reason": "sun hidden by cloud", "tolerance_deg": 1.0},
         radial_term={"k1": 0.1, "skyline_rms_px": 0.7, "adopted": False},
+        position_scan={"box_km": 6.0, "positions": 49, "adopted": False},
         frozen_on="2026-10-10",
         position_basis="operator description, supplied at fit time and not stored",
     )
@@ -101,6 +102,12 @@ def test_the_file_is_versioned_and_says_what_it_fitted() -> None:
     assert data["frames_used"] == [
         {"evening": "2026-10-10", "sun_elevation_deg": 14.65, "sha256": "ab" * 32}
     ]
+
+
+def test_a_fit_without_a_position_scan_says_so_with_null() -> None:
+    data = example_fit(position_scan=None).to_json()
+    assert data["position_scan"] is None
+    assert CameraFit.from_json(data).position_scan is None
 
 
 def test_the_file_never_carries_the_cameras_coordinates_or_a_clock_time(tmp_path: Path) -> None:
@@ -259,6 +266,10 @@ def test_the_committed_whtm1_fit_is_a_valid_frozen_fit() -> None:
     assert fit.n_columns > 500
     assert len(fit.skyline_x_px) == len(fit.skyline_y_px) > 20
     assert fit.radial_term is not None and fit.radial_term["adopted"] is False
+    scan = fit.position_scan
+    assert scan is not None, "the committed fit must record the position scan that was run"
+    assert scan["adopted"] is False and scan["positions"] >= 25 and scan["box_km"] >= 4.0
+    assert scan["rms_px_min"] <= scan["rms_px_at_site"] <= scan["rms_px_max"]
 
 
 def test_the_committed_fit_names_its_frames_without_pixels_or_clock_times() -> None:
