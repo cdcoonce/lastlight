@@ -105,11 +105,11 @@
       "replace": "notes=reduction.notes,"
     },
     {
-      "label": "C25 a time of day sneaks into the notes",
+      "label": "C25 a time of day (spelled at run time, never in this file) sneaks into the notes",
       "file": "../../src/lastlight/atmosphere.py",
       "oracle": "real",
       "find": "\"Cloud is recorded and not rendered in v0.\"",
-      "replace": "\"Cloud is recorded and not rendered in v0. Run at 18:30 UTC.\""
+      "replace": "\"Cloud is recorded and not rendered in v0. Run at 18\" + chr(58) + \"30 UTC.\""
     },
     {
       "label": "C26 GITHUB_SHA is read again: a dispatch from another ref seals that ref's commit",

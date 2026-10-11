@@ -11,8 +11,8 @@ Layout (`docs/design.md` section 4), under a ledger directory:
 requested, and a seal that fails part-way removes what it had written, so the ledger is
 either unchanged or holds a complete seal. The strip is sealed through the forecast: the
 forecast carries the SHA-256 of the PNG, so the one timestamp covers the numbers and the
-picture, and `seal` refuses a strip that is not the one the forecast names or that carries
-metadata (the ledger is append-only and a sealed leak could not be taken back). `verify`
+picture, and `seal` refuses a strip that is not the one the forecast names, is not a PNG, or
+carries metadata (the ledger is append-only and a sealed leak could not be taken back). `verify`
 re-derives everything from the files: the digest of the sealed bytes must equal the timestamp's
 imprint, the file must be a valid forecast for the requested date in canonical form, the
 timestamp must have been issued before geometric sunset at the reference point on that date
