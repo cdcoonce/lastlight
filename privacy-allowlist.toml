@@ -1,0 +1,11 @@
+# Reviewed exceptions to `lastlight privacy-scan` (docs/design.md section 3).
+#
+# Every entry needs a written reason; an entry without one is itself an error and suppresses
+# nothing. An entry covers only findings whose file matches `path`, whose rule is `rule`, and
+# whose source line contains `match` literally. Keep `match` as narrow as the line allows.
+
+[[allow]]
+path = "uv.lock"
+rule = "P001"
+match = "upload-time"
+reason = "PyPI upload stamps of third-party wheels, written by uv; they are not ours and say nothing about the camera site"

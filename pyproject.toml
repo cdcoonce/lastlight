@@ -32,6 +32,9 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["lastlight"]
+
 [dependency-groups]
 dev = [
     "pvlib>=0.16.1",

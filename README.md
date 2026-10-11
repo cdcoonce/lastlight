@@ -23,13 +23,14 @@ Expect honest nulls: a year of evenings can detect a moderate edge, not a tiny o
 uv sync
 uv run lastlight --version
 uv run ruff check && uv run ruff format --check && uv run pytest
+uv run lastlight privacy-scan
 ```
 
 Tests run offline: a guard in `tests/conftest.py` refuses every socket connect. A test that really needs the network is marked `@pytest.mark.network`, skipped by default and run on purpose with `uv run pytest -m network`.
 
 ## Privacy
 
-Everything public is referenced to the sun's elevation, never to clock time, because sunset times alone can locate a camera to within about a kilometre. Images are sky-only and stripped of metadata. A CI check enforces this.
+Everything public is referenced to the sun's elevation, never to clock time, because sunset times alone can locate a camera to within about a kilometre. Images are sky-only and stripped of metadata. `lastlight privacy-scan` enforces this in CI over every tracked file and over `site/`: it fails on clock times (P001), sun-event times (P002), coordinates other than the public Phoenix reference point (P003), image metadata (P004) and the private-site marker (P005). Reviewed exceptions, each with a written reason, live in [`privacy-allowlist.toml`](privacy-allowlist.toml).
 
 ## Who built this
 
