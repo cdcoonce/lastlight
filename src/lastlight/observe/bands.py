@@ -20,9 +20,9 @@ from typing import Final
 
 import numpy as np
 
+from lastlight.cameras.registry import ContrastBands
 from lastlight.camgeom.fitfile import CameraFit
 from lastlight.camgeom.mask import sky_mask_rows, skyline_top_rows
-from lastlight.cameras.registry import ContrastBands
 
 MIN_COLUMN_COVERAGE: Final = 0.95
 """The fraction of columns in which each band and the reference must lie inside the sky mask."""

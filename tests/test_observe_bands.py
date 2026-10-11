@@ -14,10 +14,10 @@ import numpy as np
 import pytest
 from camgeom_synthetic import HEIGHT, WIDTH, example_fit
 
+from lastlight.cameras import ContrastBands, load_registry
 from lastlight.camgeom.fitfile import load_fit
 from lastlight.camgeom.mask import sky_mask_rows
 from lastlight.camgeom.skyline import Box
-from lastlight.cameras import ContrastBands, load_registry
 from lastlight.observe.bands import (
     MIN_COLUMN_COVERAGE,
     ContrastConfigError,
@@ -170,7 +170,7 @@ def test_a_light_dome_that_fits_the_frame_is_accepted() -> None:
     validate_contrast(flat_fit(), bands(light_dome_columns=((530, 800),)))
 
 
-# --- the shipped tables against the shipped, frozen fits --------------------------------------------
+# --- the shipped tables against the shipped, frozen fits ----------------------------------------
 
 
 def test_every_shipped_contrast_table_lies_inside_its_frozen_fit() -> None:
