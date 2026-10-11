@@ -15,6 +15,7 @@ from lastlight.seal import tsa
 from lastlight.seal.tsa import DEFAULT_TSA_URL, Timestamp, TsaError
 
 NOT_GRANTED = bytes.fromhex("30053003020102")  # status 2 (rejection), no token
+NOW = dt.datetime(2026, 10, 10, tzinfo=dt.UTC)  # a date only; the copy carries no usable clock
 
 
 # --- the request --------------------------------------------------------------------------
@@ -87,6 +88,20 @@ def test_a_response_with_a_rejection_status_but_a_token_is_an_error() -> None:
         tsa.parse_response(bytes(patched))
 
 
+def test_a_response_that_covers_a_different_hash_algorithm_is_an_error() -> None:
+    # Same-width OID, one arc changed (SHA-256 -> SHA-384), the 32-byte imprint left alone: the
+    # token is well formed, but it is not a SHA-256 timestamp, so its imprint cannot be trusted
+    # to be the digest of anything we sent.
+    sha256_oid = bytes.fromhex("0609608648016503040201")
+    sha384_oid = bytes.fromhex("0609608648016503040202")
+    in_imprint = sha256_oid + bytes.fromhex("05000420") + bytes.fromhex(helpers.STUB_DIGEST)
+    template = helpers.recorded_tsr()
+    assert template.count(in_imprint) == 1
+    patched = template.replace(in_imprint, in_imprint.replace(sha256_oid, sha384_oid))
+    with pytest.raises(TsaError, match="unsupported hash"):
+        tsa.parse_response(patched)
+
+
 # --- asking the TSA -----------------------------------------------------------------------
 
 
@@ -106,6 +121,16 @@ def test_request_timestamp_refuses_a_response_for_other_data(
     monkeypatch.setattr(tsa, "post_request", helpers.FakeTsa(helpers.recorded_tsr()))
     with pytest.raises(TsaError, match="imprint"):
         tsa.request_timestamp(b"some other forecast", "https://tsa.example/tsr")
+
+
+@pytest.mark.parametrize("byte_index", [0, 15, 31])
+def test_request_timestamp_refuses_a_response_whose_imprint_differs_by_one_bit(
+    monkeypatch: pytest.MonkeyPatch, byte_index: int
+) -> None:
+    near = helpers.flip_bit(helpers.STUB_DIGEST, byte_index)
+    monkeypatch.setattr(tsa, "post_request", helpers.FakeTsa(helpers.make_tsr(near, NOW)))
+    with pytest.raises(TsaError, match="imprint"):
+        tsa.request_timestamp(helpers.STUB_CANONICAL, "https://tsa.example/tsr")
 
 
 def test_request_timestamp_refuses_a_response_that_is_not_granted(
@@ -177,6 +202,16 @@ def test_transport_failures_become_tsa_errors(
     patch_urlopen(monkeypatch, error)
     with pytest.raises(TsaError):
         tsa.post_request("https://tsa.example/tsr", b"q")
+
+
+def test_an_http_error_status_is_reported_as_an_answer_not_as_unreachable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    refusal = urllib.error.HTTPError("https://tsa.example/tsr", 503, "unavailable", {}, None)  # type: ignore[arg-type]
+    patch_urlopen(monkeypatch, refusal)
+    with pytest.raises(TsaError, match=r"answered HTTP 503") as caught:
+        tsa.post_request("https://tsa.example/tsr", b"q")
+    assert "could not reach" not in str(caught.value)
 
 
 @pytest.mark.parametrize(

@@ -198,6 +198,22 @@ def test_a_response_for_a_different_digest_writes_nothing(
     assert helpers.snapshot(ledger) == {}
 
 
+# One bit of the 32-byte digest, at the front, middle and back: a check that compares only a
+# prefix, or only a suffix, of the imprint lets exactly one of these through.
+ONE_BIT_OFF = [0, 15, 31]
+
+
+@pytest.mark.parametrize("byte_index", ONE_BIT_OFF)
+def test_a_response_whose_imprint_differs_by_one_bit_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch, ledger: Path, byte_index: int
+) -> None:
+    near = helpers.flip_bit(helpers.STUB_DIGEST, byte_index)
+    install(monkeypatch, helpers.tsr_before_sunset(DATE, near))
+    with pytest.raises(TsaError, match="imprint"):
+        seal(helpers.stub_forecast(), ledger, tsa_url=TSA_URL)
+    assert helpers.snapshot(ledger) == {}
+
+
 def test_a_failed_write_removes_what_it_had_written(
     monkeypatch: pytest.MonkeyPatch, ledger: Path
 ) -> None:
@@ -244,6 +260,22 @@ def test_one_changed_float_is_a_digest_mismatch(
     assert outcome.reason is not None and "digest mismatch" in outcome.reason
 
 
+@pytest.mark.parametrize("byte_index", ONE_BIT_OFF)
+def test_a_timestamp_whose_imprint_differs_by_one_bit_is_a_digest_mismatch(
+    monkeypatch: pytest.MonkeyPatch, ledger: Path, byte_index: int
+) -> None:
+    # Everything else is in order (valid, canonical, sealed in good time), so only the full-width
+    # digest comparison can fail this one.
+    result = sealed_with(monkeypatch, ledger)
+    near = helpers.flip_bit(helpers.STUB_DIGEST, byte_index)
+    result.paths.timestamp.write_bytes(helpers.tsr_before_sunset(DATE, near))
+    outcome = verify(DATE, ledger)
+    assert not outcome.ok
+    reason = outcome.reason or ""
+    assert "digest mismatch" in reason
+    assert helpers.STUB_DIGEST in reason and near in reason
+
+
 def test_a_timestamp_after_sunset_is_a_late_seal(
     monkeypatch: pytest.MonkeyPatch, ledger: Path
 ) -> None:
@@ -251,6 +283,27 @@ def test_a_timestamp_after_sunset_is_a_late_seal(
     outcome = verify(DATE, ledger)
     assert not outcome.ok
     assert outcome.reason is not None and "late seal" in outcome.reason
+
+
+@pytest.mark.parametrize(("offset_seconds", "late"), [(-1, False), (0, True), (1, True)])
+def test_a_timestamp_issued_at_the_instant_of_sunset_is_late(
+    monkeypatch: pytest.MonkeyPatch,
+    ledger: Path,
+    offset_seconds: int,
+    late: bool,
+) -> None:
+    # The seal must strictly precede sunset. Pin sunset to a whole second so the timestamp
+    # (whole seconds in DER) can land exactly on it.
+    pinned = helpers.sunset(DATE).replace(microsecond=0)
+    monkeypatch.setattr(
+        "lastlight.seal.ledger.elevation_crossings", lambda _date, _lat, _lon: {0.0: pinned}
+    )
+    when = pinned + dt.timedelta(seconds=offset_seconds)
+    sealed_with(monkeypatch, ledger, helpers.make_tsr(helpers.STUB_DIGEST, when))
+    outcome = verify(DATE, ledger)
+    assert outcome.ok is (not late)
+    if late:
+        assert "late seal" in (outcome.reason or "")
 
 
 def test_sunset_is_taken_on_the_forecast_date_not_the_day_before(

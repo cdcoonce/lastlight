@@ -227,6 +227,22 @@ def test_a_tsa_failure_exits_one_and_writes_nothing(
     assert helpers.snapshot(ledger) == {}
 
 
+def test_a_ledger_that_cannot_be_written_exits_one_and_leaves_no_seal(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    forecast_file: Path,
+    ledger: Path,
+) -> None:
+    ledger.mkdir()
+    (ledger / "index.jsonl").mkdir()  # appending to a directory fails after the files exist
+    install(monkeypatch, helpers.recorded_tsr())
+    code, out, err = seal_cmd(capsys, forecast_file, ledger)
+    assert (code, out) == (1, "")
+    assert "could not write the ledger" in err
+    assert not (ledger / "2026" / "10" / "11.forecast.json").exists()
+    assert not (ledger / "2026" / "10" / "11.forecast.tsr").exists()
+
+
 def test_the_tsa_url_is_configurable_and_defaults_to_freetsa(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

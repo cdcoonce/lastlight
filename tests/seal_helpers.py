@@ -143,6 +143,15 @@ def snapshot(root: Path) -> dict[str, bytes | None]:
     }
 
 
+def flip_bit(digest_hex: str, byte_index: int, mask: int = 0x01) -> str:
+    """`digest_hex` with one bit of one byte flipped: the nearest digest that is still wrong."""
+    raw = bytearray(bytes.fromhex(digest_hex))
+    raw[byte_index] ^= mask
+    flipped = raw.hex()
+    assert flipped != digest_hex
+    return flipped
+
+
 def flip_digit(text: str, needle: str) -> str:
     """`text` with the last digit of the one occurrence of `needle` changed by one."""
     assert text.count(needle) == 1
