@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 
+import eccodes
 import hrrr_support as support
 import numpy as np
 import pytest
@@ -100,6 +101,31 @@ def test_a_message_reports_its_reference_time_and_forecast_step() -> None:
 
     assert (decoded.reference_date, decoded.reference_hour) == (support.CYCLE_DATE, 22)
     assert decoded.step_hours == 0
+
+
+def _at_forecast_hour(name: str, hours: int) -> bytes:
+    """The crop's message `name` rewritten, with ecCodes, to be valid `hours` after its run.
+
+    The only recorded file is forecast hour 0, so without this a decoder that always reports
+    step 0 would pass every test.
+    """
+    handle = eccodes.codes_new_from_message(support.crop_message(name))
+    try:
+        eccodes.codes_set(handle, "forecastTime", hours)
+        return bytes(eccodes.codes_get_message(handle))
+    finally:
+        eccodes.codes_release(handle)
+
+
+@pytest.mark.parametrize("hours", [1, 3, 18])
+def test_a_message_from_a_later_forecast_hour_reports_that_hour(hours: int) -> None:
+    decoded = decode_message(_at_forecast_hour("PWAT", hours))
+
+    assert decoded.step_hours == hours
+    # Only the step changed: the run it belongs to and the values are still the recorded ones.
+    assert (decoded.reference_date, decoded.reference_hour) == (support.CYCLE_DATE, 22)
+    value = decoded.values[support.REFERENCE_CELL]
+    assert float(value) == pytest.approx(support.EXPECTED_AT_REFERENCE_CELL["PWAT"], abs=1e-3)
 
 
 def test_the_grid_spec_is_the_3_km_lambert_grid_and_is_shared_by_every_field() -> None:

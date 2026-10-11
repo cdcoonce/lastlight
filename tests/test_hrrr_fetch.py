@@ -351,6 +351,29 @@ def test_fetch_fields_masks_cells_the_model_leaves_empty(tmp_path: Path) -> None
     assert int(np.ma.getmaskarray(values).sum()) == support.CLOUD_TOP_MASKED_CELLS
 
 
+@pytest.mark.parametrize("bad", [np.nan, np.inf, -np.inf], ids=["nan", "inf", "minus-inf"])
+def test_fetch_fields_refuses_a_non_finite_value_anywhere_in_the_field(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad: float
+) -> None:
+    # The poisoned cell is the grid's far south-west corner, which no transect from the
+    # reference point samples. Only a check on the whole decoded field can see it; the
+    # check at sampling time reads sampled cells alone.
+    real_decode = hrrr.decode_message
+
+    def poisoned(data: bytes):
+        decoded = real_decode(data)
+        if (decoded.category, decoded.number) == (1, 3):  # PWAT
+            values = decoded.values.copy()
+            values[support.CORNER_CELL] = bad
+            return dataclasses.replace(decoded, values=values)
+        return decoded
+
+    monkeypatch.setattr(hrrr, "decode_message", poisoned)
+
+    with pytest.raises(HrrrError, match=r"PWAT.*non-finite"):
+        _fetch(tmp_path, support.crop_transport(), names=["LCDC", "PWAT"])
+
+
 def test_fetch_fields_with_no_fields_is_an_error(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="field"):
         fetch_fields(DATE, HOUR, 0, [], tmp_path, transport=support.crop_transport())
