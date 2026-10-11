@@ -24,10 +24,11 @@ import numpy as np
 
 from lastlight.cameras import load_registry
 from lastlight.g0 import stats
-from lastlight.g0.analysis import NOMINAL, Study
+from lastlight.g0.analysis import CHANNEL_NAMES, NOMINAL, Study
 from lastlight.g0.figures import FIGURES
 from lastlight.g0.record import DROP_REASONS, RENDER_SCALES
 from lastlight.g0.view import SkyView
+from lastlight.geometry import ELEVATION_SWEEP
 
 FIGURE_FILES: Final = tuple(FIGURES)
 
@@ -553,9 +554,7 @@ def _extremes_section(study: Study) -> str:
 
 
 def _floor_section(study: Study) -> str:
-    shares = ", ".join(
-        f"{_percent(study.floor_share[name])} at the {name} scale" for name in RENDER_SCALES
-    )
+    nominal, low, high = (study.floor_share[name] for name in RENDER_SCALES)
     lines = [
         "## The channel floor",
         "",
@@ -563,28 +562,52 @@ def _floor_section(study: Study) -> str:
         "can be negative, and a logarithm needs a positive number. A channel is raised to the "
         "widest ratio an 8-bit frame can show under `lastlight.observe`'s own pixel rules (code "
         "6 against code 249, linearised; about 0.002 of the pixel's largest channel) before the "
-        f"logarithm. The floor was used for {shares} "
-        "of the rendered channels. Where it is used, the rendered contrast saturates, which can "
-        "only hide variation, so it biases the spread low.",
+        f"logarithm. The floor was used for {_percent(nominal)} of the rendered channels at the "
+        f"nominal scale, {_percent(low)} at the low scale and {_percent(high)} at the high "
+        "scale. Where it is used the logarithm is of the floor, not of the sky: those values "
+        "say only that the channel is at or below the floor.",
         "",
     ]
     return "\n".join(lines)
 
 
-def _reading_section() -> str:
-    return """## Reading the result
-
-- The verdict is about the **model's** curve: it asks whether the real atmosphere's day-to-day \
-variation, as the archives carry it, moves the rendered contrast by more than 0.05. It says \
-nothing about whether the model matches a camera; that is the scoring milestone, and G1 measures \
-how much of the 0.05 is camera repeatability.
-- The geometry is provisional. The sensitivity table shows how much the pixel scale matters.
-- The renderer is single scattering with fixed aerosol optics and no cloud, and the aerosol \
-column comes from a 25 km model; real variation in aerosol type, humidity and cloud is not here.
-- A mean over a year includes the season. The seasonal control says how much of the spread is \
-the calendar.
-- Dropped dates are listed above with their reasons; none was filled.
-"""
+def _reading_section(study: Study) -> str:
+    columns = [study.bands.index(name) for name in study.counted_bands]
+    red = float(np.mean(study.channels[CHANNEL_NAMES[0]].distances[:, columns]))
+    blue = float(np.mean(study.channels[CHANNEL_NAMES[1]].distances[:, columns]))
+    blue_share = 100.0 * blue / (red + blue) if red + blue > 0.0 else 0.0
+    horizon = list(ELEVATION_SWEEP).index(0.0)
+    at_horizon = [
+        float(np.median([record.contrast[NOMINAL][horizon, 0, channel] for record in study.used]))
+        for channel in (0, 1)
+    ]
+    bullets = [
+        "- The verdict is about the **model's** curve: it asks whether the real atmosphere's "
+        "day-to-day variation, as the archives carry it, moves the rendered contrast by more "
+        "than 0.05. It says nothing about whether the model matches a camera; that is the "
+        "scoring milestone, and G1 measures how much of the 0.05 is camera repeatability.",
+        f"- {CHANNEL_NAMES[1]} carries {blue_share:.0f} percent of the summed D(d, s) over the "
+        "counted bands (see the channel decomposition). In linear sRGB the blue channel of these "
+        "reddened low skies is a small difference of large terms, nearly zero, and a ratio "
+        "against a channel that is nearly zero is very sensitive to small changes in the "
+        "light: the choice of a webcam proxy matters to this statistic.",
+        f"- At a sun elevation of 0 the median, over the dates used, of the lowest band's contrast "
+        f"is {at_horizon[0]:+.2f} in log(R/G) and {at_horizon[1]:+.2f} in log(B/G). The four "
+        "usable frames of the first observed evening, an overcast one, read between -0.21 and "
+        "+0.14 for sun elevations from +5 to -4 (`docs/log/2026-10-11-observed-contrasts.md`). "
+        "A single-scattering model leaves out the multiple scattering that fills the blue of a "
+        "twilight sky, which is likely to exaggerate the rendered blue contrast; matching the "
+        "camera is for the scoring milestone, not for G0.",
+        "- The geometry is provisional. The sensitivity table shows how much the pixel scale "
+        "matters.",
+        "- The renderer is single scattering with fixed aerosol optics and no cloud, and the "
+        "aerosol column comes from a 25 km model; real variation in aerosol type, humidity and "
+        "cloud is not here.",
+        "- A mean over a year includes the season. The seasonal control says how much of the "
+        "spread is the calendar.",
+        "- Dropped dates are listed above with their reasons; none was filled.",
+    ]
+    return "## Reading the result\n\n" + "\n".join(bullets) + "\n"
 
 
 def render_markdown(study: Study, views: Mapping[str, SkyView]) -> str:
@@ -610,7 +633,7 @@ def render_markdown(study: Study, views: Mapping[str, SkyView]) -> str:
         _tier_b_section(study),
         _extremes_section(study),
         _floor_section(study),
-        _reading_section(),
+        _reading_section(study),
     ]
     return "\n".join(parts)
 
