@@ -166,7 +166,7 @@ def test_a_missing_required_argument_exits_2(missing: str, archive: Path, tmp_pa
     assert main([*argv, "--archive", str(archive)]) == 2
 
 
-@pytest.mark.parametrize("date", ["20261010", "2026-13-01", "tonight", "2026-10-10T00:00"])
+@pytest.mark.parametrize("date", ["20261010", "2026-13-01", "tonight", "2026-10", "10/10/2026"])
 def test_a_bad_date_exits_2(date: str, archive: Path, tmp_path: Path) -> None:
     assert run(archive, tmp_path / "o.json", date=date) == 2
 
