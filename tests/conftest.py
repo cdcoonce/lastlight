@@ -12,6 +12,7 @@ UDP `sendto`; tests must not rely on those either.
 from __future__ import annotations
 
 import socket
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -38,3 +39,31 @@ def _block_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPat
         return
     monkeypatch.setattr(socket.socket, "connect", _refuse)
     monkeypatch.setattr(socket.socket, "connect_ex", _refuse)
+
+
+@pytest.fixture
+def ledger_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A ledger of three sealed evenings (`ledger_factory.DATES`), each sealed with its painting.
+
+    `ledger_factory` is imported here, not at the top, because the network-guard tests run this
+    file on its own in a throwaway project that does not have the other test helpers.
+    """
+    import ledger_factory
+
+    ledger = tmp_path / "ledger"
+    ledger_factory.seal_dates(ledger, monkeypatch)
+    return ledger
+
+
+@pytest.fixture
+def shuffled_ledger_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The same three evenings and paintings as `ledger_dir`, sealed out of date order.
+
+    The index lists 2026-10-13, then 2026-10-11, then 2026-10-12: neither ascending nor
+    descending, so only sorting by date can put them newest first.
+    """
+    import ledger_factory
+
+    ledger = tmp_path / "ledger"
+    ledger_factory.seal_dates_out_of_date_order(ledger, monkeypatch)
+    return ledger
