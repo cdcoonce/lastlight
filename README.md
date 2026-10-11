@@ -25,7 +25,11 @@ uv run lastlight --version
 uv run lastlight hrrr-transect --date 2026-10-10   # HRRR cloud, aerosol and vapour along the sightline
 uv run ruff check && uv run ruff format --check && uv run pytest
 uv run lastlight privacy-scan
+uv run lastlight seal FORECAST.json --ledger-dir ledger   # canonical JSON, SHA-256, RFC 3161 timestamp
+uv run lastlight verify 2026-10-11 --ledger-dir ledger    # PASS, or FAIL with the reason
 ```
+
+Public-camera frames are collected on the always-on capture host by `lastlight collect` (see `uv run lastlight collect --help`); the owner's install steps are in [`docs/runbooks/collector.md`](docs/runbooks/collector.md).
 
 Tests run offline: a guard in `tests/conftest.py` refuses every socket connect. A test that really needs the network is marked `@pytest.mark.network`, skipped by default and run on purpose with `uv run pytest -m network`.
 

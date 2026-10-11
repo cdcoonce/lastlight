@@ -20,6 +20,8 @@ dependencies = [
     "eccodeslib>=2.48 ; sys_platform != 'win32'",
     "numpy>=2.5.4",
     "pillow>=12.3.0",
+    "pydantic>=2.14.0",
+    "rfc3161-client>=1.0.9",
 ]
 
 [project.scripts]
