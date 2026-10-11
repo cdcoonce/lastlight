@@ -109,6 +109,35 @@ def test_a_malformed_idx_line_is_an_error() -> None:
         )
 
 
+def test_two_idx_lines_at_the_same_offset_are_refused() -> None:
+    # A message ends where the next begins, so an equal offset is a message of no bytes.
+    with pytest.raises(gefs.AerosolArchiveError, match="does not follow"):
+        gefs.parse_idx(
+            "1:100:d=2025100100:AOTK:entire atmosphere:anl:aerosol=x\n"
+            "2:100:d=2025100100:AOTK:entire atmosphere:anl:aerosol=y\n"
+        )
+
+
+def _entry(number: int, offset: int, label: str, *, level: str = "entire atmosphere"):
+    return gefs.IdxEntry(number, offset, "2025100100", "AOTK", level, "anl", label)
+
+
+def test_an_idx_label_must_match_exactly_not_merely_contain_the_wanted_one() -> None:
+    wanted = gefs.TOTAL_AOD_550.label
+    lookalike = _entry(1, 0, wanted + ":aerosol_mode fine")  # contains the wanted label
+    exact = _entry(2, 100, wanted)
+    ranges = gefs.select_ranges([lookalike, exact], [gefs.TOTAL_AOD_550])
+    assert ranges["TOTAL_AOD_550"] == ByteRange(100, None)
+
+
+def test_an_idx_message_must_be_for_the_entire_atmosphere() -> None:
+    wanted = gefs.TOTAL_AOD_550.label
+    elsewhere = _entry(1, 0, wanted, level="surface")  # the same label at another level
+    column = _entry(2, 100, wanted)
+    ranges = gefs.select_ranges([elsewhere, column], [gefs.TOTAL_AOD_550])
+    assert ranges["TOTAL_AOD_550"] == ByteRange(100, None)
+
+
 def test_the_two_wanted_messages_are_found_among_many_lookalikes_in_the_real_idx() -> None:
     entries = gefs.parse_idx(support.REAL_IDX_TEXT)
     ranges = gefs.select_ranges(entries, gefs.AOD_SPECS)
@@ -365,6 +394,22 @@ def test_a_wrong_wavelength_is_refused(tmp_path) -> None:
         gefs.fetch_aerosol(EVENING, LAT, LON, tmp_path, transport=transport)
 
 
+def test_a_range_that_comes_back_shorter_than_asked_is_not_one_whole_message(tmp_path) -> None:
+    # Ten bytes cut from the middle of the total message: it still opens with GRIB and closes with
+    # 7777, so only its length (the idx says 1482 bytes) shows it is not the message that was asked
+    # for. The file ends there, so the range returns the whole short message.
+    transport = support.crop_transport(CYCLE_DATE, 0)
+    total = support.edited(support.crop_message("TOTAL_AOD_550"), cycle=(CYCLE_DATE, 0))
+    transport.files[gefs.chem_url(CYCLE_DATE, 0, 0)] = total[:700] + total[710:]
+    with pytest.raises(gefs.AerosolArchiveError, match="not one whole GRIB message"):
+        gefs.fetch_aerosol(EVENING, LAT, LON, tmp_path, transport=transport)
+
+
+def test_the_second_message_must_be_on_the_same_grid_as_the_first(tmp_path) -> None:
+    transport = _serve_edited(dust={"latitudeOfFirstGridPointInDegrees": 35.5})
+    _refused_for(tmp_path, transport, r"DUST_AOD_550: the message is on a different grid")
+
+
 def test_a_point_outside_the_grid_is_an_error_not_the_nearest_edge_cell(tmp_path) -> None:
     transport = support.crop_transport(CYCLE_DATE, 0)
     with pytest.raises(gefs.AerosolArchiveError, match="outside"):
@@ -380,6 +425,12 @@ def test_an_optical_depth_that_is_negative_or_not_a_number_is_refused() -> None:
         gefs.check_optical_depth("DUST_AOD_550", float("nan"))
     assert gefs.check_optical_depth("TOTAL_AOD_550", 0.0) == 0.0
     assert gefs.check_optical_depth("TOTAL_AOD_550", 0.3) == 0.3
+
+
+def test_a_tiny_negative_optical_depth_is_packing_noise_and_reads_as_zero() -> None:
+    assert gefs.check_optical_depth("TOTAL_AOD_550", -5e-5) == 0.0
+    with pytest.raises(gefs.AerosolArchiveError, match="TOTAL_AOD_550"):
+        gefs.check_optical_depth("TOTAL_AOD_550", -2e-4)
 
 
 def test_a_cell_the_file_leaves_empty_is_an_error() -> None:
