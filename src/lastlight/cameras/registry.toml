@@ -25,6 +25,8 @@
 #   reference_rows       the band all the others are differenced against
 #   light_dome_columns   [lo, hi) column ranges of artificial city light, excluded from every
 #                        band while the sun is below -4 degrees (columns, not azimuths)
+#   light_dome_provisional  true while those columns are a seed, not a measurement; echoed into
+#                        every observed.json (default false)
 # Every band and the reference must lie inside the camera's sky mask in at least 95 percent of
 # columns of its frozen fit; `lastlight observe` checks that before it reads a frame. A camera
 # without a frozen fit (ESMO1) has no contrast table, and `observe` refuses it.
@@ -49,10 +51,14 @@ elev_m = 340
 skyline_margin_rows = 8
 bands_rows = [[8, 28], [28, 48], [48, 68], [68, 88], [88, 108]]
 reference_rows = [118, 138]
-# Seeded from the first observed evening: from about column 530 to the right-hand edge the
-# lowest band turns orange once the sun is below about -6 degrees (build log
-# docs/log/2026-10-11-observed-contrasts.md says which numbers gave the column).
+# PROVISIONAL. Seeded from the first observed evening: from about column 530 to the right-hand
+# edge the lowest band turns orange once the sun is below about -6 degrees (build log
+# docs/log/2026-10-11-observed-contrasts.md says which numbers gave the column). It rests on ONE
+# overcast frame with the sun below -6 degrees, and left-to-right differences of a similar size
+# appear in that evening's frames at other sun elevations, so city light cannot yet be told from
+# sky structure. Refit it from several evenings, then set light_dome_provisional = false.
 light_dome_columns = [[530, 800]]
+light_dome_provisional = true
 
 [[camera]]
 id = "ESMO1"

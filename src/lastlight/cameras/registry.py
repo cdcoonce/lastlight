@@ -37,7 +37,13 @@ _KNOWN_KEYS: Final = frozenset(
 )
 _POSITION_KEYS: Final = ("lat", "lon", "elev_m")
 _CONTRAST_KEYS: Final = frozenset(
-    {"skyline_margin_rows", "bands_rows", "reference_rows", "light_dome_columns"}
+    {
+        "skyline_margin_rows",
+        "bands_rows",
+        "reference_rows",
+        "light_dome_columns",
+        "light_dome_provisional",
+    }
 )
 
 
@@ -73,12 +79,16 @@ class ContrastBands:
     - `light_dome_columns`: half-open column ranges `(lo, hi)` of artificial city light, excluded
       from every band while the sun is below -4 degrees. Columns, not azimuths: the frame is only
       about 19 degrees wide.
+    - `light_dome_provisional`: true while the dome's columns rest on too little data to be
+      called a measurement (one overcast frame with the sun below -6 degrees). Echoed into
+      `observed.json`, so every observation says whether it was read with a seed or a refit.
     """
 
     skyline_margin_rows: int
     bands_rows: tuple[tuple[int, int], ...]
     reference_rows: tuple[int, int]
     light_dome_columns: tuple[tuple[int, int], ...] = ()
+    light_dome_provisional: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,6 +211,10 @@ def _contrast(entry: dict[str, Any], label: str) -> ContrastBands | None:
         else ()
     )
 
+    provisional = raw.get("light_dome_provisional", False)
+    if not isinstance(provisional, bool):
+        raise RegistryError(f"{label}: contrast 'light_dome_provisional' must be true or false")
+
     _check_ascending(bands, label, "bands_rows")
     _check_ascending(domes, label, "light_dome_columns")
     if bands[0][0] < margin:
@@ -224,6 +238,7 @@ def _contrast(entry: dict[str, Any], label: str) -> ContrastBands | None:
         bands_rows=bands,
         reference_rows=reference,
         light_dome_columns=domes,
+        light_dome_provisional=provisional,
     )
 
 

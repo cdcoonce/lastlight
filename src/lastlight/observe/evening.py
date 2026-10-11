@@ -134,6 +134,7 @@ class Observation:
                 "bands_rows": [list(rows) for rows in contrast.bands_rows],
                 "reference_rows": list(contrast.reference_rows),
                 "light_dome_columns": [list(columns) for columns in contrast.light_dome_columns],
+                "light_dome_provisional": contrast.light_dome_provisional,
                 "light_dome_below_sun_elevation_deg": LIGHT_DOME_SUN_ELEVATION_DEG,
                 "saturated_at_or_above_code": SATURATION_LEVEL,
                 "too_dark_at_or_below_code": DARK_LEVEL,

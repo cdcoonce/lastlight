@@ -6,6 +6,8 @@ move them silently); the loader's refusals are tried one at a time against a val
 
 from __future__ import annotations
 
+from importlib import resources
+
 import pytest
 
 from lastlight.cameras import ContrastBands, RegistryError, load_registry, parse_registry
@@ -67,6 +69,25 @@ def test_whtm1_light_dome_is_a_column_range_on_the_right_hand_edge() -> None:
     assert contrast.light_dome_columns[-1][1] == 800  # it runs to the right-hand edge
 
 
+def test_whtm1_light_dome_is_marked_provisional_and_the_registry_says_why() -> None:
+    contrast = load_registry()["WHTM1"].contrast
+    assert contrast is not None
+    assert contrast.light_dome_provisional is True  # one overcast frame below -6 degrees
+
+    text = (
+        resources.files("lastlight.cameras").joinpath("registry.toml").read_text(encoding="utf-8")
+    )
+    lines = text.splitlines()
+    index = next(i for i, line in enumerate(lines) if line.startswith("light_dome_columns = "))
+    block = []
+    for line in reversed(lines[:index]):
+        if not line.startswith("#"):
+            break
+        block.append(line)
+    comment = " ".join(reversed(block)).lower()
+    assert "provisional" in comment and "overcast" in comment and "one" in comment, comment
+
+
 def test_esmo1_has_no_contrast_table_until_it_has_a_frozen_fit() -> None:
     assert load_registry()["ESMO1"].contrast is None
 
@@ -93,6 +114,26 @@ def test_the_light_dome_may_be_omitted_and_then_excludes_nothing() -> None:
         line for line in VALID.splitlines() if not line.startswith("light_dome_columns")
     )
     assert parse_registry(text)["TEST1"].contrast.light_dome_columns == ()
+
+
+@pytest.mark.parametrize(("value", "expected"), [("true", True), ("false", False)])
+def test_the_light_dome_provisional_flag_is_a_boolean_in_the_table(
+    value: str, expected: bool
+) -> None:
+    contrast = parse_registry(VALID + f"light_dome_provisional = {value}\n")["TEST1"].contrast
+    assert contrast.light_dome_provisional is expected
+
+
+def test_the_light_dome_is_not_provisional_unless_the_table_says_so() -> None:
+    assert parse_registry(VALID)["TEST1"].contrast.light_dome_provisional is False
+
+
+@pytest.mark.parametrize("value", ["1", "0", '"true"', '"yes"', "1.0", "[true]"])
+def test_a_light_dome_provisional_flag_that_is_not_a_boolean_is_rejected_by_name(
+    value: str,
+) -> None:
+    with pytest.raises(RegistryError, match=r"TEST1.*light_dome_provisional.*true or false"):
+        parse_registry(VALID + f"light_dome_provisional = {value}\n")
 
 
 def test_bands_may_leave_a_gap_above_the_margin() -> None:

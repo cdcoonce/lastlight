@@ -296,6 +296,16 @@ def test_the_definition_of_the_bands_is_echoed_so_the_file_describes_itself(arch
     assert "pixel rows above" in definition["unit"]
 
 
+def test_the_light_dome_is_echoed_as_provisional_until_it_is_refit(archive: Path) -> None:
+    definition = observe(archive).to_json()["contrast_definition"]
+    assert definition["light_dome_provisional"] is True  # the seed rests on one overcast frame
+
+    settled = dataclasses.replace(whtm1().contrast, light_dome_provisional=False)
+    camera = dataclasses.replace(whtm1(), contrast=settled)
+    document = observe_evening(camera, archive=archive, date=EVENING).to_json()
+    assert document["contrast_definition"]["light_dome_provisional"] is False
+
+
 def test_the_window_and_the_counts_are_recorded(archive: Path) -> None:
     document = observe(archive).to_json()
     assert document["sun_window_deg"] == {"max": 6.0, "min": -6.0}
