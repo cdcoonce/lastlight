@@ -20,15 +20,15 @@ from camgeom_synthetic import (
     ridge_dem,
     write_geotiff,
 )
+from PIL import Image
+
 from lastlight.camgeom.dem import horizon_profile, tile_name
 from lastlight.camgeom.fitfile import load_fit
 from lastlight.camgeom.frames import frame_sha256
 from lastlight.camgeom.skyline import default_overlay_boxes
 from lastlight.camgeom.suncheck import predict_sun_pixel
-from lastlight.commands.camgeom import COMMAND
-from PIL import Image
-
 from lastlight.cli import main
+from lastlight.commands.camgeom import COMMAND
 
 STAMP = "%Y%m%dT%H%M%SZ"
 EVENING = dt.datetime(2026, 10, 11, 0, 30, tzinfo=dt.UTC)
@@ -178,6 +178,29 @@ def test_fit_reads_the_dem_tile_from_the_cache_and_never_the_network(
     assert load_fit("SYN1", directory=tmp_path).orientation.azimuth_deg == pytest.approx(
         TRUE_MODEL.azimuth_deg, abs=0.3
     )
+
+
+def test_a_position_scan_is_recorded_without_moving_the_site(
+    tmp_path: Path, archive: Path, dem_tif: Path, site_file: Path, capsys: pytest.CaptureFixture
+) -> None:
+    # A box smaller than the step scans only the site itself: the whole path is exercised
+    # (flags, scan, summary, file) for the price of one extra horizon.
+    out = tmp_path / "SYN1.json"
+    code = run(
+        "fit", "--camera", "SYN1", "--frames", str(archive), "--site-file", str(site_file),
+        "--dem", str(dem_tif), "--out", str(out), "--frozen-on", "2026-10-10",
+        "--scan-position-km", "1", "--scan-step-km", "2",
+    )  # fmt: skip
+    assert code == 0
+    scan = load_fit("SYN1", directory=tmp_path).position_scan
+    assert scan is not None
+    assert scan["positions"] == 1 and scan["adopted"] is False
+    assert scan["rms_px_at_site"] == scan["rms_px_min"] == scan["rms_px_max"]
+    assert "position scan" in capsys.readouterr().out
+
+
+def test_without_the_scan_flags_no_scan_is_recorded(fitted: Fitted) -> None:
+    assert load_fit("SYN1", directory=fitted.out_dir).position_scan is None
 
 
 def test_fit_refuses_when_no_frame_is_bright_enough_and_names_the_threshold(

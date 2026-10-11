@@ -12,6 +12,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 from camgeom_synthetic import HEIGHT, REF_ELEV_M, REF_LAT, REF_LON, WIDTH
+from PIL import Image
+
 from lastlight.camgeom.fitfile import (
     GEOMETRY_DIR,
     CameraFit,
@@ -24,7 +26,6 @@ from lastlight.camgeom.mask import sky_mask, write_mask_png
 from lastlight.camgeom.model import CameraModel
 from lastlight.camgeom.orientation import Orientation
 from lastlight.camgeom.skyline import default_overlay_boxes
-from PIL import Image
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 COMMITTED = REPO_ROOT / "src" / "lastlight" / "cameras" / "geometry" / "WHTM1.json"
