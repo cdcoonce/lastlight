@@ -20,7 +20,7 @@
 - Binary skipping made UTF-16 text exports invisible to the text rules. A byte-order mark now routes UTF-16 and UTF-32 files through them.
 - `ruff check --fix` ran before `lastlight.privacy` existed and sorted its imports as third-party in the new test files; it was re-run once the package was there.
 
-**Not seen by the scanner:** clock times inside file names; coordinates written as degrees-minutes-seconds, scaled integers or Unix timestamps; UTF-16 text without a byte-order mark; TIFF metadata other than GPS. CI skips docs-only changes (`paths-ignore`), so a leak added in a docs-only pull request is first scanned on the next code push.
+**Not seen by the scanner:** clock times inside file names; coordinates written as degrees-minutes-seconds, scaled integers or Unix timestamps; UTF-16 text without a byte-order mark; TIFF metadata other than GPS. CI skips docs-only changes (`paths-ignore`), so a leak added in a docs-only pull request is first scanned on the next code push. (Superseded 2026-10-11: CI now runs the full gate on docs-only changes too; see `2026-10-11-day-1-decisions.md`.)
 
 **Expected false positives:** P003 reads any two decimals in the box as a pair, so SVG path data, CSS colour functions or plot ticks that happen to fall in the Arizona box will be flagged. The almanac slice should avoid such decimals in generated files or allowlist them with a reason. P001 flags any HH:MM, including a duration or a MAC address.
 
