@@ -22,13 +22,19 @@ DEFAULT_MIN_INTERVAL_S: Final = 0.5
 DEFAULT_RETRIES: Final = 3
 DEFAULT_BACKOFF_S: Final = 5.0
 
-_NOT_FOUND = re.compile(r"HTTP 404(?!\d)")
+_STATUS = re.compile(r"^\S+: HTTP (\d{3})(?!\d)")
+"""The status field of a `FetchError` message, which is `<url>: HTTP <status> <reason>`."""
 _Result = TypeVar("_Result")
 
 
 def is_not_found(error: FetchError) -> bool:
-    """True when the failure is the server saying the object does not exist (HTTP 404)."""
-    return _NOT_FOUND.search(str(error)) is not None
+    """True when the failure is the server saying the object does not exist (HTTP 404).
+
+    Keyed on the status field the transport writes after the URL, not on a `404` anywhere in the
+    message: a run of 4 April has 404 in its URL, and a reason phrase can carry any text.
+    """
+    status = _STATUS.match(str(error))
+    return status is not None and status.group(1) == "404"
 
 
 class PoliteTransport:
