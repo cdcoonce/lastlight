@@ -10,6 +10,7 @@ from __future__ import annotations
 import dataclasses
 import datetime as dt
 import json
+import statistics
 import subprocess
 import sys
 from pathlib import Path
@@ -149,11 +150,77 @@ def test_with_no_smoke_the_aod_is_the_background_alone() -> None:
     assert result.atmosphere.aod_550 == pytest.approx(0.06)
 
 
+SKEWED_AOTK: list[float | None] = [
+    0.3, 0.0, 0.9, 0.0, 0.1, 0.0, 0.3, 0.1, 0.0, 0.0, 0.9, 0.1, 0.0, 0.3, 0.0, 0.1, 0.0,
+]  # fmt: skip
+"""Eight zeros, four 0.1, three 0.3 and two 0.9: the sum is 3.1 over 17 points."""
+
+SKEWED_CLOUD_BASE: list[float | None] = [None] * 10 + [
+    500.0,
+    600.0,
+    700.0,
+    800.0,
+    900.0,
+    5000.0,
+    9000.0,
+]
+SKEWED_CLOUD_TOP: list[float | None] = [None] * 10 + [
+    3000.0, 3500.0, 4000.0, 4500.0, 12000.0, 15000.0, 16000.0,
+]  # fmt: skip
+SKEWED_EVEN_BASE: list[float | None] = [None] * 11 + [
+    1000.0,
+    1200.0,
+    1400.0,
+    3000.0,
+    5000.0,
+    20000.0,
+]
+
+
+def present(values: list[float | None]) -> list[float]:
+    return [value for value in values if value is not None]
+
+
+def test_the_skewed_aotk_fixture_tells_the_mean_from_every_other_reduction() -> None:
+    values = present(SKEWED_AOTK)
+    nonzero = [value for value in values if value > 0.0]
+    mean = statistics.fmean(values)
+    others = {
+        "median": statistics.median(values),
+        "max": max(values),
+        "min": min(values),
+        "midrange": (max(values) + min(values)) / 2,
+        "mean of the points that have smoke": statistics.fmean(nonzero),
+        "sum": sum(values),
+    }
+    assert all(abs(mean - other) > 0.05 for other in others.values()), others
+
+
+@pytest.mark.parametrize("values", [SKEWED_CLOUD_BASE, SKEWED_CLOUD_TOP, SKEWED_EVEN_BASE])
+def test_the_skewed_cloud_fixtures_tell_the_median_from_every_other_reduction(
+    values: list[float | None],
+) -> None:
+    found = present(values)
+    median = statistics.median(found)
+    others = {
+        "mean": statistics.fmean(found),
+        "max": max(found),
+        "min": min(found),
+        "midrange": (max(found) + min(found)) / 2,
+    }
+    if len(found) % 2 == 0:
+        others |= {"median_low": statistics.median_low(found)}
+        others |= {"median_high": statistics.median_high(found)}
+    assert all(abs(median - other) > 100.0 for other in others.values()), others
+
+
 def test_aod_is_the_transect_mean_of_aotk_plus_the_background() -> None:
-    aotk: list[float | None] = [0.1, 0.3] + [0.2] * 15  # mean 0.2
-    result = reduce_transect(make_samples(AOTK=aotk), EVENING)
-    assert result.aod_smoke == pytest.approx(0.2)
-    assert result.atmosphere.aod_550 == pytest.approx(0.26)
+    # The mean is 3.1 / 17; the median is 0.1, the maximum 0.9, the mean of the points that have
+    # smoke 0.344...: no other reduction lands within a few hundredths of it.
+    result = reduce_transect(make_samples(AOTK=SKEWED_AOTK), EVENING)
+    assert result.aod_smoke == pytest.approx(3.1 / 17, abs=1e-12)
+    assert result.atmosphere.aod_550 == pytest.approx(3.1 / 17 + 0.06, abs=1e-12)
+    assert result.aod_smoke != pytest.approx(0.1, abs=0.01)  # not the median
 
 
 def test_the_mean_does_not_depend_on_the_order_of_the_samples() -> None:
@@ -222,29 +289,39 @@ def test_precipitable_water_is_recorded_but_the_renderer_has_no_place_for_it() -
 
 
 def test_cloud_cover_is_summarised_as_transect_means() -> None:
-    low: list[float | None] = [0.0, 100.0] + [50.0] * 15
-    result = reduce_transect(make_samples(LCDC=low, MCDC=30.0, HCDC=60.0, TCDC=90.0), EVENING)
-    clouds = result.clouds
+    # Four differently skewed fields, so a mean cannot be mistaken for a median and one field
+    # cannot be read under another's name: means 320, 570, 280 and 720 over 17 points.
+    low: list[float | None] = [0.0] * 9 + [10.0] * 4 + [40.0] * 2 + [100.0] * 2
+    mid: list[float | None] = [10.0] * 12 + [90.0] * 5
+    high: list[float | None] = [0.0] * 13 + [70.0] * 4
+    total: list[float | None] = [100.0] * 3 + [30.0] * 14
+    clouds = reduce_transect(
+        make_samples(LCDC=low, MCDC=mid, HCDC=high, TCDC=total), EVENING
+    ).clouds
     assert clouds.points == 17
-    assert clouds.low_pct == pytest.approx(sum(v for v in low if v is not None) / 17)
-    assert (clouds.mid_pct, clouds.high_pct, clouds.total_pct) == (30.0, 60.0, 90.0)
+    assert clouds.low_pct == pytest.approx(320 / 17, abs=1e-9)
+    assert clouds.mid_pct == pytest.approx(570 / 17, abs=1e-9)
+    assert clouds.high_pct == pytest.approx(280 / 17, abs=1e-9)
+    assert clouds.total_pct == pytest.approx(720 / 17, abs=1e-9)
 
 
 def test_cloud_base_and_top_are_medians_over_the_points_that_have_cloud() -> None:
-    base: list[float | None] = [None] * 10 + [
-        1000.0,
-        2000.0,
-        3000.0,
-        4000.0,
-        5000.0,
-        6000.0,
-        7000.0,
-    ]
-    top: list[float | None] = [None] * 10 + [8000.0] * 7
-    clouds = reduce_transect(make_samples(HGT_CLOUD_BASE=base, HGT_CLOUD_TOP=top), EVENING).clouds
-    assert clouds.base_m == 4000.0
-    assert clouds.top_m == 8000.0
+    # Seven cloudy points. Base: median 800, mean 2500 (17500 / 7), maximum 9000. Top: median
+    # 4500, mean about 8286, maximum 16000. Each label gets its own field's median.
+    clouds = reduce_transect(
+        make_samples(HGT_CLOUD_BASE=SKEWED_CLOUD_BASE, HGT_CLOUD_TOP=SKEWED_CLOUD_TOP), EVENING
+    ).clouds
+    assert clouds.base_m == 800.0
+    assert clouds.top_m == 4500.0
     assert clouds.cloudy_points == 7
+
+
+def test_with_an_even_number_of_cloudy_points_the_median_is_the_middle_pair_averaged() -> None:
+    # Six points: the middle pair is 1400 and 3000, so 2200; not the lower (1400), the upper
+    # (3000) or the mean (about 5267).
+    clouds = reduce_transect(make_samples(HGT_CLOUD_BASE=SKEWED_EVEN_BASE), EVENING).clouds
+    assert clouds.base_m == 2200.0
+    assert clouds.cloudy_points == 6
 
 
 def test_a_clear_transect_has_no_cloud_base_or_top() -> None:
@@ -257,22 +334,35 @@ def test_a_clear_transect_has_no_cloud_base_or_top() -> None:
 # --- the notes ----------------------------------------------------------------------------
 
 
+CLOSING_SENTENCE = "Cloud is recorded and not rendered in v0."
+
+
 def test_the_notes_say_what_was_used_and_what_was_not_rendered() -> None:
     notes = reduce_transect(make_samples(AOTK=0.05, PWAT=20.0), EVENING).notes
     assert "0.060" in notes and "0.050" in notes and "0.110" in notes  # background, smoke, total
     assert "272" in notes and "DU" in notes  # October ozone
     assert "SBUV" in notes and "2005" in notes
-    assert "20.0 kg m-2" in notes
-    assert "not rendered" in notes
-    assert "low 40%" in notes and "total 55%" in notes
-    assert "1500 m" in notes and "4000 m" in notes
+    assert "Precipitable water 20.0 kg m-2, recorded and not rendered. " in notes
+    # The cloud sentence, exactly: each height sits under its own label, and the closing
+    # sentence says the cloud is recorded and not rendered (the water-vapour clause also says
+    # "not rendered", so that phrase alone proves nothing about the cloud).
+    assert (
+        "Cloud cover transect mean: low 40%, middle 20%, high 10%, total 55%; "
+        "cloud base median 1500 m and top median 4000 m "
+        "(HRRR geopotential metres; cloud at 17 of 17 points). " + CLOSING_SENTENCE
+    ) in notes
+    assert notes.endswith(" " + CLOSING_SENTENCE)
 
 
 def test_the_notes_for_clear_air_say_there_is_no_cloud_base() -> None:
     notes = reduce_transect(
         make_samples(HGT_CLOUD_BASE=None, HGT_CLOUD_TOP=None, LCDC=0.0, TCDC=0.0), EVENING
     ).notes
-    assert "no cloud base" in notes
+    assert (
+        "Cloud cover transect mean: low 0%, middle 20%, high 10%, total 0%; "
+        "no cloud base or top anywhere on the transect. " + CLOSING_SENTENCE
+    ) in notes
+    assert notes.endswith(" " + CLOSING_SENTENCE)
 
 
 @pytest.mark.parametrize("pwat", [0.0, 12.5, 31.0, 33.5, 37.4, 44.4])

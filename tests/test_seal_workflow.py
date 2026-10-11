@@ -29,6 +29,9 @@ SEAL = WORKFLOWS / "seal.yml"
 SCHEDULE_GAP_HOURS = 2.0
 """The scheduled run must start at least this long before the earliest sunset of the year."""
 
+TWO_YEARS_OF_DAYS = 731
+"""Every day of a span that holds a leap day and both solstices twice, not a sample of it."""
+
 
 @pytest.fixture(scope="module")
 def workflow() -> dict[Any, Any]:
@@ -81,7 +84,7 @@ def test_the_scheduled_run_always_lands_before_the_evening_it_seals() -> None:
     hour, minute = scheduled_time(workflow)
     lat, lon, _elevation = REFERENCE_POINT
     smallest_gap = None
-    for offset in range(0, 366, 6):
+    for offset in range(TWO_YEARS_OF_DAYS):
         date = dt.date(2026, 10, 11) + dt.timedelta(days=offset)
         start = dt.datetime(date.year, date.month, date.day, hour, minute, tzinfo=dt.UTC)
         assert default_evening(start) == date
@@ -172,11 +175,39 @@ def test_the_ledger_is_written_in_a_worktree_and_the_scan_covers_all_of_it(
     assert "ledger-wt/ledger" in scan and "--root" in scan
 
 
-def test_the_token_is_given_to_the_publish_step_alone(steps: list[dict[str, Any]]) -> None:
+def token_mentions(node: Any, path: tuple[str, ...] = ()) -> set[tuple[str, ...]]:
+    """Every place in the parsed workflow that names `GITHUB_TOKEN` or reads any secret."""
+    found: set[tuple[str, ...]] = set()
+    if isinstance(node, dict):
+        for key, value in node.items():
+            here = (*path, str(key))
+            if "GITHUB_TOKEN" in str(key) or "secrets." in str(key):
+                found.add(here)
+            found |= token_mentions(value, here)
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            found |= token_mentions(value, (*path, str(index)))
+    elif "GITHUB_TOKEN" in str(node) or "secrets." in str(node):
+        found.add(path)
+    return found
+
+
+def test_the_token_is_given_to_the_publish_step_alone(
+    workflow: dict[Any, Any], steps: list[dict[str, Any]]
+) -> None:
+    # Not in the workflow's `env`, not in the job's `env` (either would hand it to `uv sync` and
+    # to the step that runs the seal), not in a step's `with:` or `run:`: one `env` entry on the
+    # publish step is the only place it appears.
+    assert "env" not in workflow, "a workflow-level env reaches every step"
+    (job,) = workflow["jobs"].values()
+    assert "GITHUB_TOKEN" not in job["env"] and "secrets" not in str(job["env"])
+    publish = step_index(steps, "lastlight ledger-branch publish")
+    assert token_mentions(workflow) == {
+        ("jobs", "seal", "steps", str(publish), "env", "GITHUB_TOKEN")
+    }, "the token is named on the publish step's env, and nowhere else"
     carrying = [step for step in steps if "GITHUB_TOKEN" in str(step.get("env", {}))]
-    assert len(carrying) == 1
-    assert "lastlight ledger-branch publish" in carrying[0]["run"]
-    assert carrying[0]["env"]["GITHUB_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
+    assert carrying == [steps[publish]]
+    assert steps[publish]["env"] == {"GITHUB_TOKEN": "${{ secrets.GITHUB_TOKEN }}"}
 
 
 def test_the_seal_does_not_know_the_site_exists(steps: list[dict[str, Any]]) -> None:

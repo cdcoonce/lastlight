@@ -235,7 +235,7 @@ def test_the_instant_the_sun_reaches_the_horizon_is_already_too_late(
 def test_a_second_before_sunset_is_still_in_time(
     monkeypatch: pytest.MonkeyPatch, ledger: Path, cache: Path
 ) -> None:
-    now = support.sunset() - dt.timedelta(seconds=2)
+    now = support.sunset() - dt.timedelta(seconds=1)
     support.install_tsa(monkeypatch, now)
     assert run(ledger, cache, now=now).status == "sealed"
     assert verify(support.EVENING, ledger).ok

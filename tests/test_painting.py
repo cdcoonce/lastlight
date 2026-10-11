@@ -14,7 +14,7 @@ import pytest
 from PIL import Image
 
 from lastlight import geometry
-from lastlight.atmosphere import reduce_transect
+from lastlight.atmosphere import AtmosphereV0, reduce_transect
 from lastlight.forecast import Forecast
 from lastlight.inputs import hrrr
 from lastlight.painting import Painting, current_code_sha, paint
@@ -24,7 +24,7 @@ from lastlight.privacy.rules import text_hits
 from lastlight.render import SUN_ELEVATIONS, VIEW_ELEVATIONS, render_curve, render_strip
 from lastlight.seal.canonical import canonical_bytes
 from lastlight.site import REFERENCE_POINT
-from lastlight.vividness import VIVIDNESS_SD
+from lastlight.vividness import RULE_SUMMARY, VIVIDNESS_SD, vividness_v0
 
 
 @pytest.fixture(scope="module")
@@ -74,19 +74,23 @@ def test_every_input_is_recorded_with_its_source_cycle_and_digest(painting: Pain
         assert item.digest == sha256(hrrr_support.crop_message(spec.name))
 
 
-def test_the_curve_is_the_renderers_curve_for_the_reduced_atmosphere(
-    painting: Painting, tmp_path: Path
-) -> None:
+def recorded_reduction(cache_dir: Path) -> AtmosphereV0:
+    """The reduction of the recorded crop, done here step by step, not through `paint`."""
     lat, lon, _elevation = REFERENCE_POINT
     fields = hrrr.fetch_fields(
-        hrrr_support.CYCLE_DATE, support.CYCLE_HOUR, 0, hrrr.DEFAULT_FIELDS, tmp_path,
+        hrrr_support.CYCLE_DATE, support.CYCLE_HOUR, 0, hrrr.DEFAULT_FIELDS, cache_dir,
         transport=support.transport(),
     )  # fmt: skip
     points = geometry.transect(
         support.EVENING, lat, lon, [float(km) for km in hrrr.TRANSECT_DISTANCES_KM]
     )
-    atmosphere = reduce_transect(hrrr.sample_transect(fields, points), support.EVENING).atmosphere
-    expected = render_curve(atmosphere)
+    return reduce_transect(hrrr.sample_transect(fields, points), support.EVENING)
+
+
+def test_the_curve_is_the_renderers_curve_for_the_reduced_atmosphere(
+    painting: Painting, tmp_path: Path
+) -> None:
+    expected = render_curve(recorded_reduction(tmp_path).atmosphere)
 
     curve = painting.forecast.curve
     assert len(curve) == len(SUN_ELEVATIONS) * len(VIEW_ELEVATIONS) == 203
@@ -98,17 +102,29 @@ def test_the_curve_is_the_renderers_curve_for_the_reduced_atmosphere(
         assert (point.L, point.a, point.b) == pytest.approx((row["L"], row["a"], row["b"]))
 
 
-def test_the_vividness_is_the_v0_placeholder_with_its_wide_spread(painting: Painting) -> None:
-    vividness = painting.forecast.vividness
-    assert vividness.sd == VIVIDNESS_SD
-    assert 0.0 <= vividness.mean <= 1.0
+def test_the_vividness_is_the_v0_rule_applied_to_the_low_cloud_and_the_aerosol_of_the_reduction(
+    painting: Painting, tmp_path: Path
+) -> None:
+    reduction = recorded_reduction(tmp_path)
+    low_cloud_pct, aod = reduction.clouds.low_pct, reduction.atmosphere.aod_550
+    assert painting.forecast.vividness == vividness_v0(low_cloud_pct, aod)
+    assert painting.forecast.vividness.sd == VIVIDNESS_SD
+    # The recorded crop tells the two arguments apart: with them swapped the mean would differ.
+    assert vividness_v0(aod, low_cloud_pct) != vividness_v0(low_cloud_pct, aod)
 
 
 def test_the_notes_carry_the_cloud_summary_and_name_the_v0_vividness_rule(
-    painting: Painting,
+    painting: Painting, tmp_path: Path
 ) -> None:
     notes = painting.forecast.notes
-    assert "not rendered" in notes
+    # The recorded crop's cloud sentence and the closing sentence, exactly, then the rule.
+    assert (
+        "Cloud cover transect mean: low 37%, middle 100%, high 90%, total 100%; "
+        "cloud base median 3401 m and top median 8533 m "
+        "(HRRR geopotential metres; cloud at 17 of 17 points). "
+        "Cloud is recorded and not rendered in v0. "
+    ) in notes
+    assert notes == f"{recorded_reduction(tmp_path).notes} {RULE_SUMMARY}"
     assert "v0-placeholder" in notes
     assert "SBUV" in notes
     assert text_hits(notes) == []

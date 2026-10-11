@@ -364,6 +364,40 @@ def test_the_command_opens_and_publishes(
     assert git(remote, "log", "-1", "--format=%s", "ledger") == f"seal: 2026-10-10 {DIGEST[:12]}"
 
 
+def test_the_command_hands_github_token_to_the_push_and_to_no_other_git_call(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    checkout: Path,
+    worktree: Path,
+    git_log: Path,
+) -> None:
+    secret = "ghs_commandleveltokenvalue"
+    decoy = "ghs_adifferenttokenvariable"
+    monkeypatch.setenv("GITHUB_TOKEN", secret)
+    monkeypatch.setenv("GH_TOKEN", decoy)
+    assert (
+        main(["ledger-branch", "open", "--worktree", str(worktree), "--repo", str(checkout)]) == 0
+    )
+    write_seal(worktree)
+    git_log.write_text("")  # only what `publish` runs is under test
+
+    assert main(["ledger-branch", "publish", "--worktree", str(worktree)]) == 0
+
+    calls = git_log.read_text().splitlines()
+    encoded = base64.b64encode(f"x-access-token:{secret}".encode()).decode()
+    decoy_encoded = base64.b64encode(f"x-access-token:{decoy}".encode()).decode()
+    carrying = [call for call in calls if encoded in call]
+    assert len(carrying) == 1, "the token reaches git on exactly one call"
+    assert " push " in f" {carrying[0]} ", "and that call is the push"
+    assert f"AUTHORIZATION: basic {encoded}" in carrying[0]
+    assert all(decoy_encoded not in call and decoy not in call for call in calls)
+    assert all(secret not in call for call in calls), (
+        "only the encoded header is on the command line"
+    )
+    shown = capsys.readouterr()
+    assert secret not in shown.out + shown.err and encoded not in shown.out + shown.err
+
+
 def test_the_command_fails_loudly_when_the_worktree_is_not_there(
     capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
