@@ -60,6 +60,16 @@ def test_a_privacy_finding_exits_one_prints_it_and_writes_no_site(
     assert not out.exists()
 
 
+def test_a_missing_painting_warns_on_stderr_and_still_exits_zero(
+    capsys: pytest.CaptureFixture[str], ledger_dir: Path, tmp_path: Path
+) -> None:
+    factory.strip_path(ledger_dir, factory.DATES[1]).unlink()
+    code, _stdout, stderr = build(capsys, ledger_dir, tmp_path / "site")
+    assert code == 0
+    assert stderr.count("warning") == 1
+    assert "2026-10-12" in stderr and "no painting" in stderr
+
+
 def test_a_missing_ledger_still_builds_the_empty_state_and_warns(
     capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:

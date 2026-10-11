@@ -181,6 +181,37 @@ def test_an_unreadable_strip_is_a_warning_and_a_placeholder_not_a_failed_build(
     assert "No painting for this date" in (out / "2026-10-12.html").read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("how", ["missing", "symlink"])
+def test_a_sealed_date_without_a_usable_painting_is_a_warning_and_a_placeholder(
+    ledger_dir: Path, tmp_path: Path, how: str
+) -> None:
+    painting = factory.strip_path(ledger_dir, MIDDLE)
+    painting.unlink()
+    if how == "symlink":
+        painting.symlink_to(factory.strip_path(ledger_dir, OLDEST))
+    out = tmp_path / "site"
+    report = build_site(ledger_dir, out)
+    assert report.ok
+    assert len(report.warnings) == 1
+    assert "2026-10-12" in report.warnings[0] and "no painting" in report.warnings[0]
+    assert "No painting for this date" in (out / "2026-10-12.html").read_text(encoding="utf-8")
+    assert not (out / "strips" / "2026-10-12.png").exists()
+
+
+def test_every_date_without_a_painting_gets_its_own_warning(
+    ledger_dir: Path, tmp_path: Path
+) -> None:
+    for date in factory.DATES:
+        factory.strip_path(ledger_dir, date).unlink()
+    report = build_site(ledger_dir, tmp_path / "site")
+    assert report.ok
+    assert len(report.warnings) == 3
+    for warning, date in zip(
+        report.warnings, ("2026-10-13", "2026-10-12", "2026-10-11"), strict=True
+    ):
+        assert date in warning
+
+
 def test_a_painting_behind_a_symlinked_directory_is_not_published(
     ledger_dir: Path, tmp_path: Path
 ) -> None:

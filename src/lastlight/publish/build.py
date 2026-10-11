@@ -98,17 +98,20 @@ def _ledger_warnings(ledger: Ledger, ledger_dir: Path) -> list[str]:
 def _publish_strips(
     evenings: tuple[Evening, ...], staging: Path
 ) -> tuple[tuple[Evening, ...], list[str]]:
-    """Re-encode each painting into the staged site; an unreadable one becomes 'no painting'."""
+    """Re-encode each painting into the staged site.
+
+    A date with no painting, or one that is not a readable image, still gets its page, with a
+    placeholder; each such date is a warning, so a ledger layout the reader no longer matches
+    shows up as a warning per date rather than as a quietly empty gallery.
+    """
     kept: list[Evening] = []
     warnings: list[str] = []
     for evening in evenings:
-        if evening.strip is not None and not _reencode(
-            evening.strip, staging / pages.strip_name(evening.date)
-        ):
-            warnings.append(
-                f"the painting for {evening.date.isoformat()} is not a readable image "
-                "and was left out"
-            )
+        iso = evening.date.isoformat()
+        if evening.strip is None:
+            warnings.append(f"there is no painting for {iso}; its page shows a placeholder")
+        elif not _reencode(evening.strip, staging / pages.strip_name(evening.date)):
+            warnings.append(f"the painting for {iso} is not a readable image and was left out")
             evening = dataclasses.replace(evening, strip=None)
         kept.append(evening)
     return tuple(kept), warnings
