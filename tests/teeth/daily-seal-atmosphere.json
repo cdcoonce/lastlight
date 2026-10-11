@@ -1,0 +1,278 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_atmosphere_reduction.py",
+    "tests/test_painting.py",
+    "tests/test_vividness.py",
+    "tests/test_hrrr_fetch.py",
+    "tests/test_render_curve.py",
+    "tests/test_render_data.py",
+    "tests/test_cli_daily.py",
+    "tests/test_daily.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_atmosphere_reduction.py",
+    "tests/test_painting.py",
+    "tests/test_vividness.py",
+    "tests/test_hrrr_fetch.py",
+    "tests/test_render_curve.py",
+    "tests/test_render_data.py",
+    "tests/test_cli_daily.py",
+    "tests/test_daily.py"
+  ],
+  "mutants": [
+    {
+      "label": "C01 aod ignores the 0.06 background",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "aod = smoke + BACKGROUND_AOD",
+      "replace": "aod = smoke"
+    },
+    {
+      "label": "C02 background is a floor not an addend (max)",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "aod = smoke + BACKGROUND_AOD",
+      "replace": "aod = max(smoke, BACKGROUND_AOD)"
+    },
+    {
+      "label": "C03 AOTK transect mean replaced by the maximum",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "return math.fsum(values) / len(values)",
+      "replace": "return max(values)"
+    },
+    {
+      "label": "C04 AOTK transect mean replaced by the median",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "return math.fsum(values) / len(values)",
+      "replace": "return statistics.median(values)"
+    },
+    {
+      "label": "C05 points without a value count as zero",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "        if sample.value is not None:\n            values.setdefault(sample.field, []).append(sample.value)\n",
+      "replace": "        values.setdefault(sample.field, []).append(0.0 if sample.value is None else sample.value)\n"
+    },
+    {
+      "label": "C06 ozone month lookup off by one (wraps)",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "return OZONE_DU_BY_MONTH[month - 1]",
+      "replace": "return OZONE_DU_BY_MONTH[month % 12]"
+    },
+    {
+      "label": "C07 reduction uses the wrong month for ozone",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "ozone = ozone_du(evening.month)",
+      "replace": "ozone = ozone_du(evening.month % 12 + 1)"
+    },
+    {
+      "label": "C08 October ozone value perturbed",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "272.4,  # October",
+      "replace": "274.2,  # October"
+    },
+    {
+      "label": "C09 missing AOTK read as clean air",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "smoke = mean_of(\"AOTK\", required=True)",
+      "replace": "smoke = mean_of(\"AOTK\", required=False) or 0.0"
+    },
+    {
+      "label": "C10 cloud cover in notes printed with a decimal (coordinate-shaped)",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "else f\"{value:.0f}%\"",
+      "replace": "else f\"{value:.1f}%\""
+    },
+    {
+      "label": "C11 cloud base and top labels swapped in notes",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "f\"cloud base median {clouds.base_m:.0f} m and top median {clouds.top_m:.0f} m \"",
+      "replace": "f\"cloud base median {clouds.top_m:.0f} m and top median {clouds.base_m:.0f} m \""
+    },
+    {
+      "label": "C12 notes claim cloud is rendered",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "\"Cloud is recorded and not rendered in v0.\"",
+      "replace": "\"Cloud is rendered in v0.\""
+    },
+    {
+      "label": "C13 pwat passed on but notes drop it silently",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "f\"{water}. \"",
+      "replace": "\"\""
+    },
+    {
+      "label": "C14 cloud median base over all points incl. none",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "base_m=statistics.median(bases) if bases else None,",
+      "replace": "base_m=statistics.mean(bases) if bases else None,"
+    },
+    {
+      "label": "C14b cloud top summarised with the mean instead of the median",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "top_m=statistics.median(tops) if tops else None,",
+      "replace": "top_m=statistics.mean(tops) if tops else None,"
+    },
+    {
+      "label": "C14c cloud base of an even number of points is the lower middle one",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "base_m=statistics.median(bases) if bases else None,",
+      "replace": "base_m=statistics.median_low(bases) if bases else None,"
+    },
+    {
+      "label": "C15 vividness cloud term sign flipped",
+      "file": "../../src/lastlight/vividness.py",
+      "oracle": "real",
+      "find": "- _CLOUD_WEIGHT * (low_cloud_pct / 100.0)",
+      "replace": "+ _CLOUD_WEIGHT * (low_cloud_pct / 100.0)"
+    },
+    {
+      "label": "C16 vividness sd narrowed",
+      "file": "../../src/lastlight/vividness.py",
+      "oracle": "real",
+      "find": "VIVIDNESS_SD: Final = 0.25",
+      "replace": "VIVIDNESS_SD: Final = 0.05"
+    },
+    {
+      "label": "C17 vividness aerosol cap removed",
+      "file": "../../src/lastlight/vividness.py",
+      "oracle": "real",
+      "find": "min(aod_550 / _AEROSOL_CAP_AOD, 1.0)",
+      "replace": "(aod_550 / _AEROSOL_CAP_AOD)"
+    },
+    {
+      "label": "C18 (retired clamp, now) vividness cloud weight doubled so the mean can leave the scale",
+      "file": "../../src/lastlight/vividness.py",
+      "oracle": "real",
+      "find": "_CLOUD_WEIGHT: Final = 0.30",
+      "replace": "_CLOUD_WEIGHT: Final = 0.60"
+    },
+    {
+      "label": "C19 vividness sees aod and cloud swapped",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "vividness_v0(reduction.clouds.low_pct, reduction.atmosphere.aod_550)",
+      "replace": "vividness_v0(reduction.atmosphere.aod_550, reduction.clouds.low_pct)"
+    },
+    {
+      "label": "C20 every input records the first field's digest",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "digest=fields.digests[spec.name],",
+      "replace": "digest=fields.digests[hrrr.DEFAULT_FIELDS[0].name],"
+    },
+    {
+      "label": "C21 digests are of the field name not the bytes",
+      "file": "../../src/lastlight/inputs/hrrr.py",
+      "oracle": "real",
+      "find": "hashlib.sha256(data).hexdigest() for name, data in messages.items()",
+      "replace": "hashlib.sha256(name.encode()).hexdigest() for name, data in messages.items()"
+    },
+    {
+      "label": "C22 input source label loses the field name",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "source=f\"hrrr:{spec.name}\",",
+      "replace": "source=\"hrrr\","
+    },
+    {
+      "label": "C23 forecast names a strip digest that is not the strip's",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "hashlib.sha256(strip_png).hexdigest()",
+      "replace": "hashlib.sha256(strip_png[:-1]).hexdigest()"
+    },
+    {
+      "label": "C24 vividness rule name dropped from notes",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "notes=f\"{reduction.notes} {RULE_SUMMARY}\",",
+      "replace": "notes=reduction.notes,"
+    },
+    {
+      "label": "C25 a time of day sneaks into the notes",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "\"Cloud is recorded and not rendered in v0.\"",
+      "replace": "\"Cloud is recorded and not rendered in v0. Run at 18:30 UTC.\""
+    },
+    {
+      "label": "C26 GITHUB_SHA is read again: a dispatch from another ref seals that ref's commit",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "    override = environment.get(_OVERRIDE_VARIABLE, \"\").strip().lower()",
+      "replace": "    override = (environment.get(_OVERRIDE_VARIABLE) or environment.get(\"GITHUB_SHA\", \"\")).strip().lower()"
+    },
+    {
+      "label": "C26b the checkout's HEAD is never consulted",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "    where = Path(__file__).resolve().parent if cwd is None else cwd",
+      "replace": "    return _UNKNOWN_SHA\n    where = Path(__file__).resolve().parent if cwd is None else cwd"
+    },
+    {
+      "label": "C26c an explicit override loses to the checkout",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "    if _SHA.fullmatch(override):\n        return override\n",
+      "replace": "    if False:\n        return override\n"
+    },
+    {
+      "label": "C27 strip PNG keeps image.info metadata",
+      "file": "../../src/lastlight/render/curve.py",
+      "oracle": "real",
+      "find": "clean = Image.frombytes(image.mode, image.size, image.tobytes())",
+      "replace": "clean = image"
+    },
+    {
+      "label": "C28 forecast CLI always makes a strip",
+      "file": "../../src/lastlight/commands/forecast.py",
+      "oracle": "real",
+      "find": "with_strip=args.strip is not None,",
+      "replace": "with_strip=True,"
+    },
+    {
+      "label": "C29 painting uses the wrong evening for the date",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "date=evening,",
+      "replace": "date=evening + dt.timedelta(days=1),"
+    },
+    {
+      "label": "[control] fsum over a sorted copy (exactly rounded, order-free)",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "return math.fsum(values) / len(values)",
+      "replace": "return math.fsum(sorted(values)) / len(values)",
+      "expect": "survived",
+      "why": "math.fsum returns the correctly rounded sum of its addends independent of order, so sorting the same finite floats cannot change the result; test_the_mean_does_not_depend_on_the_order_of_the_samples pins exactly that. Holds for finite floats only; inf/nan inputs are outside what HRRR samples decode to here."
+    }
+  ]
+}
