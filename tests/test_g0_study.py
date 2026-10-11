@@ -138,6 +138,20 @@ def test_the_ends_of_the_pixel_scale_range_are_recomputed_with_their_own_median(
     assert study.verdict is study.outcomes["nominal"].verdict  # the sensitivity never replaces it
 
 
+def test_a_pixel_scale_end_takes_its_median_from_its_own_contrast_not_the_nominal_one() -> None:
+    # At the low-scale end 12 of 20 dates (more than half) sit 0.1 above zero in golden and early,
+    # so that scale's own median is 0.1 there and the 8 unmoved dates are the ones 0.1 away from
+    # it. Against the nominal contrast (all zero, so a median of zero) it would be the 12 moved
+    # dates instead: 12 of 20, not 8 of 20.
+    days = dates(START, 20)
+    moved = {"golden": 0.1, "early": 0.1}
+    records = [synthetic_record(day, {}, low=moved if i < 12 else {}) for i, day in enumerate(days)]
+    low = study_of(records).outcomes["low"]
+    assert low.verdict.meeting == 8
+    assert low.meets.tolist() == [False] * 12 + [True] * 8
+    np.testing.assert_allclose(low.baseline[list(stats.band_members("golden"))], 0.1)
+
+
 def test_a_sensitivity_that_flips_does_not_change_the_headline_verdict() -> None:
     records = [
         synthetic_record(day, {"golden": 0.1, "early": 0.1} if i < 6 else {}, low={})

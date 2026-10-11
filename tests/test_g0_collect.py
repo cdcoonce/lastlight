@@ -11,6 +11,7 @@ fault is not a reason (it is raised, nothing is written, and the date is tried a
 from __future__ import annotations
 
 import datetime as dt
+import itertools
 
 import gefs_support
 import hrrr_support
@@ -216,6 +217,48 @@ def test_a_dropped_records_detail_never_carries_a_clock_time_or_a_url(tmp_path) 
     assert ".t" not in record.drop_detail.replace(".txt", "")
 
 
+# --- the detail of a dropped date is made safe to keep and print ------------------------------
+
+
+def test_clean_replaces_a_url_wherever_it_sits() -> None:
+    # A URL that is not an archive file name, so only the URL scrub can remove it.
+    cleaned = collect_module._clean("failed to read https://example.org/a/b.bin: refused")
+    assert cleaned == "failed to read the archive refused"
+
+
+def test_clean_replaces_an_archive_file_name_that_is_not_in_a_url() -> None:
+    cleaned = collect_module._clean("cannot read hrrr.t06z.wrfsfcf00.grib2 as asked")
+    assert cleaned == "cannot read the archive file as asked"
+
+
+def test_clean_replaces_a_gefs_file_name_that_is_not_in_a_url() -> None:
+    cleaned = collect_module._clean("cannot read gefs.chem.t12z.a2d_0p25.f000.grib2 as asked")
+    assert cleaned == "cannot read the archive file as asked"
+
+
+def test_clean_cuts_a_long_message_to_the_limit() -> None:
+    cleaned = collect_module._clean("word " * 500)
+    assert len(cleaned) == collect_module._DETAIL_LIMIT
+
+
+def test_clean_joins_lines_and_runs_of_spaces() -> None:
+    assert collect_module._clean("one\n  two\t\tthree") == "one two three"
+
+
+def test_an_unreadable_aerosol_messages_detail_has_no_url_and_no_file_name(tmp_path) -> None:
+    # A run whose bytes are not one whole message: the archive error names the URL (with its cycle
+    # hour) and the range, and the record must keep neither.
+    transport = combined_transport()
+    plan = gefs.aerosol_run(EVENING, LAT, LON)
+    url = gefs.chem_url(plan.cycle_date, plan.cycle_hour, 0)
+    transport.files[url] = transport.files[url][:-20]  # the open-ended dust range loses its trailer
+    record = collector(tmp_path, transport).collect(EVENING)
+    assert record.drop_reason == "aerosol_unreadable"
+    assert "whole GRIB message" in record.drop_detail  # the detail is still the archive's finding
+    assert "http" not in record.drop_detail and "grib2" not in record.drop_detail
+    assert ".t" not in record.drop_detail
+
+
 # --- a network fault is not a reason -----------------------------------------------------------
 
 
@@ -334,6 +377,39 @@ def test_a_time_budget_stops_the_run_between_dates(tmp_path) -> None:
     assert summary.collected < 4
     assert len(store.dates()) == summary.collected
     assert summary.remaining == tuple(d for d in days if d not in store.dates())
+
+
+def test_a_run_stops_when_the_budget_is_exactly_used_up(tmp_path) -> None:
+    days = dates(EVENING, 3)
+    ticks = itertools.chain([0.0], itertools.repeat(50.0))  # the first check finds 50 s gone
+    summary = collect_range(
+        days,
+        RecordStore(tmp_path / "records"),
+        collector(tmp_path, multi_transport(days)),
+        budget_seconds=50.0,
+        clock=lambda: next(ticks),
+    )
+    assert summary.stopped_early
+    assert (summary.collected, summary.remaining) == (0, tuple(days))
+
+
+def test_a_5xx_for_a_run_of_4_april_is_a_fault_not_a_missing_archive_file(tmp_path) -> None:
+    # The aerosol run for the evening of 3 April is the cycle of 4 April, so 404 is in its URL.
+    evening = dt.date(2026, 4, 3)
+    transport = combined_transport(evening)
+    assert "404" in gefs.chem_url(gefs.aerosol_run(evening, LAT, LON).cycle_date, 0, 0)
+
+    class Flaky503:
+        def exists(self, url):
+            return transport.exists(url)
+
+        def get(self, url, byte_range=None):
+            if "gefs" in url:
+                raise FetchError(f"{url}: HTTP 503 Slow Down")
+            return transport.get(url, byte_range)
+
+    with pytest.raises(TransientError, match="503"):
+        collector(tmp_path, Flaky503()).collect(evening)
 
 
 def test_atmosphere_module_is_the_one_the_collector_reduces_with() -> None:

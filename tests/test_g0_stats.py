@@ -256,6 +256,18 @@ def test_the_windowed_median_uses_only_dates_within_the_window() -> None:
     assert stats.band_distances(contrast, baseline).max() == 0.0
 
 
+@pytest.mark.parametrize(("days_apart", "in_window"), [(15, True), (16, False)])
+def test_the_window_holds_a_date_exactly_fifteen_days_away_and_not_one_further(
+    days_apart: int, in_window: bool
+) -> None:
+    dates = [dt.date(2026, 3, 1), dt.date(2026, 3, 1) + dt.timedelta(days=days_apart)]
+    contrast = np.zeros((2, N_ELEVATIONS, N_BANDS, N_CHANNELS))
+    contrast[1] = 1.0
+    baseline = stats.windowed_median(dates, contrast, 15)
+    # Two dates in each other's window have a median halfway between them; alone, a date is its own.
+    assert float(baseline[0, 0, 0, 0]) == (0.5 if in_window else 0.0)
+
+
 def test_the_windowed_median_is_taken_over_calendar_days_so_gaps_do_not_matter() -> None:
     dates = [dt.date(2026, 3, 1), dt.date(2026, 3, 2), dt.date(2026, 3, 29)]
     contrast = np.zeros((3, N_ELEVATIONS, N_BANDS, N_CHANNELS))
