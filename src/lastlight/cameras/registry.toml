@@ -13,6 +13,21 @@
 # the operator's named place when camera calibration needs it; that adds coordinates other
 # than the reference point, which `lastlight privacy-scan` flags until an allowlist entry
 # with a reason is added.
+#
+# A camera may carry a [camera.contrast] table: its tier A observation bands (docs/design.md
+# section 1), defined in PIXEL ROWS above the camera's frozen skyline, column by column, not in
+# degrees. A band [lo, hi) is the rows lo to hi - 1 above the skyline in each column. The pixel
+# scale of a public camera is not identified until the sun enters its frame, so a band in
+# degrees would move by up to half its height at every refit; a band in rows is exact and
+# repeatable (docs/log/2026-10-11-observed-contrasts.md).
+#   skyline_margin_rows  rows kept clear above the skyline; no band may start inside them
+#   bands_rows           the scored bands, lowest first, ascending, not overlapping
+#   reference_rows       the band all the others are differenced against
+#   light_dome_columns   [lo, hi) column ranges of artificial city light, excluded from every
+#                        band while the sun is below -4 degrees (columns, not azimuths)
+# Every band and the reference must lie inside the camera's sky mask in at least 95 percent of
+# columns of its frozen fit; `lastlight observe` checks that before it reads a frame. A camera
+# without a frozen fit (ESMO1) has no contrast table, and `observe` refuses it.
 
 [[camera]]
 id = "WHTM1"
@@ -29,6 +44,15 @@ position_note = "Interim: the public reference point, not the camera's own site.
 lat = 33.45
 lon = -112.07
 elev_m = 340
+
+[camera.contrast]
+skyline_margin_rows = 8
+bands_rows = [[8, 28], [28, 48], [48, 68], [68, 88], [88, 108]]
+reference_rows = [118, 138]
+# Seeded from the first observed evening: from about column 530 to the right-hand edge the
+# lowest band turns orange once the sun is below about -6 degrees (build log
+# docs/log/2026-10-11-observed-contrasts.md says which numbers gave the column).
+light_dome_columns = [[530, 800]]
 
 [[camera]]
 id = "ESMO1"
