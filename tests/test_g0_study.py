@@ -267,3 +267,48 @@ def test_a_shift_that_is_only_in_blue_is_carried_by_blue_alone() -> None:
 def test_the_channel_runs_never_replace_the_verdict() -> None:
     study = study_of(blue_only_population(20, 6, amount=0.12))
     assert study.verdict is study.outcomes["nominal"].verdict
+
+
+# --- the seasonal control, split by channel (post hoc, reported only) --------------------------
+
+
+def blue_step_population(n: int, moved: int, amount: float = 0.4):
+    """`n` dates; the first `moved` are shifted in log(B/G) only, in golden and early."""
+    records = population(n, 0)
+    for record in records[:moved]:
+        for band in ("golden", "early"):
+            record.contrast["nominal"][list(stats.band_members(band)), :, 1] += amount
+    return records
+
+
+def test_the_seasonal_control_is_also_split_by_channel() -> None:
+    # 60 dates, the first 10 moved in blue only. Against the year's median (zero) all 10 are 0.4
+    # away. Against the median of the dates within 15 days, the first dates have a window in which
+    # the moved ones are the majority, so only dates 4 to 9 (a tie at date 4, a minority from
+    # date 5) are still away from their window's median.
+    study = study_of(blue_step_population(60, 10))
+    assert list(study.seasonal_channels) == ["log(R/G)", "log(B/G)"]
+    red, blue = study.seasonal_channels["log(R/G)"], study.seasonal_channels["log(B/G)"]
+    assert study.channels["log(B/G)"].verdict.meeting == 10  # the year-wide median
+    assert (blue.verdict.meeting, blue.verdict.dates) == (6, 60)
+    assert blue.meets.tolist() == [False] * 4 + [True] * 6 + [False] * 50
+    assert red.verdict.meeting == 0
+    assert blue.name == "log(B/G)" and red.name == "log(R/G)"
+
+
+def test_a_seasonal_channel_run_uses_that_channels_own_windowed_median() -> None:
+    records = blue_step_population(60, 10)
+    study = study_of(records)
+    nominal = np.stack([record.contrast["nominal"] for record in records])
+    days = [record.date for record in records]
+    for index, name in enumerate(("log(R/G)", "log(B/G)")):
+        alone = nominal[..., [index]]
+        expected = stats.band_distances(alone, stats.windowed_median(days, alone))
+        np.testing.assert_allclose(study.seasonal_channels[name].distances, expected, atol=1e-12)
+
+
+def test_the_seasonal_channel_runs_never_replace_the_verdict_or_the_seasonal_control() -> None:
+    study = study_of(blue_step_population(60, 10))
+    assert study.verdict is study.outcomes["nominal"].verdict
+    assert study.seasonal.name == "seasonal"
+    assert study.seasonal.verdict.meeting == study.seasonal.meets.sum()

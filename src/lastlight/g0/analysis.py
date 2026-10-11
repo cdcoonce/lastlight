@@ -6,7 +6,8 @@ reason, and a date with no record at all is `not_collected` (never a silent gap)
 the pre-registered rule (`lastlight.g0.stats`) over the nominal-scale contrasts of the dates
 used. Around it, reported and never changing it: the same rule with the median taken at each end
 of the fit's pixel-scale range, the seasonal control (median over the dates within 15 days), the
-post hoc split of D by channel (log(R/G) alone, log(B/G) alone),
+post hoc split of D by channel (log(R/G) alone, log(B/G) alone) for the whole-period median and
+for the seasonal control,
 delta-E 2000 of the absolute curve for tier B, how often the channel floor was used, and the five
 most extreme dates.
 """
@@ -66,6 +67,7 @@ class Study:
     outcomes: dict[str, ScaleOutcome]
     seasonal: ScaleOutcome
     channels: dict[str, ScaleOutcome]
+    seasonal_channels: dict[str, ScaleOutcome]
     delta_e: np.ndarray
     floor_share: dict[str, float]
     extremes: tuple[Extreme, ...]
@@ -144,6 +146,10 @@ def build_study(records: Sequence[DateRecord], start: dt.date, end: dt.date) -> 
         name: _outcome(name, nominal[..., [index]], baseline[..., [index]])
         for index, name in enumerate(CHANNEL_NAMES)
     }
+    seasonal_channels = {
+        name: _outcome(name, nominal[..., [index]], seasonal.baseline[..., [index]])
+        for index, name in enumerate(CHANNEL_NAMES)
+    }
     delta_e = stats.delta_e_by_band(np.stack([record.curve_lab for record in used]))  # type: ignore[misc]
 
     channels_per_date = nominal.shape[1] * (nominal.shape[2] + 1) * 3  # elevations x views x RGB
@@ -160,6 +166,7 @@ def build_study(records: Sequence[DateRecord], start: dt.date, end: dt.date) -> 
         outcomes=outcomes,
         seasonal=seasonal,
         channels=channels,
+        seasonal_channels=seasonal_channels,
         delta_e=delta_e,
         floor_share=floor_share,
         extremes=_extremes(used, outcomes[NOMINAL]),
