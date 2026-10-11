@@ -10,8 +10,9 @@ import math
 import numpy as np
 import pytest
 from camgeom_synthetic import REF_LAT, REF_LON, TRUE_MODEL, paint_disk, paint_glow, render_frame
-from lastlight.camgeom.suncheck import locate_sun_disk, predict_sun_pixel, run_sun_check
 
+from lastlight.camgeom.skyline import Box
+from lastlight.camgeom.suncheck import locate_sun_disk, predict_sun_pixel, run_sun_check
 from lastlight.geometry import solar_position
 
 WHEN = dt.datetime(2026, 10, 11, 0, 30, tzinfo=dt.UTC)
@@ -89,6 +90,16 @@ def test_an_overexposed_patch_is_not_a_sun() -> None:
 def test_a_disk_outside_the_search_radius_is_not_found() -> None:
     image = paint_disk(sky_frame(), 600.0, 60.0)
     assert locate_sun_disk(image, near=(410.0, 120.0), radius_px=60.0) is None
+
+
+def test_white_text_in_an_excluded_box_is_not_mistaken_for_a_sun() -> None:
+    image = sky_frame().copy()
+    image[100:112, 400:412] = 255  # a bright square the size of a stamp glyph cluster
+    kept = locate_sun_disk(image, near=(405.0, 106.0), radius_px=40.0)
+    ignored = locate_sun_disk(
+        image, near=(405.0, 106.0), radius_px=40.0, exclude=[Box(395, 95, 420, 118)]
+    )
+    assert kept is not None and ignored is None
 
 
 def test_the_disk_nearest_the_prediction_wins() -> None:

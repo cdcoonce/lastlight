@@ -160,6 +160,7 @@ def test_the_written_file_carries_no_coordinates_or_clock_times(fitted: Fitted) 
     assert str(REF_LAT) not in text and str(REF_LON) not in text
     assert not re.search(r"(?<![\d.])\d{1,2}:\d{2}(?!\d)", text)
     assert data["radial_term"]["adopted"] is False
+    assert data["radial_term"]["at_bound"] is False
     assert "position_basis" in data
 
 

@@ -21,6 +21,7 @@ from camgeom_synthetic import (
     haversine_m,
     write_geotiff,
 )
+
 from lastlight.camgeom.dem import (
     Dem,
     fetch_tiles,
@@ -29,6 +30,7 @@ from lastlight.camgeom.dem import (
     tile_name,
     tile_url,
     tiles_for_bounds,
+    view_bounds,
 )
 
 # --- the acceptance criterion: a cone against its analytic elevation -----------------------------
@@ -280,3 +282,25 @@ def test_the_real_tile_for_the_phoenix_area_is_a_tiff_on_the_public_bucket() -> 
     with urllib.request.urlopen(request, timeout=60) as response:
         head = response.read()
     assert head in {b"II*\x00", b"II+\x00"}
+
+
+# --- the ground a view can reach ---------------------------------------------------------------
+
+
+def test_the_view_bounds_reach_the_far_end_of_every_ray_and_include_the_observer() -> None:
+    west, south, east, north = view_bounds(REF_LAT, REF_LON, [180.0, 270.0, 360.0], 50.0)
+    one_degree_of_latitude_km = 111.2
+    assert REF_LAT - south == pytest.approx(50.0 / one_degree_of_latitude_km, rel=0.01)
+    assert north - REF_LAT == pytest.approx(50.0 / one_degree_of_latitude_km, rel=0.01)
+    assert REF_LON - west == pytest.approx(
+        50.0 / (one_degree_of_latitude_km * math.cos(math.radians(REF_LAT))), rel=0.01
+    )
+    assert east == pytest.approx(REF_LON, abs=1e-6), "no ray goes east, so the observer is the edge"
+
+
+def test_the_view_bounds_can_be_padded_on_every_side() -> None:
+    plain = view_bounds(REF_LAT, REF_LON, [250.0, 290.0], 30.0)
+    padded = view_bounds(REF_LAT, REF_LON, [250.0, 290.0], 30.0, margin_deg=0.02)
+    assert padded == pytest.approx(
+        (plain[0] - 0.02, plain[1] - 0.02, plain[2] + 0.02, plain[3] + 0.02)
+    )
