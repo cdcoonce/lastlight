@@ -12,8 +12,10 @@ UDP `sendto`; tests must not rely on those either.
 from __future__ import annotations
 
 import socket
+from pathlib import Path
 from typing import Any
 
+import ledger_factory
 import pytest
 
 
@@ -38,3 +40,13 @@ def _block_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPat
         return
     monkeypatch.setattr(socket.socket, "connect", _refuse)
     monkeypatch.setattr(socket.socket, "connect_ex", _refuse)
+
+
+@pytest.fixture
+def ledger_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A ledger of three sealed evenings (`ledger_factory.DATES`), each with a painting."""
+    ledger = tmp_path / "ledger"
+    ledger_factory.seal_dates(ledger, monkeypatch)
+    for date in ledger_factory.DATES:
+        ledger_factory.write_strip(ledger, date)
+    return ledger
