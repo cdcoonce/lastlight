@@ -29,7 +29,7 @@ from lastlight.camgeom.holdout import (
     holdout_rms,
 )
 from lastlight.camgeom.orientation import Orientation
-from lastlight.camgeom.skyline import default_overlay_boxes
+from lastlight.camgeom.skyline import Box, default_overlay_boxes
 
 OVERLAY = default_overlay_boxes(WIDTH, HEIGHT)
 TRUTH_ROWS = true_skyline_y(TRUE_MODEL)
@@ -86,14 +86,29 @@ def test_the_default_band_is_the_width_of_the_fits_own_last_pass() -> None:
     assert holdout_rms(frozen_fit(), cloudy, "default0").rms_px < 0.5
 
 
-def test_the_stamp_is_left_out_as_it_is_in_the_fit() -> None:
-    with_stamp = holdout_rms(frozen_fit(), frame(), "stamp000")
-    # A bright block under the ridge inside the excluded corner must not be traced.
-    image = frame().copy()
-    image[270:295, 600:790] = 255
-    assert holdout_rms(frozen_fit(), image, "stamp001").rms_px == pytest.approx(
-        with_stamp.rms_px, abs=0.3
+def test_the_boxes_the_fit_excludes_are_left_out_of_the_check_too() -> None:
+    # Over 40 columns where the ridge is level, a bright strip 15 to 20 rows above it has a
+    # bottom edge stronger than the ridge's own. With the strip's box excluded, as the fit's
+    # timestamp box is, the trace ignores it; without the exclusion it follows the strip.
+    first = min(range(60, 700), key=lambda c: np.ptp(TRUTH_ROWS[c : c + 40]))
+    span = range(first, first + 40)
+    box = Box(
+        first,
+        int(min(TRUTH_ROWS[c] for c in span)) - 21,
+        first + 40,
+        int(max(TRUTH_ROWS[c] for c in span)) - 10,
     )
+    image = frame().astype(float)
+    for column in span:
+        row = int(round(TRUTH_ROWS[column]))
+        image[row - 20 : row - 15, column] = 255.0
+        image[row - 15 : row - 10, column] = 60.0
+    image = image.astype(np.uint8)
+
+    excluded = holdout_rms(frozen_fit(overlay_boxes=(box,)), image, "boxed000", band_rows=20.0)
+    unexcluded = holdout_rms(frozen_fit(overlay_boxes=()), image, "plain000", band_rows=20.0)
+    assert unexcluded.rms_px > 2.0, "the strip must bite when its box is not excluded"
+    assert excluded.rms_px < 0.4
 
 
 def test_a_frame_of_another_size_cannot_be_checked_against_the_fit() -> None:
