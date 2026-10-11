@@ -342,3 +342,31 @@ def test_the_aerosol_input_is_summarised_by_month(outputs) -> None:
     assert "dust" in section.lower() and "median" in section
     january = next(line for line in section.splitlines() if line.startswith("| 2026-01"))
     assert f"| {sum(1 for d in study.used_dates if d.month == 1)} |" in january
+
+
+# --- reading the result: what carries D, and how large the rendered contrasts are --------------
+
+
+def test_the_reading_section_says_how_much_of_d_each_channel_carries(outputs) -> None:
+    _, _, _, text = outputs
+    reading = text.split("## Reading the result")[1]
+    assert "log(B/G) carries 50 percent of the summed D(d, s) over the counted bands" in reading
+    assert "nearly zero" in reading and "very sensitive" in reading  # why the blue ratio matters
+
+
+def test_the_reading_section_gives_the_size_of_the_rendered_contrast_at_the_horizon(
+    outputs,
+) -> None:
+    _, _, _, text = outputs
+    reading = text.split("## Reading the result")[1]
+    assert "At a sun elevation of 0" in reading
+    assert "+0.00 in log(R/G) and +0.00 in log(B/G)" in reading
+    assert "docs/log/2026-10-11-observed-contrasts.md" in reading
+    assert "multiple scattering" in reading
+
+
+def test_the_channel_floor_sentence_reads_cleanly(outputs) -> None:
+    _, _, _, text = outputs
+    floor = text.split("## The channel floor")[1].split("\n## ")[0]
+    assert "of the rendered channels at the nominal scale" in floor
+    assert "can only hide variation" not in floor
