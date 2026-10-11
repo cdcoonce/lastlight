@@ -376,6 +376,17 @@ def test_an_interrupted_write_leaves_neither_the_tile_nor_a_partial_file(
     assert path.read_bytes() == fake_tile()
 
 
+def test_the_readme_carries_the_credit_the_copernicus_licence_asks_for() -> None:
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text()
+    for required in (
+        "Copernicus DEM GLO-30",
+        "DLR e.V. 2010-2014",
+        "Airbus Defence and Space GmbH 2014-2018",
+        "provided under COPERNICUS by the European Union and ESA",
+    ):
+        assert required in readme, f"the README must credit the terrain data: {required!r}"
+
+
 @pytest.mark.network
 def test_the_real_tile_for_the_phoenix_area_is_a_tiff_on_the_public_bucket() -> None:
     url = tile_url(tile_name(33, -113))

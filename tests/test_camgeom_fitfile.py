@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import json
 import math
 import re
@@ -11,56 +10,42 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from camgeom_synthetic import HEIGHT, REF_ELEV_M, REF_LAT, REF_LON, WIDTH
+from camgeom_synthetic import (
+    HEIGHT,
+    REF_ELEV_M,
+    REF_LAT,
+    REF_LON,
+    SKYLINE_COLUMNS,
+    WIDTH,
+    example_fit,
+)
 from PIL import Image
 
 from lastlight.camgeom.fitfile import (
     GEOMETRY_DIR,
+    SCHEMA_VERSION,
     CameraFit,
     FitFileError,
-    FrameRecord,
+    azimuth_difference_deg,
     load_fit,
+    uncertainty_from_ranges,
     write_fit,
 )
 from lastlight.camgeom.mask import sky_mask, write_mask_png
-from lastlight.camgeom.model import CameraModel
-from lastlight.camgeom.orientation import Orientation, hfov_is_pinned
-from lastlight.camgeom.skyline import default_overlay_boxes
+from lastlight.camgeom.model import CameraModel, pixels_per_degree
+from lastlight.camgeom.orientation import hfov_is_pinned
 from lastlight.privacy.rules import text_hits
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 COMMITTED = REPO_ROOT / "src" / "lastlight" / "cameras" / "geometry" / "WHTM1.json"
 
-COLUMNS = tuple(float(x) for x in range(0, WIDTH, 10)) + (float(WIDTH - 1),)
+COLUMNS = SKYLINE_COLUMNS
 
 
 def assert_nothing_private(text: str) -> None:
     """The repository's own text rules (P001 to P003) find nothing in `text`."""
     found = [text[hit.start : hit.end] for hit in text_hits(text)]
     assert not found, f"the privacy rules flag {found}"
-
-
-def example_fit(**changes) -> CameraFit:
-    fit = CameraFit(
-        camera_id="SYN1",
-        width=WIDTH,
-        height=HEIGHT,
-        orientation=Orientation(274.0, 2.0, 0.4, 66.0),
-        skyline_rms_px=0.8,
-        skyline_rms_deg=0.075,
-        skyline_median_abs_px=0.6,
-        n_columns=790,
-        skyline_x_px=COLUMNS,
-        skyline_y_px=tuple(150.0 + 0.01 * x for x in COLUMNS),
-        overlay_boxes=default_overlay_boxes(WIDTH, HEIGHT),
-        frames_used=(FrameRecord("2026-10-10", 14.65, "ab" * 32),),
-        sun_check={"status": "skipped", "reason": "sun hidden by cloud", "tolerance_deg": 1.0},
-        radial_term={"k1": 0.1, "skyline_rms_px": 0.7, "adopted": False},
-        position_search={"box_km": 8.0, "positions": 60, "adopted": True},
-        frozen_on="2026-10-10",
-        position_basis="operator description, supplied at fit time and not stored",
-    )
-    return dataclasses.replace(fit, **changes)
 
 
 # --- writing and reading --------------------------------------------------------------------------
@@ -79,7 +64,7 @@ def test_a_fit_survives_a_round_trip_through_its_file(tmp_path: Path) -> None:
 
 def test_the_file_is_versioned_and_says_what_it_fitted() -> None:
     data = example_fit().to_json()
-    assert data["schema_version"] == 1
+    assert data["schema_version"] == 2
     assert data["camera_id"] == "SYN1"
     assert data["image"] == {"width": WIDTH, "height": HEIGHT}
     assert set(data["orientation"]) == {"azimuth_deg", "elevation_deg", "roll_deg", "hfov_deg"}
@@ -114,6 +99,87 @@ def test_the_privacy_probe_itself_catches_what_it_is_meant_to() -> None:
     assert_nothing_private("[14.65, 274.0, 66.0]")
 
 
+# --- provisional status, uncertainty and the stated direction -----------------------------------
+
+
+def test_the_file_says_it_is_provisional_and_how_far_the_pointing_could_be_off() -> None:
+    data = example_fit().to_json()
+    assert SCHEMA_VERSION == 2 and data["schema_version"] == 2
+    assert data["provisional"] is True
+    assert data["uncertainty"] == {
+        "azimuth_deg": [272.0, 276.0],
+        "hfov_deg": [60.0, 70.0],
+        "px_per_deg": [10.3, 12.4],
+        "basis": "positions within 10 percent of the best residual inside the box",
+        "lower_bounds": False,
+    }
+    assert data["stated_azimuth_deg"] == 272.0
+    assert data["azimuth_minus_stated_deg"] == 2.0
+
+
+def test_a_fit_object_exposes_the_same_fields_and_they_survive_a_round_trip(
+    tmp_path: Path,
+) -> None:
+    fit = example_fit()
+    assert fit.provisional is True
+    assert fit.uncertainty is not None and fit.uncertainty.hfov_deg == (60.0, 70.0)
+    assert (fit.stated_azimuth_deg, fit.azimuth_minus_stated_deg) == (272.0, 2.0)
+    write_fit(fit, tmp_path / "SYN1.json")
+    loaded = load_fit("SYN1", directory=tmp_path)
+    assert loaded.provisional is True
+    assert loaded.uncertainty == fit.uncertainty
+    assert (loaded.stated_azimuth_deg, loaded.azimuth_minus_stated_deg) == (272.0, 2.0)
+
+
+def test_a_fit_with_no_search_and_no_registry_entry_says_so_with_null() -> None:
+    fit = example_fit(uncertainty=None, stated_azimuth_deg=None, azimuth_minus_stated_deg=None)
+    data = fit.to_json()
+    assert data["uncertainty"] is None and data["stated_azimuth_deg"] is None
+    again = CameraFit.from_json(data)
+    assert again.uncertainty is None and again.azimuth_minus_stated_deg is None
+
+
+def test_a_fit_whose_sun_check_passed_is_not_provisional() -> None:
+    passed = example_fit(
+        sun_check={"status": "passed", "reason": "1 of 1 frames", "tolerance_deg": 1.0},
+        provisional=False,
+    )
+    assert CameraFit.from_json(passed.to_json()).provisional is False
+
+
+def test_the_provisional_flag_must_agree_with_the_sun_check() -> None:
+    # A hand edit that clears the flag without a passing sun check, or sets it after one, is
+    # refused: the flag is derived from the check, never an independent claim.
+    for status, claimed in (("skipped", False), ("failed", False), ("passed", True)):
+        data = example_fit().to_json()
+        data["sun_check"]["status"] = status
+        data["provisional"] = claimed
+        with pytest.raises(FitFileError, match="provisional"):
+            CameraFit.from_json(data)
+
+
+def test_the_difference_from_the_stated_azimuth_wraps_through_north() -> None:
+    assert azimuth_difference_deg(288.7, 274.0) == pytest.approx(14.7)
+    assert azimuth_difference_deg(5.0, 355.0) == pytest.approx(10.0)
+    assert azimuth_difference_deg(355.0, 5.0) == pytest.approx(-10.0)
+
+
+def test_the_pixel_scale_range_follows_from_the_field_of_view_range() -> None:
+    found = uncertainty_from_ranges((283.3, 291.8), (17.7, 28.5), 800, "basis", True)
+    assert found.hfov_deg == (17.7, 28.5)
+    assert found.px_per_deg[1] > found.px_per_deg[0], "a narrower lens is a finer scale"
+    focal = lambda h: 400.0 / math.tan(math.radians(h) / 2.0)  # noqa: E731
+    assert found.px_per_deg[0] == pytest.approx(focal(28.5) * math.pi / 180.0)
+    assert found.px_per_deg[1] == pytest.approx(focal(17.7) * math.pi / 180.0)
+    assert found.lower_bounds is True
+
+
+def test_the_documentation_of_the_model_and_the_mask_says_the_mapping_is_provisional() -> None:
+    assert "provisional" in (CameraFit.camera_model.__doc__ or "")
+    assert "provisional" in (sky_mask.__doc__ or "")
+    assert "0.024" in (sky_mask.__doc__ or ""), "the example scale is that of the real fit"
+
+
 def test_loading_a_fit_that_is_not_there_names_the_camera(tmp_path: Path) -> None:
     with pytest.raises(FitFileError, match="NOPE1"):
         load_fit("NOPE1", directory=tmp_path)
@@ -139,6 +205,55 @@ def _tampered(tmp_path: Path, edit) -> Path:
 def test_a_malformed_fit_file_is_refused_with_the_reason(tmp_path: Path, edit, message) -> None:
     _tampered(tmp_path, edit)
     with pytest.raises(FitFileError, match=message):
+        load_fit("BAD1", directory=tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("edit", "message"),
+    [
+        (lambda d: d["orientation"].update(hfov_deg=0.0), "hfov_deg"),
+        (lambda d: d["orientation"].update(hfov_deg=-20.0), "hfov_deg"),
+        (lambda d: d["orientation"].update(hfov_deg=180.0), "hfov_deg"),
+        (lambda d: d["orientation"].update(hfov_deg=math.nan), "hfov_deg"),
+        (lambda d: d["orientation"].update(azimuth_deg=math.nan), "azimuth_deg"),
+        (lambda d: d["orientation"].update(elevation_deg=95.0), "elevation_deg"),
+        (lambda d: d["orientation"].update(roll_deg="level"), "roll_deg"),
+        (lambda d: d["image"].update(width=0), "width"),
+        (lambda d: d["image"].update(height=-300), "height"),
+        (lambda d: d["image"].update(width=800.5), "width"),
+        (lambda d: d["skyline_fit"].update(rms_px=math.inf), "rms_px"),
+        (lambda d: d["skyline_fit"].update(n_columns=-1), "n_columns"),
+        (lambda d: d["skyline"]["x_px"].__setitem__(5, d["skyline"]["x_px"][4]), "increasing"),
+        (lambda d: d["skyline"]["x_px"].reverse(), "increasing"),
+        (lambda d: d["skyline"]["y_px"].__setitem__(3, math.nan), "y_px"),
+        (lambda d: d["uncertainty"]["hfov_deg"].reverse(), "uncertainty"),
+        (lambda d: d["uncertainty"].update(lower_bounds="no"), "lower_bounds"),
+        (lambda d: d.update(azimuth_minus_stated_deg=9.0), "azimuth_minus_stated"),
+        (lambda d: d.update(azimuth_minus_stated_deg=None), "stated"),
+        (lambda d: d.update(provisional="yes"), "provisional"),
+    ],
+)
+def test_a_fit_file_that_camera_model_or_the_mask_could_not_use_is_refused(
+    tmp_path: Path, edit, message
+) -> None:
+    _tampered(tmp_path, edit)
+    with pytest.raises(FitFileError, match=message):
+        load_fit("BAD1", directory=tmp_path)
+
+
+def test_a_fit_file_from_the_first_schema_is_refused_with_the_version() -> None:
+    data = example_fit().to_json()
+    data["schema_version"] = 1
+    for key in ("provisional", "uncertainty", "stated_azimuth_deg", "azimuth_minus_stated_deg"):
+        del data[key]
+    with pytest.raises(FitFileError, match="schema_version"):
+        CameraFit.from_json(data)
+
+
+@pytest.mark.parametrize("content", ["[]", "42", "null", '"text"', "{not json", ""])
+def test_a_file_that_is_not_a_json_object_is_a_fit_file_error(tmp_path: Path, content: str) -> None:
+    (tmp_path / "BAD1.json").write_text(content)
+    with pytest.raises(FitFileError, match="BAD1.json"):
         load_fit("BAD1", directory=tmp_path)
 
 
@@ -241,6 +356,10 @@ def test_the_committed_whtm1_fit_is_a_valid_frozen_fit() -> None:
     assert COMMITTED.parent == GEOMETRY_DIR
     assert (fit.width, fit.height) == (800, 300)
     assert abs(fit.orientation.azimuth_deg - 274.0) < 20.0, "within the operator's stated view"
+    assert fit.stated_azimuth_deg == 274.0, "the registry's direction for WHTM1, recorded"
+    assert fit.azimuth_minus_stated_deg == pytest.approx(
+        fit.orientation.azimuth_deg - 274.0, abs=0.01
+    ), "and how far the fit landed from it, so the 15 degrees is on the record"
     assert not hfov_is_pinned(fit.orientation.hfov_deg), "a fit on a limit is not a fit"
     assert abs(fit.orientation.elevation_deg) < 10.0 and abs(fit.orientation.roll_deg) < 5.0
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", fit.frozen_on)
@@ -257,6 +376,27 @@ def test_the_committed_whtm1_fit_is_a_valid_frozen_fit() -> None:
     assert search["adopted"] is True and search["positions"] >= 25 and search["box_km"] >= 6.0
     assert search["rms_px_best"] == pytest.approx(fit.skyline_rms_px, abs=0.01)
     assert search["near_best_positions"] >= 1
+    assert search["step_km"] <= 1.0 and search["positions"] >= 17 * 17, "a 1 km grid over the box"
+    assert isinstance(search["best_on_box_edge"], bool)
+    assert isinstance(search["residual_falls_beyond_box"], bool)
+    assert search["ring_positions"] >= 40, "the probes just outside the box were run"
+
+
+def test_the_committed_fit_is_marked_provisional_with_the_ranges_it_could_have_landed_in() -> None:
+    fit = load_fit("WHTM1")
+    assert fit.sun_check["status"] != "passed"
+    assert fit.provisional is True
+    u = fit.uncertainty
+    assert u is not None, "a fit from a position search carries its uncertainty"
+    o = fit.orientation
+    assert u.azimuth_deg[0] <= o.azimuth_deg <= u.azimuth_deg[1]
+    assert u.hfov_deg[0] <= o.hfov_deg <= u.hfov_deg[1]
+    scale = pixels_per_degree(o.hfov_deg, fit.width)
+    assert u.px_per_deg[0] <= scale <= u.px_per_deg[1]
+    assert u.hfov_deg[1] > 1.3 * u.hfov_deg[0], "the field of view is known only to a wide range"
+    search = fit.position_search
+    assert search is not None
+    assert u.lower_bounds == (search["best_on_box_edge"] or search["residual_falls_beyond_box"])
 
 
 def test_the_committed_fit_names_its_frames_without_pixels_or_clock_times() -> None:

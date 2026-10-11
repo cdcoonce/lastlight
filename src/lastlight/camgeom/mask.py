@@ -8,29 +8,34 @@ ridge, where terrain and sky blend, out of every colour statistic.
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
 from lastlight.camgeom.fitfile import CameraFit
+from lastlight.camgeom.model import pixels_per_degree
 
 
 def sky_mask(fit: CameraFit, margin_deg: float = 1.0) -> np.ndarray:
     """Boolean rows-by-columns array, True where the pixel is sky.
 
-    The margin is converted to rows with the pixel scale at the image centre (about one row
-    per 0.09 degrees for a 66 degree lens), which is within a few percent of the true scale
-    across a frame that is under 30 degrees tall. A column where the skyline was not seen is
+    The mask is cut in pixel space from the stored skyline, so it is as well pinned as that
+    skyline (a pixel or two). Only the margin is converted: it becomes rows with the pixel scale
+    at the image centre, which is within a few percent of the true scale across a frame that is
+    under 30 degrees tall. That scale is a property of the fit, about 41 pixels per degree (a row
+    is 0.024 degrees) for a 19 degree lens and 11 pixels per degree (0.09 degrees a row) for a
+    66 degree lens.
+
+    The mapping is provisional while `fit.provisional` is true: the field of view, and with it
+    the number of rows a margin in degrees comes to, is known only to the ranges in
+    `fit.uncertainty` until the sun has confirmed it. A column where the skyline was not seen is
     never sky.
     """
     if margin_deg < 0.0:
         raise ValueError("the margin must not be negative")
-    focal = (fit.width / 2.0) / math.tan(math.radians(fit.orientation.hfov_deg) / 2.0)
-    pixels_per_degree = focal * math.pi / 180.0
     skyline = fit.skyline_y(np.arange(fit.width))
-    limit = skyline - margin_deg * pixels_per_degree
+    limit = skyline - margin_deg * pixels_per_degree(fit.orientation.hfov_deg, fit.width)
     with np.errstate(invalid="ignore"):
         mask = np.arange(fit.height, dtype=float)[:, None] < limit[None, :]
     for box in fit.overlay_boxes:

@@ -8,6 +8,7 @@ sits at the public reference point, and every other place is derived from it.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from pathlib import Path
 
@@ -17,8 +18,10 @@ from rasterio.transform import from_origin
 from scipy import ndimage
 
 from lastlight.camgeom.dem import Dem
+from lastlight.camgeom.fitfile import CameraFit, FrameRecord, Uncertainty
 from lastlight.camgeom.model import CameraModel
-from lastlight.camgeom.skyline import Box
+from lastlight.camgeom.orientation import Orientation
+from lastlight.camgeom.skyline import Box, default_overlay_boxes
 
 REF_LAT, REF_LON = 33.45, -112.07
 REF_ELEV_M = 340.0
@@ -323,3 +326,42 @@ def paint_glow(image: np.ndarray, x: float, y: float, peak: float = 215.0) -> np
     distance = np.hypot(cols - x, rows - y)
     image = np.maximum(image, peak * np.exp(-((distance / 14.0) ** 2))[..., None])
     return np.clip(image, 0, 255).astype(np.uint8)
+
+
+# --- a fit file --------------------------------------------------------------------------------
+
+SKYLINE_COLUMNS = tuple(float(x) for x in range(0, WIDTH, 10)) + (float(WIDTH - 1),)
+
+
+def example_fit(**changes) -> CameraFit:
+    """A valid, provisional `CameraFit` for the synthetic camera; `changes` replace fields."""
+    fit = CameraFit(
+        camera_id="SYN1",
+        width=WIDTH,
+        height=HEIGHT,
+        orientation=Orientation(274.0, 2.0, 0.4, 66.0),
+        skyline_rms_px=0.8,
+        skyline_rms_deg=0.075,
+        skyline_median_abs_px=0.6,
+        n_columns=790,
+        skyline_x_px=SKYLINE_COLUMNS,
+        skyline_y_px=tuple(150.0 + 0.01 * x for x in SKYLINE_COLUMNS),
+        overlay_boxes=default_overlay_boxes(WIDTH, HEIGHT),
+        frames_used=(FrameRecord("2026-10-10", 14.65, "ab" * 32),),
+        sun_check={"status": "skipped", "reason": "sun hidden by cloud", "tolerance_deg": 1.0},
+        radial_term={"k1": 0.1, "skyline_rms_px": 0.7, "adopted": False},
+        position_search={"box_km": 8.0, "positions": 60, "adopted": True},
+        frozen_on="2026-10-10",
+        position_basis="operator description, supplied at fit time and not stored",
+        provisional=True,
+        uncertainty=Uncertainty(
+            azimuth_deg=(272.0, 276.0),
+            hfov_deg=(60.0, 70.0),
+            px_per_deg=(10.3, 12.4),
+            basis="positions within 10 percent of the best residual inside the box",
+            lower_bounds=False,
+        ),
+        stated_azimuth_deg=272.0,
+        azimuth_minus_stated_deg=2.0,
+    )
+    return dataclasses.replace(fit, **changes)

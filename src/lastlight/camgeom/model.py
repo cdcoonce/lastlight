@@ -29,6 +29,11 @@ def _focal_px(hfov_deg: float, width: int) -> float:
     return (width / 2.0) / math.tan(math.radians(hfov_deg) / 2.0)
 
 
+def pixels_per_degree(hfov_deg: float, width: int) -> float:
+    """Pixels per degree at the image centre of a rectilinear lens of this field of view."""
+    return _focal_px(hfov_deg, width) * math.pi / 180.0
+
+
 def _axes(azimuth_deg: float, elevation_deg: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Forward, right and up unit vectors of the camera, as (east, north, up) components."""
     az, el = math.radians(azimuth_deg), math.radians(elevation_deg)

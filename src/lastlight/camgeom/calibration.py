@@ -7,11 +7,12 @@ whether a radial distortion term would explain the residual; check the fit again
 disk; and assemble the record that gets frozen.
 
 The position search exists because an operator's description ("looks west from Avondale") is
-vague, and the horizon a terrain model predicts depends on where the camera stands. It is a
-coarse grid over the box followed by a finer grid around the best coarse position, each point
-fitted from scratch. A skyline alone constrains position and field of view only jointly (move
-the camera toward the ridge and a narrower lens fits as well), so the record keeps how flat the
-valley of good fits is, not just its floor.
+vague, and the horizon a terrain model predicts depends on where the camera stands. It fits
+from scratch at every point of a fine grid (1 km by default) over the whole stated box, and then
+at a ring of probes just outside the box. A skyline alone constrains position and field of view
+only jointly (move the camera toward the ridge and a narrower lens fits as well), so the record
+keeps how flat the valley of good fits is, not just its floor; and the ring says whether that
+valley's floor lies beyond the box that was allowed, which the box itself cannot show.
 """
 
 from __future__ import annotations
@@ -25,7 +26,13 @@ from pathlib import Path
 import numpy as np
 
 from lastlight.camgeom.dem import Dem, horizon_profile
-from lastlight.camgeom.fitfile import CameraFit, FrameRecord
+from lastlight.camgeom.fitfile import (
+    CameraFit,
+    FrameRecord,
+    Uncertainty,
+    azimuth_difference_deg,
+    uncertainty_from_ranges,
+)
 from lastlight.camgeom.frames import discover_frames, evening_of, frame_sha256, load_rgb
 from lastlight.camgeom.model import CameraModel
 from lastlight.camgeom.orientation import (
@@ -49,6 +56,7 @@ AZIMUTH_STEP_DEG = 0.05
 SKYLINE_KNOT_STEP_PX = 10
 KM_PER_DEGREE_LAT = 111.2  # a flat-Earth offset is exact enough for a search of some kilometres
 NEAR_BEST_FACTOR = 1.1  # a position within 10 percent of the best residual is "as good"
+DEFAULT_STEP_KM = 1.0  # grid spacing of the position search
 POSITION_BASIS = (
     "read from the camera site file at fit time and moved by the offset in position_search; "
     "coordinates are kept out of the repository (docs/design.md section 3)"
@@ -85,18 +93,27 @@ class Calibration:
 # --- the position search: pure logic over a function that fits at an offset -----------------------
 
 
-def search_offsets(
-    box_km: float, step_km: float, around: tuple[float, float] = (0.0, 0.0)
-) -> list[tuple[float, float]]:
-    """(east, north) offsets in km: every multiple of the step inside the box about `around`."""
+def search_offsets(box_km: float, step_km: float) -> list[tuple[float, float]]:
+    """(east, north) offsets in km: every multiple of the step inside the box about the site."""
     if box_km < 0 or step_km <= 0:
         raise ValueError("the search box must not be negative and the step must be positive")
     count = math.floor(box_km / step_km + 1e-9)
     steps = range(-count, count + 1)
+    return [(east * step_km, north * step_km) for north in steps for east in steps]
+
+
+def ring_offsets(box_km: float, gap_km: float, spacing_km: float) -> list[tuple[float, float]]:
+    """Offsets on the square `gap_km` outside the box, `spacing_km` apart, corners included."""
+    if gap_km <= 0 or spacing_km <= 0:
+        raise ValueError("the ring's gap and spacing must be positive")
+    half = box_km + gap_km
+    segments = max(1, round(2.0 * half / spacing_km))
+    coords = [-half + 2.0 * half * i / segments for i in range(segments + 1)]
     return [
-        (around[0] + east * step_km, around[1] + north * step_km)
-        for north in steps
-        for east in steps
+        (east, north)
+        for north in coords
+        for east in coords
+        if max(abs(east), abs(north)) >= half - 1e-9
     ]
 
 
@@ -112,38 +129,45 @@ def choose_position(trials: Sequence[PositionTrial]) -> PositionTrial:
     return min(usable, key=lambda t: t.skyline_rms_px)
 
 
+@dataclass(frozen=True)
+class PositionSearch:
+    """What the search found: the chosen trial, every trial in the box, and the ring's trials."""
+
+    best: PositionTrial
+    trials: list[PositionTrial]
+    ring: list[PositionTrial]
+
+
 def search_position(
-    fit_at: Callable[[float, float], PositionTrial | None], box_km: float, step_km: float
-) -> tuple[PositionTrial, list[PositionTrial]]:
-    """Coarse grid over the box, then a grid of half the step around the best coarse position.
+    fit_at: Callable[[float, float], PositionTrial | None],
+    box_km: float,
+    step_km: float,
+    *,
+    ring_gap_km: float | None = None,
+    ring_spacing_km: float | None = None,
+) -> PositionSearch:
+    """Fit at every point of a grid of `step_km` over the box, then probe a ring outside it.
 
     `fit_at(east_km, north_km)` returns the trial there, or None where no fit is possible. No
-    position is fitted twice. Returns the chosen trial and every trial made.
+    position is fitted twice. The chosen position is the best inside the box: the ring is only
+    evidence about what lies beyond it, and is never chosen. The ring is a square `ring_gap_km`
+    outside the box with a probe every `ring_spacing_km`; both default to the grid step, so the
+    ring is sampled as finely as the box and its best is comparable with the box's best (the
+    residual is bumpy at the scale of a kilometre, and a coarser ring would miss the dips). A box
+    smaller than the step asks for the site and nothing else, with no ring.
     """
-    trials: dict[tuple[float, float], PositionTrial] = {}
-
-    def run(offsets: list[tuple[float, float]]) -> None:
-        for offset in offsets:
-            if offset not in trials:
-                found = fit_at(*offset)
-                if found is not None:
-                    trials[offset] = found
-
-    coarse_offsets = search_offsets(box_km, step_km)
-    run(coarse_offsets)
+    offsets = search_offsets(box_km, step_km)
+    trials = [found for offset in offsets if (found := fit_at(*offset)) is not None]
     if not trials:
         raise ValueError("no position in the box gave a usable fit")
-    if len(coarse_offsets) > 1:  # a box smaller than the step asks for the site and nothing else
-        coarse = choose_position(list(trials.values()))
-        around = (coarse.east_km, coarse.north_km)
-        run(
-            [
-                offset
-                for offset in search_offsets(step_km, step_km / 2.0, around=around)
-                if abs(offset[0]) <= box_km + 1e-9 and abs(offset[1]) <= box_km + 1e-9
-            ]
-        )
-    return choose_position(list(trials.values())), list(trials.values())
+    ring: list[PositionTrial] = []
+    if len(offsets) > 1:
+        ring = [
+            found
+            for offset in ring_offsets(box_km, ring_gap_km or step_km, ring_spacing_km or step_km)
+            if (found := fit_at(*offset)) is not None
+        ]
+    return PositionSearch(choose_position(trials), trials, ring)
 
 
 def summarize_search(
@@ -152,11 +176,18 @@ def summarize_search(
     box_km: float,
     step_km: float,
     site_rms_px: float | None,
+    *,
+    ring: Sequence[PositionTrial] = (),
 ) -> dict:
     """What the fit file keeps of the search: the offset adopted and the valley it sits in.
 
     Offsets are from the site file's position, which stays out of the repository, so the record
     holds distances and statistics and no coordinates.
+
+    `best_on_box_edge` is true when the best position lies within one grid step of the box's
+    edge, where the box (a prior the operator's description set) and not the data may have
+    stopped the search. `residual_falls_beyond_box` is true when a probe in the ring just outside
+    the box fits better than anything inside it, which says the valley's floor is out there.
     """
     near = [
         t
@@ -166,7 +197,18 @@ def summarize_search(
     ]
     azimuth = [t.orientation.azimuth_deg for t in near]
     hfov = [t.orientation.hfov_deg for t in near]
-    on_edge = max(abs(best.east_km), abs(best.north_km)) >= box_km - 1e-9 and box_km > 0
+    on_edge = box_km > 0 and max(abs(best.east_km), abs(best.north_km)) >= box_km - step_km - 1e-9
+    ring_usable = [t.skyline_rms_px for t in ring if not hfov_is_pinned(t.orientation.hfov_deg)]
+    ring_best = min(ring_usable, default=None)
+    falls_beyond = ring_best is not None and ring_best < best.skyline_rms_px
+    notes = []
+    if on_edge:
+        notes.append("the floor lies on the edge of the box, so the valley may continue beyond it")
+    if falls_beyond:
+        notes.append(
+            f"the ring just outside the box fits better still ({ring_best:.2f} px against "
+            f"{best.skyline_rms_px:.2f}), so the valley continues beyond the box"
+        )
     return {
         "box_km": box_km,
         "step_km": step_km,
@@ -179,19 +221,66 @@ def summarize_search(
         "near_best_azimuth_deg_range": [round(min(azimuth), 2), round(max(azimuth), 2)],
         "near_best_hfov_deg_range": [round(min(hfov), 2), round(max(hfov), 2)],
         "positions_at_hfov_bound": int(sum(hfov_is_pinned(t.orientation.hfov_deg) for t in trials)),
-        "best_on_box_edge": on_edge,
+        "best_on_box_edge": bool(on_edge),
+        "ring_positions": len(ring),
+        "ring_rms_px_best": None if ring_best is None else round(ring_best, 3),
+        "residual_falls_beyond_box": bool(falls_beyond),
         "adopted": True,
         "reason": (
             f"lowest residual in a flat valley: {len(near)} positions lie within 10 percent of "
             "it, and azimuth and field of view move with the position along it, so the offset "
             "is the floor of the valley and not a measured location"
-            + (
-                "; the floor lies on the edge of the box, so the valley may continue beyond it"
-                if on_edge
-                else ""
-            )
+            + "".join(f"; {note}" for note in notes)
         ),
     }
+
+
+def search_uncertainty(summary: dict, width: int) -> Uncertainty:
+    """The ranges of the nearly equal fits, from a search summary, as the fit file's block."""
+    count = summary["near_best_positions"]
+    lower_bounds = bool(summary["best_on_box_edge"] or summary["residual_falls_beyond_box"])
+    basis = (
+        f"{count} positions inside the {summary['box_km']:g} km position box fit within 10 "
+        f"percent of the best skyline residual ({summary['rms_px_best']:g} px)"
+    )
+    if lower_bounds:
+        basis += (
+            "; the best sits at the edge of the box or the residual keeps falling beyond it, "
+            "so these ranges are lower bounds"
+        )
+    if summary["residual_falls_beyond_box"]:
+        basis += " (the ring of probes just outside the box fits better than anything inside)"
+    return uncertainty_from_ranges(
+        tuple(summary["near_best_azimuth_deg_range"]),
+        tuple(summary["near_best_hfov_deg_range"]),
+        width,
+        basis,
+        lower_bounds,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class Observer:
+    """Where a camera stands for one trial: the position and the height above sea level."""
+
+    lat: float
+    lon: float
+    elev_m: float
+
+
+def observer_at(dem: Dem, site: CameraSite, east_km: float, north_km: float) -> Observer | None:
+    """The camera moved `east_km` and `north_km` from the site, on the terrain model's ground.
+
+    East adds to the longitude (a degree of longitude is shorter by the cosine of the latitude)
+    and north to the latitude. The camera stands on the model's ground there plus the mount
+    height. None where the model has no ground.
+    """
+    lat = site.lat + north_km / KM_PER_DEGREE_LAT
+    lon = site.lon + east_km / (KM_PER_DEGREE_LAT * math.cos(math.radians(site.lat)))
+    ground = dem.sample(lat, lon)
+    if np.isnan(ground):
+        return None
+    return Observer(lat, lon, float(ground) + site.mount_height_m)
 
 
 # --- the pipeline ---------------------------------------------------------------------------------
@@ -234,12 +323,10 @@ def _fit_placed(
     max_range_km: float,
 ) -> _Placement | None:
     """Fit with the camera moved from the site; None where the DEM cannot support it."""
-    lat = site.lat + north_km / KM_PER_DEGREE_LAT
-    lon = site.lon + east_km / (KM_PER_DEGREE_LAT * math.cos(math.radians(site.lat)))
-    ground = dem.sample(lat, lon)
-    if np.isnan(ground):
+    observer = observer_at(dem, site, east_km, north_km)
+    if observer is None:
         return None
-    elev_m = float(ground) + site.mount_height_m
+    lat, lon, elev_m = observer.lat, observer.lon, observer.elev_m
     azimuths = view_azimuths(site.view_azimuth_deg)
     elevations = horizon_profile(dem, lat, lon, elev_m, azimuths, max_range_km=max_range_km)
     if np.isfinite(elevations).mean() < 0.5:
@@ -267,13 +354,15 @@ def calibrate_camera(
     max_range_km: float = 50.0,
     sun_tolerance_deg: float = 1.0,
     position_box_km: float = 0.0,
-    position_step_km: float = 4.0,
+    position_step_km: float = DEFAULT_STEP_KM,
+    stated_azimuth_deg: float | None = None,
 ) -> Calibration:
     """Fit one camera from the frames under `frames_dir` and the terrain in `dem`.
 
     With `position_box_km` above zero the camera's position is searched inside that box about
     the site (see `search_position`) and the fit is the one at the best position; otherwise the
-    camera is taken to stand at the site.
+    camera is taken to stand at the site. `stated_azimuth_deg` is the direction the operator
+    states (the camera registry's `view_azimuth_deg`); the fit records how far it landed from it.
     """
     timed, without_time = [], 0
     for frame in discover_frames(frames_dir):
@@ -311,18 +400,19 @@ def calibrate_camera(
     position_search = None
     if position_box_km > 0:
         try:
-            best, trials = search_position(fit_at, position_box_km, position_step_km)
+            found = search_position(fit_at, position_box_km, position_step_km)
         except ValueError as error:
             raise CalibrationError(str(error)) from error
         site_placement = placements.get((0.0, 0.0))
         position_search = summarize_search(
-            trials,
-            best,
+            found.trials,
+            found.best,
             position_box_km,
             position_step_km,
             None if site_placement is None else site_placement.trial.skyline_rms_px,
+            ring=found.ring,
         )
-        placed = placements[(best.east_km, best.north_km)]
+        placed = placements[(found.best.east_km, found.best.north_km)]
     else:
         if fit_at(0.0, 0.0) is None:
             raise CalibrationError("the DEM does not cover the camera's position and view")
@@ -379,6 +469,16 @@ def calibrate_camera(
         position_search=position_search,
         frozen_on=frozen_on.isoformat(),
         position_basis=POSITION_BASIS,
+        provisional=sun_check.status != "passed",
+        uncertainty=(
+            None if position_search is None else search_uncertainty(position_search, width)
+        ),
+        stated_azimuth_deg=stated_azimuth_deg,
+        azimuth_minus_stated_deg=(
+            None
+            if stated_azimuth_deg is None
+            else azimuth_difference_deg(o.azimuth_deg, stated_azimuth_deg)
+        ),
     )
     return Calibration(fit, skyline, radial, sun_check, len(chosen), too_dark, without_time)
 

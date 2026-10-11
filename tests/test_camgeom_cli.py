@@ -72,11 +72,30 @@ def archive(tmp_path_factory: pytest.TempPathFactory, horizon_fn) -> Path:
 @pytest.fixture(scope="module")
 def site_file(tmp_path_factory: pytest.TempPathFactory) -> Path:
     path = tmp_path_factory.mktemp("site") / "sites.toml"
-    path.write_text(
-        f"[SYN1]\nlat = {REF_LAT}\nlon = {REF_LON}\n"
-        f"mount_height_m = {MOUNT_HEIGHT_M}\nview_azimuth_deg = 272.0\n"
-    )
+    for camera in ("SYN1", "WHTM1"):
+        with path.open("a") as out:
+            out.write(
+                f"[{camera}]\nlat = {REF_LAT}\nlon = {REF_LON}\n"
+                f"mount_height_m = {MOUNT_HEIGHT_M}\nview_azimuth_deg = 272.0\n"
+            )
     return path
+
+
+def small_archive(root: Path, horizon_fn, *, disk_offset_px: float | None) -> Path:
+    """Two daytime frames; the first holds a sun disk `disk_offset_px` from where it belongs."""
+    sun = predict_sun_pixel(TRUE_MODEL, EVENING)
+    assert sun is not None
+    for index in range(2):
+        when = EVENING + dt.timedelta(minutes=5 * index)
+        image = render_frame(
+            TRUE_MODEL, horizon_fn, seed=20 + index, stamp=default_overlay_boxes(800, 300)[0]
+        )
+        if index == 0 and disk_offset_px is not None:
+            image = paint_disk(image, sun.x + disk_offset_px, sun.y)
+        path = root / "2026-10-10" / f"{when.strftime(STAMP)}.jpg"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        Image.fromarray(image).save(path, quality=92)
+    return root
 
 
 def run(*argv: str) -> int:
@@ -205,6 +224,68 @@ def test_without_the_search_flags_no_search_is_recorded(fitted: Fitted) -> None:
     assert load_fit("SYN1", directory=fitted.out_dir).position_search is None
 
 
+def test_a_fit_whose_sun_check_passed_is_not_provisional(fitted: Fitted) -> None:
+    fit = load_fit("SYN1", directory=fitted.out_dir)
+    assert fit.sun_check["status"] == "passed" and fit.provisional is False
+    assert "PROVISIONAL" not in fitted.stdout
+
+
+def test_a_skipped_sun_check_exits_0_and_marks_the_fit_provisional(
+    tmp_path: Path, horizon_fn, dem_tif: Path, site_file: Path, capsys: pytest.CaptureFixture
+) -> None:
+    frames = small_archive(tmp_path / "frames", horizon_fn, disk_offset_px=None)
+    out = tmp_path / "SYN1.json"
+    code = run(
+        "fit", "--camera", "SYN1", "--frames", str(frames), "--site-file", str(site_file),
+        "--dem", str(dem_tif), "--out", str(out), "--frozen-on", "2026-10-10",
+    )  # fmt: skip
+    assert code == 0
+    fit = load_fit("SYN1", directory=tmp_path)
+    assert fit.sun_check["status"] == "skipped"
+    assert fit.provisional is True
+    assert "PROVISIONAL" in capsys.readouterr().out
+
+
+def test_a_failed_sun_check_exits_1_and_still_writes_the_fit_for_inspection(
+    tmp_path: Path, horizon_fn, dem_tif: Path, site_file: Path, capsys: pytest.CaptureFixture
+) -> None:
+    # The sun's disk lies 35 pixels (about 3 degrees) from where the fit says the sun is.
+    frames = small_archive(tmp_path / "frames", horizon_fn, disk_offset_px=35.0)
+    out = tmp_path / "SYN1.json"
+    code = run(
+        "fit", "--camera", "SYN1", "--frames", str(frames), "--site-file", str(site_file),
+        "--dem", str(dem_tif), "--out", str(out), "--frozen-on", "2026-10-10",
+    )  # fmt: skip
+    captured = capsys.readouterr()
+    assert code == 1
+    assert out.exists(), "the file is written so that it can be inspected"
+    fit = load_fit("SYN1", directory=tmp_path)
+    assert fit.sun_check["status"] == "failed" and fit.provisional is True
+    assert "sun check FAILED" in captured.err and str(out) in captured.err
+    assert "failed" in captured.out
+
+
+def test_the_fit_records_how_far_it_landed_from_the_direction_the_operator_states(
+    tmp_path: Path, archive: Path, dem_tif: Path, site_file: Path
+) -> None:
+    out = tmp_path / "WHTM1.json"
+    code = run(
+        "fit", "--camera", "WHTM1", "--frames", str(archive), "--site-file", str(site_file),
+        "--dem", str(dem_tif), "--out", str(out), "--frozen-on", "2026-10-10",
+    )  # fmt: skip
+    assert code == 0
+    fit = load_fit("WHTM1", directory=tmp_path)
+    assert fit.stated_azimuth_deg == 274.0, "the registry's direction for WHTM1"
+    assert fit.azimuth_minus_stated_deg == pytest.approx(
+        fit.orientation.azimuth_deg - 274.0, abs=0.01
+    )
+
+
+def test_a_camera_the_registry_does_not_list_has_no_stated_azimuth(fitted: Fitted) -> None:
+    fit = load_fit("SYN1", directory=fitted.out_dir)
+    assert fit.stated_azimuth_deg is None and fit.azimuth_minus_stated_deg is None
+
+
 def test_fit_refuses_when_no_frame_is_bright_enough_and_names_the_threshold(
     tmp_path: Path, archive: Path, dem_tif: Path, site_file: Path, capsys: pytest.CaptureFixture
 ) -> None:
@@ -250,6 +331,56 @@ def test_fit_exits_2_with_a_reason_when_an_input_is_missing(
     assert not (tmp_path / "x.json").exists()
 
 
+def _bad_frames(tmp_path: Path, kind: str) -> Path:
+    frames = tmp_path / "frames"
+    good = frames / "2026-10-10"
+    good.mkdir(parents=True)
+    when = EVENING + dt.timedelta(minutes=1)
+    path = good / f"{when.strftime(STAMP)}.jpg"
+    if kind == "truncated":
+        noise = np.random.default_rng(0).integers(0, 256, (300, 800, 3), dtype=np.uint8)
+        Image.fromarray(noise).save(path, quality=95)
+        path.write_bytes(path.read_bytes()[: path.stat().st_size // 3])
+    elif kind == "garbage":
+        path.write_bytes(b"this is not a picture, whatever the name says" * 50)
+    else:
+        path.write_bytes(b"")
+    return frames
+
+
+@pytest.mark.parametrize("kind", ["truncated", "garbage", "empty"])
+def test_a_frame_that_cannot_be_decoded_exits_2_with_a_one_line_reason(
+    tmp_path: Path, dem_tif: Path, site_file: Path, capsys: pytest.CaptureFixture, kind: str
+) -> None:
+    frames = _bad_frames(tmp_path, kind)
+    code = run(
+        "fit", "--camera", "SYN1", "--frames", str(frames), "--site-file", str(site_file),
+        "--dem", str(dem_tif), "--out", str(tmp_path / "x.json"),
+    )  # fmt: skip
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "not a readable JPEG" in err
+    assert err.strip().count("\n") == 0 and "Traceback" not in err
+    assert not (tmp_path / "x.json").exists()
+
+
+@pytest.mark.parametrize("kind", ["not_a_tiff", "tiff_header_only"])
+def test_a_corrupt_dem_tile_exits_2_with_a_one_line_reason(
+    tmp_path: Path, archive: Path, site_file: Path, capsys: pytest.CaptureFixture, kind: str
+) -> None:
+    tile = tmp_path / "corrupt.tif"
+    tile.write_bytes((b"II*\x00" if kind == "tiff_header_only" else b"junk") + b"\x07" * 6000)
+    code = run(
+        "fit", "--camera", "SYN1", "--frames", str(archive), "--site-file", str(site_file),
+        "--dem", str(tile), "--out", str(tmp_path / "x.json"),
+    )  # fmt: skip
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "corrupt.tif" in err
+    assert err.strip().count("\n") == 0 and "Traceback" not in err
+    assert not (tmp_path / "x.json").exists()
+
+
 def test_fit_without_a_site_file_says_which_environment_variable_would_do(
     tmp_path: Path, archive: Path, dem_tif: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture,
@@ -263,6 +394,106 @@ def test_fit_without_a_site_file_says_which_environment_variable_would_do(
 def test_camgeom_without_an_action_is_a_usage_error(capsys: pytest.CaptureFixture) -> None:
     assert run() == 2
     assert "fit" in capsys.readouterr().err
+
+
+# --- holdout  ------------------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def other_frames(tmp_path_factory: pytest.TempPathFactory, horizon_fn, archive: Path) -> Path:
+    """Two frames the fit never saw, and a copy of one it was frozen on."""
+    root = tmp_path_factory.mktemp("held-out")
+    for index, minutes in enumerate((12, 17)):
+        when = EVENING + dt.timedelta(minutes=minutes)
+        image = render_frame(
+            TRUE_MODEL, horizon_fn, seed=60 + index, stamp=default_overlay_boxes(800, 300)[0]
+        )
+        Image.fromarray(image).save(root / f"{when.strftime(STAMP)}.jpg", quality=92)
+    used = sorted((archive / "2026-10-10").glob("*.jpg"))[0]
+    (root / "copy-of-a-fitted-frame.jpg").write_bytes(used.read_bytes())
+    return root
+
+
+def test_holdout_prints_one_line_per_unused_frame_and_the_band(
+    fitted: Fitted, other_frames: Path, capsys: pytest.CaptureFixture
+) -> None:
+    code = run(
+        "holdout", "--camera", "SYN1", "--fit", str(fitted.path), "--frames", str(other_frames),
+        "--band", "12",
+    )  # fmt: skip
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert code == 0
+    frame_lines = [line for line in lines if "held-out frame" in line and "sha256" in line]
+    assert len(frame_lines) == 2, lines
+    for line in frame_lines:
+        assert re.search(r"sha256 [0-9a-f]{8}\)", line)
+        rms = float(re.search(r"rms ([\d.]+) px", line).group(1))
+        assert rms < 1.5, "the frozen skyline follows the ridge in frames it was not fitted on"
+    assert "+-12 rows" in lines[0] and "1 frame used in the fit left out" in lines[0]
+    assert "band +-12 rows" in lines[-1]
+
+
+def test_holdout_names_no_file_and_no_time(
+    fitted: Fitted, other_frames: Path, capsys: pytest.CaptureFixture
+) -> None:
+    run("holdout", "--camera", "SYN1", "--fit", str(fitted.path), "--frames", str(other_frames))
+    out = capsys.readouterr().out
+    assert ".jpg" not in out and "2026" not in out and "T00" not in out
+
+
+def test_holdout_with_only_frames_the_fit_used_says_so_and_exits_2(
+    fitted: Fitted, archive: Path, capsys: pytest.CaptureFixture, tmp_path: Path
+) -> None:
+    used_only = tmp_path / "used"
+    used_only.mkdir()
+    fit = load_fit("SYN1", directory=fitted.out_dir)
+    for path in (archive / "2026-10-10").glob("*.jpg"):
+        if frame_sha256(path) in {r.sha256 for r in fit.frames_used}:
+            (used_only / path.name).write_bytes(path.read_bytes())
+    code = run("holdout", "--camera", "SYN1", "--fit", str(fitted.path), "--frames", str(used_only))
+    assert code == 2
+    assert "all were used in the fit" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["--fit", "{tmp}/missing.json"], "missing.json"),
+        (["--camera", "OTHER1"], "OTHER1"),
+        (["--frames", "{tmp}/nowhere"], "nowhere"),
+        (["--band", "0"], "band"),
+    ],
+)
+def test_holdout_exits_2_with_a_reason_when_an_input_is_unusable(
+    tmp_path: Path,
+    fitted: Fitted,
+    other_frames: Path,
+    capsys: pytest.CaptureFixture,
+    argv: list[str],
+    message: str,
+) -> None:
+    base = {
+        "--camera": "SYN1",
+        "--fit": str(fitted.path),
+        "--frames": str(other_frames),
+        "--band": "12",
+    }
+    for flag, value in zip(argv[::2], argv[1::2], strict=True):
+        base[flag] = value.replace("{tmp}", str(tmp_path))
+    code = run("holdout", *[part for pair in base.items() for part in pair])
+    err = capsys.readouterr().err
+    assert code == 2 and message in err
+    assert err.strip().count("\n") == 0 and "Traceback" not in err
+
+
+def test_holdout_on_an_unreadable_frame_exits_2_with_a_one_line_reason(
+    tmp_path: Path, fitted: Fitted, capsys: pytest.CaptureFixture
+) -> None:
+    frames = _bad_frames(tmp_path, "garbage")
+    code = run("holdout", "--camera", "SYN1", "--fit", str(fitted.path), "--frames", str(frames))
+    err = capsys.readouterr().err
+    assert code == 2 and "not a readable JPEG" in err
+    assert err.strip().count("\n") == 0
 
 
 # --- mask  ----------------------------------------------------------------------------------------
