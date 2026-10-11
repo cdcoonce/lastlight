@@ -12,10 +12,19 @@ Two quantities are forecast and scored:
 
 | Target | What it is | Score |
 | --- | --- | --- |
-| **Curve** | Colour of the sky along the solar azimuth, sampled at fixed view elevations, as a function of sun elevation from +6 degrees to -8 degrees | delta-E 2000 in camera-native space, per elevation band |
+| **Curve** | Colour of the sky at fixed view elevations in each camera's view direction, as a function of sun elevation from +6 degrees to -8 degrees | Tier A: error in the within-frame log-chromaticity contrast profile, per elevation band. Tier B: delta-E 2000 in camera-native space |
 | **Vividness** | One pre-registered scalar per evening summarising how much saturated warm colour the western sky shows during twilight (definition frozen in `docs/gates/vividness.md` before the first scored evening) | CRPS of the forecast distribution |
 
 Both are scored against two baselines: **climatology** (smoothed day-of-year mean of observed history, built only from evenings before the scored one) and **persistence** (yesterday's observation). Results are split by **regime**: clear, dust, smoke, cloud. The regime label comes from data the forecast did not see (GOES clear-sky mask along the sightline, camera cloud fraction, surface PM).
+
+### Truth tiers
+
+| Tier | Instrument | What can be scored |
+| --- | --- | --- |
+| **A (primary, from 2026-10-10)** | Public, uncalibrated webcams: ADEQ PhoenixVis White Tank (`WHTM1`, looks west, 274 degrees, from Avondale) and Estrella (`ESMO1`, looks southwest from North Mountain). 800x300 JPEG, a new frame about every 15 minutes, auto exposure and white balance, no archive beyond 48 hours of hourly thumbnails. | **Within-frame colour contrasts only.** A webcam's exposure and white balance act, to first order, as one gain per colour channel for the whole frame. So the log-chromaticity difference between two sky regions of the same frame (for example `log(R/G)` at 2 degrees above the horizon minus at 20 degrees) cancels them. The curve target becomes a profile of these contrasts against view elevation, per frame, indexed by the sun elevation at the frame's time. Vividness is defined on the same invariants. Absolute colour ("how red is the whole sky") is not scored in tier A. |
+| **B (optional, later)** | A calibrated RAW camera at the owner's home | Absolute colour, delta-E 2000 in camera-native space. Built only if tier A shows skill worth measuring more precisely; it brings back the home-privacy rules in section 3. |
+
+The forecast computes the same invariants from its rendered spectra for each camera's own viewing geometry (camera position, azimuth, field of view, horizon line), so model and camera are compared like for like. Each camera's pixel-to-sky geometry is calibrated from the sun's track through the frame and the horizon ridge's known elevation, fitted on a declared window and frozen.
 
 ## 2. Honesty rules
 
@@ -40,6 +49,10 @@ The home's location must not be derivable from anything public. Sunset clock tim
 
 Metro-level location (Phoenix) is public and accepted.
 
+The rules above protect a home camera site (tier B). Tier A cameras are public and their locations are published by their operators, so they leak nothing about the owner; the rules stay in force anyway, because they cost little and tier B may follow.
+
+**Third-party camera frames.** Use only cameras whose page is public and whose operator's terms do not forbid automated access; a feed whose terms forbid it (for example a consumer-camera public share) needs the operator's written consent first. Poll at most once per 5 minutes per camera, with conditional requests and an identifying User-Agent. Keep raw frames private on the capture host, never in git or CI artifacts. Publish derived numbers and small, sky-only thumbnails (at most 320 pixels wide), each credited to and linked back to the operator, and only for cameras whose registry entry has `publish_thumbnails = true` with a recorded `basis`. The site states that any operator's material is removed on request, and a removal is honoured the same day. Basis for the ADEQ PhoenixVis cameras: public page, `robots.txt` allows all, terms silent on automated use; the owner decided on 2026-10-10 to proceed without a prior permission request.
+
 ## 4. Architecture
 
 Python 3.12, `uv`, `src/lastlight/`, pytest, ruff. Small modules with one job each:
@@ -53,9 +66,10 @@ Python 3.12, `uv`, `src/lastlight/`, pytest, ruff. Small modules with one job ea
 | `inputs.*` | Later: RRFS-SD dust and smoke, CAMS aerosol and ozone, AirNow PM |
 | `render` | Spectral atmosphere model → radiance per (sun elevation, view elevation) → CIE XYZ → camera RGB and sRGB; v0 single scattering, v1 Bruneton precomputed-scattering lookup table |
 | `seal` | Canonical forecast JSON, SHA-256, RFC 3161 timestamp, `verify` |
-| `capture` | Sun-elevation-scheduled bracketed RAW capture, dark frames (runs on the capture host only) |
-| `calibrate` | Flat field, dark, linearity, camera spectral sensitivity from a colour chart |
-| `observe` | Frames → observed curve and vividness |
+| `cameras` | Registry of tier A cameras (operator, image URL, position, view azimuth, attribution); polite collector (conditional GET, identifying User-Agent, timeouts and retries, stale-frame rejection by Last-Modified and burned-in stamp) writing a private archive on the capture host |
+| `camgeom` | Per-camera pixel-to-(azimuth, elevation) calibration from the sun's track and the horizon ridge; sky mask |
+| `observe` | Frames → within-frame log-chromaticity contrast profile and vividness (tier A); later absolute colour (tier B) |
+| `capture`, `calibrate` | Tier B only: RAW capture, dark frames, colour-chart spectral sensitivity |
 | `score` | delta-E 2000, CRPS, baselines, regimes, skill with confidence intervals |
 | `publish` | Static almanac site from the ledger: painted vs real, scoreboard |
 | `privacy` | The scanner in section 3 |
@@ -79,7 +93,7 @@ Python 3.12, `uv`, `src/lastlight/`, pytest, ruff. Small modules with one job ea
 ### Where things run
 
 - **Forecast and seal**: a scheduled GitHub Actions job at a fixed clock time; it needs only public inputs. Its run log is a second public witness.
-- **Capture, observe, score**: the capture host at home (an always-on Ubuntu server, or a Raspberry Pi next to the camera), pushing only sky-only, elevation-referenced products.
+- **Collect, observe, score**: the always-on capture host at home (an Ubuntu server), running the tier A collector during each evening's twilight window and pushing only derived, elevation-referenced numbers. The owner installs its timer; agents never install timers themselves.
 
 ## 5. Milestones and gates
 
@@ -87,10 +101,11 @@ Python 3.12, `uv`, `src/lastlight/`, pytest, ruff. Small modules with one job ea
 | --- | --- | --- |
 | M0 Foundations | Scaffold, CI, privacy scanner, geometry, seal ledger, HRRR transect ingest | CI green; privacy scanner proven by planted leaks |
 | M1 First painting | Renderer v0, daily sealed forecast, almanac site showing tonight's painting | A forecast sealed and verified on 5 consecutive days |
-| **G0** | Spread study: render a year of clear-sky curves from archived inputs | On at least 25 percent of dates, the rendered curve differs from the period's median curve by a band-mean delta-E 2000 of at least 4.0 in at least 2 of 3 twilight bands; otherwise the curve target cannot be resolved and the design changes before hardware is bought |
-| M2 Instrument | Camera purchase (human ask), mount, capture, calibration | **G1**: repeatability of at least 2x below the observed clear-sky spread across 20 clear evenings; re-run in the first hot month |
-| M3 Scoring | Observed curves, vividness, baselines, regimes, public scoreboard | First 30 scored evenings |
+| **G0** | Spread study: render a year of clear-sky curves from archived inputs | On at least 25 percent of dates, the rendered contrast profile differs from the period's median by a band-mean of at least 0.05 in log-chromaticity contrast in at least 2 of 3 twilight bands (delta-E 2000 reported alongside for tier B); otherwise the physics barely varies and the forecast cannot beat climatology on clear evenings |
+| M2 Public-camera truth | Tier A collector (owner installs the timer), camera geometry calibration, contrast-profile observations, permission requests to operators (owner sends) | **G1**: on pairs of consecutive clear evenings, the observed contrast profile repeats more closely than the spread across all evenings (repeatability at most half the spread), over at least 10 pairs |
+| M3 Scoring | Forecast invariants per camera, baselines, regimes, public scoreboard | First 30 scored evenings |
 | M4 Physics | Bruneton lookup table, cloud-lit vividness, RRFS-SD dust, CAMS | Pre-registered comparison of v1 against v0 on held-out evenings |
+| M5 (optional) Tier B | Calibrated home camera for absolute colour (spend and hands-on ask) | Only if M3 shows skill worth a better instrument |
 
 ## 6. How it is built
 
