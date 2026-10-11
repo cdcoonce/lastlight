@@ -154,7 +154,10 @@ def test_the_decoded_values_at_the_reference_cell_are_the_originals() -> None:
     row, col = support.REFERENCE_CELL
     total = grib.decode_latlon_message(support.crop_message("TOTAL_AOD_550"))
     dust = grib.decode_latlon_message(support.crop_message("DUST_AOD_550"))
-    assert total.lats[row] == 33.5 and total.lons[col] == pytest.approx(-112.0)
+    # Row 226 and column 992 of the 0.25 degree grid (north to south from the pole, east from the
+    # prime meridian): the cell nearest the reference point.
+    assert total.lats[row] == 90.0 - 226 * 0.25
+    assert total.lons[col] == pytest.approx(992 * 0.25 - 360.0)
     assert float(total.values[row, col]) == pytest.approx(support.TOTAL_AT_REFERENCE, abs=1e-6)
     assert float(dust.values[row, col]) == pytest.approx(support.DUST_AT_REFERENCE, abs=1e-6)
 

@@ -38,7 +38,7 @@ import numpy as np
 from lastlight import geometry
 from lastlight.atmosphere import AtmosphereV0, ReductionError, reduce_transect
 from lastlight.cameras import load_registry
-from lastlight.camgeom.fitfile import GEOMETRY_DIR, CameraFit, load_fit
+from lastlight.camgeom.fitfile import GEOMETRY_DIR, load_fit
 from lastlight.g0.contrast import day_contrasts
 from lastlight.g0.record import (
     RENDER_SCALES,
@@ -89,6 +89,23 @@ def _classify_fetch(error: FetchError, missing_reason: str, source: str) -> _Dro
     raise TransientError(f"{source}: {_clean(str(error))}") from error
 
 
+def build_views(camera_id: str = "WHTM1", geometry_dir: Path = GEOMETRY_DIR) -> dict[str, SkyView]:
+    """The camera's view at each of `RENDER_SCALES`, from its frozen fit and registry table.
+
+    Checks first that the bands lie inside the fit's sky mask, as `lastlight observe` does.
+    """
+    fit = load_fit(camera_id, geometry_dir)
+    camera = load_registry()[camera_id]
+    if camera.contrast is None:
+        raise ValueError(f"{camera_id} has no contrast table in the registry")
+    validate_contrast(fit, camera.contrast)
+    scales = pixel_scales(fit)
+    return {
+        name: sky_view(fit, camera.contrast, px_per_deg=None if name == "nominal" else scales[name])
+        for name in RENDER_SCALES
+    }
+
+
 class Collector:
     """Builds the record of one evening from the archives, for one camera's frozen geometry."""
 
@@ -104,18 +121,7 @@ class Collector:
         self.transport = transport
         self.cache_dir = Path(cache_dir)
         self.now_utc = now_utc
-        self.fit: CameraFit = load_fit(camera_id, geometry_dir)
-        camera = load_registry()[camera_id]
-        if camera.contrast is None:
-            raise ValueError(f"{camera_id} has no contrast table in the registry")
-        validate_contrast(self.fit, camera.contrast)
-        scales = pixel_scales(self.fit)
-        self.views: dict[str, SkyView] = {
-            name: sky_view(
-                self.fit, camera.contrast, px_per_deg=None if name == "nominal" else scales[name]
-            )
-            for name in RENDER_SCALES
-        }
+        self.views: dict[str, SkyView] = build_views(camera_id, geometry_dir)
 
     # --- the inputs ------------------------------------------------------------------------
 
