@@ -51,6 +51,15 @@ uv run lastlight observe --camera WHTM1 --date 2026-10-10 --archive ~/.workshop/
 
 Each frame within +6 to -6 degrees of sun elevation (`--min-sun-elev`, `--max-sun-elev`) becomes a within-frame log-chromaticity contrast profile over bands of pixel rows above the camera's frozen skyline (defined per camera in the registry, checked against its frozen fit), so the camera's exposure and white balance cancel. `observed.json` holds derived numbers only: a short SHA-256 prefix and the sun elevation per frame, the fit it used, and counts of every frame and pixel left out. It exits 1 when no frame is usable and 2 for bad input; a camera with no frozen fit (ESMO1) is refused.
 
+The G0 gate (issue #10) asks whether the rendered curve varies enough from day to day to be measured. Its criterion is pre-registered in [`docs/gates/G0/criterion.md`](docs/gates/G0/criterion.md) and its result is in [`docs/gates/G0/report.md`](docs/gates/G0/report.md). It renders a year of HRRR and GEFS-Aerosols analyses (no account for either) for WHTM1's frozen geometry, caches every date outside git, and can be run in chunks:
+
+```sh
+uv run lastlight g0 --start 2025-10-01 --end 2025-10-31 --out docs/gates/G0 --stage fetch   # resumable; one chunk per month
+uv run lastlight g0 --start 2025-10-01 --end 2026-09-30 --out docs/gates/G0 --stage report  # reads only the cache
+```
+
+The cache is `~/.cache/lastlight` (about a gigabyte for a year); a rerun skips every date that is already there.
+
 Sealed days are kept on the orphan `ledger` branch, written once a day by the `seal` workflow; [`docs/ledger.md`](docs/ledger.md) explains how anyone can fetch it and verify a day, what is sealed (the forecast and the SHA-256 of its painting) and what the RFC 3161 timestamp proves.
 
 Public-camera frames are collected on the always-on capture host by `lastlight collect` (see `uv run lastlight collect --help`); the owner's install steps are in [`docs/runbooks/collector.md`](docs/runbooks/collector.md).
