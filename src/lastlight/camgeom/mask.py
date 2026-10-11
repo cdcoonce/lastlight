@@ -43,6 +43,35 @@ def sky_mask(fit: CameraFit, margin_deg: float = 1.0) -> np.ndarray:
     return mask
 
 
+def skyline_top_rows(fit: CameraFit) -> np.ndarray:
+    """The fitted skyline's row in each column, rounded half up to a whole row (floats).
+
+    NaN where the skyline was not seen. Pixel-row bands (`lastlight.observe`) count rows upward
+    from this row, so the rounding is part of their definition: it makes a band's rows the same
+    whole rows in every frame and under every refit that leaves the skyline in place.
+    """
+    return np.floor(fit.skyline_y(np.arange(fit.width)) + 0.5)
+
+
+def sky_mask_rows(fit: CameraFit, margin_rows: int) -> np.ndarray:
+    """Boolean rows-by-columns array, True where the pixel is sky, with the margin in pixel rows.
+
+    The row-band counterpart of `sky_mask`: nothing here is converted from degrees, so it does
+    not depend on the fit's pixel scale and is the same whether the fit is provisional or not.
+    A pixel `d` rows above the skyline (`d = skyline_top_rows - row`) is sky when `d` is at least
+    `margin_rows`; so a band `[lo, hi)` with `lo >= margin_rows` lies wholly in the mask. A column
+    where the skyline was not seen is never sky, and neither is a pixel in an overlay box.
+    """
+    if margin_rows < 0:
+        raise ValueError("the margin must not be negative")
+    limit = skyline_top_rows(fit) - margin_rows
+    with np.errstate(invalid="ignore"):
+        mask = np.arange(fit.height, dtype=float)[:, None] <= limit[None, :]
+    for box in fit.overlay_boxes:
+        mask[box.y0 : box.y1, box.x0 : box.x1] = False
+    return mask
+
+
 def write_mask_png(mask: np.ndarray, path: Path) -> Path:
     """Write the mask as a PNG of 0 and 255 with no metadata chunks at all."""
     path.parent.mkdir(parents=True, exist_ok=True)

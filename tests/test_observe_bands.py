@@ -29,13 +29,16 @@ COLUMNS = tuple(float(x) for x in range(WIDTH))
 
 
 def flat_fit(top: float = 200.0, **changes):
-    """A fit whose skyline sits at row `top` in every one of the 800 columns, with no overlay."""
-    return example_fit(
-        skyline_x_px=COLUMNS,
-        skyline_y_px=tuple(top for _ in COLUMNS),
-        overlay_boxes=(),
-        **changes,
-    )
+    """A fit whose skyline sits at row `top` in every one of the 800 columns, with no overlay.
+
+    `changes` replace any field of the fit, `skyline_y_px` and `overlay_boxes` included.
+    """
+    fields = {
+        "skyline_x_px": COLUMNS,
+        "skyline_y_px": tuple(top for _ in COLUMNS),
+        "overlay_boxes": (),
+    }
+    return example_fit(**{**fields, **changes})
 
 
 def bands(**changes) -> ContrastBands:
@@ -65,7 +68,7 @@ def test_the_row_mask_follows_the_skyline_column_by_column() -> None:
     mask = sky_mask_rows(fit, margin_rows=0)
     for column in (0, 300, 799):
         top = round(100.0 + column / 10.0)
-        assert mask[top - 1, column] and not mask[top, column]
+        assert mask[top, column] and not mask[top + 1, column]  # d = top - row >= 0
 
 
 def test_the_row_mask_excludes_the_overlay_boxes_and_unseen_skyline_columns() -> None:
@@ -112,7 +115,8 @@ def test_a_band_is_outside_in_a_column_if_any_one_of_its_rows_is() -> None:
 
 def test_the_overlay_box_takes_its_columns_out_of_the_band() -> None:
     fit = flat_fit(top=200.0, overlay_boxes=(Box(0, 0, 100, HEIGHT),))
-    assert {c.fraction for c in band_coverage(fit, bands())} == {pytest.approx(700 / 800)}
+    fractions = [c.fraction for c in band_coverage(fit, bands())]
+    assert fractions == [pytest.approx(700 / 800)] * 3
 
 
 def test_a_band_that_is_only_partly_inside_the_overlay_box_is_outside_in_those_columns() -> None:
