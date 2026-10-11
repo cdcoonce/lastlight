@@ -32,6 +32,7 @@ BG_SLOPE = 0.0015
 RG_AT_SKYLINE = 0.30
 BG_AT_SKYLINE = -0.10
 BRIGHTNESS = 0.25
+TERRAIN = (0.05, 0.03, 0.02)  # linear light
 
 
 def flat_fit(top: float = 200.0, **changes):
@@ -75,11 +76,16 @@ def offsets_above_skyline(top_rows: np.ndarray) -> np.ndarray:
 
 
 def gradient_linear(d: np.ndarray) -> np.ndarray:
-    """Linear RGB at offset `d`: the horizon-to-zenith gradient described at the top."""
+    """Linear RGB at offset `d`: the horizon-to-zenith gradient described at the top.
+
+    Below the skyline (`d < 0`) it is dark brown terrain instead, so a band read from the wrong
+    rows finds ground, not a shifted copy of the ramp (a linear ramp alone cannot tell).
+    """
     green = np.full(d.shape, BRIGHTNESS)
     red = green * np.exp(RG_AT_SKYLINE + RG_SLOPE * d)
     blue = green * np.exp(BG_AT_SKYLINE + BG_SLOPE * d)
-    return np.stack([red, green, blue], axis=-1)
+    sky = np.stack([red, green, blue], axis=-1)
+    return np.where(d[..., None] >= 0, sky, np.array(TERRAIN))
 
 
 def gradient_frame(top: float = 200.0, gains=(1.0, 1.0, 1.0)) -> np.ndarray:
