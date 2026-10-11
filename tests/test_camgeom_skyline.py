@@ -78,6 +78,21 @@ def test_a_band_with_gaps_in_the_prediction_leaves_those_columns_unconstrained()
     assert np.median(np.abs(found - TRUTH)) < 0.5
 
 
+def test_a_band_wholly_outside_the_frame_gives_no_skyline_there_and_does_not_crash() -> None:
+    # A candidate placement can predict the skyline below the bottom row or above the top row
+    # for part of the frame. No row of the frame lies in such a band, so there is nothing to
+    # trace: the column is NaN, and the neighbouring columns are traced as before.
+    image = render_frame(TRUE_MODEL, seed=4, noise=3.0)
+    around = TRUTH.copy()
+    around[:60] = HEIGHT + 200.0
+    around[60:120] = -80.0
+    found = extract_skyline(image, around=around, half_width=30)
+    assert found.shape == (WIDTH,)
+    assert np.isnan(found[:120]).all()
+    assert np.all(np.isfinite(found[120:]))
+    assert np.median(np.abs(found - TRUTH)[120:]) < 0.5
+
+
 def test_edge_strength_is_positive_only_where_brightness_falls_going_down() -> None:
     bright_over_dark = np.zeros((40, 30))
     bright_over_dark[:20] = 200.0

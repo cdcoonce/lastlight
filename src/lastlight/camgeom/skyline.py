@@ -104,13 +104,20 @@ def trace_skyline(
 
     The path maximises the summed edge strength with a small cost for moving between rows, and
     may move at most two rows from one column to the next. The integer path is refined with a
-    parabola through the three edge values around each row.
+    parabola through the three edge values around each row. A column whose band holds no row of
+    the frame is NaN.
     """
     height, width = strength.shape
     allowed = _allowed_rows(height, width, around, half_width)
+    # A band that lies wholly outside the frame (the expected skyline is below the last row, or
+    # above the first) leaves no row to trace. The path passes through such a column at no cost
+    # and the column is reported as NaN, so it neither crashes the path nor votes.
+    unusable = ~allowed.any(axis=1)
+    allowed[unusable, _GUARD_ROWS : height - _GUARD_ROWS] = True
     scale = np.percentile(strength[strength > 0], 99) if np.any(strength > 0) else 1.0
     penalty = _SMOOTHNESS * scale
     gain = np.where(allowed, -strength.T, np.inf)  # columns by rows, lower is better
+    gain[unusable] = np.where(allowed[unusable], 0.0, np.inf)
     cost = np.empty((width, height))
     back = np.zeros((width, height), dtype=np.int64)
     cost[0] = gain[0]
@@ -133,7 +140,9 @@ def trace_skyline(
     path[-1] = int(np.argmin(cost[-1]))
     for column in range(width - 1, 0, -1):
         path[column - 1] = back[column, path[column]]
-    return _refine(strength, path)
+    refined = _refine(strength, path)
+    refined[unusable] = np.nan
+    return refined
 
 
 def _refine(strength: np.ndarray, path: np.ndarray) -> np.ndarray:
