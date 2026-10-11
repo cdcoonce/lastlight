@@ -34,10 +34,12 @@ def _triggers(workflow: dict[Any, Any]) -> dict[str, Any]:
 
 
 @pytest.mark.parametrize("event", ["pull_request", "push"])
-def test_ci_skips_docs_only_changes(workflow: dict[Any, Any], event: str) -> None:
-    ignored = _triggers(workflow)[event]["paths-ignore"]
-    assert "docs/**" in ignored
-    assert "**/*.md" in ignored
+def test_ci_runs_on_every_change_including_docs(workflow: dict[Any, Any], event: str) -> None:
+    # Build logs and docs are where a clock time is most likely to slip in, so the privacy
+    # scan must run on docs-only changes too (docs/log/2026-10-11-day-1-decisions.md).
+    trigger = _triggers(workflow)[event] or {}  # a bare `pull_request:` parses as None
+    assert "paths-ignore" not in trigger
+    assert "paths" not in trigger
 
 
 def test_ci_runs_on_pull_requests_and_pushes_to_main_only(workflow: dict[Any, Any]) -> None:
