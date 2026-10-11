@@ -14,6 +14,11 @@ What v0 does with each input:
   a fixed background of `BACKGROUND_AOD` (0.06). HRRR's `AOTK` is smoke only (it is zero unless
   the smoke run is active), so the background stands in for the dust and other aerosol the
   model does not carry. The mean is unweighted: every transect point counts the same.
+  The G0 spread study (#10) may pass an `AerosolColumn` (`aerosol=`), total and dust optical
+  depth from an archive that carries both: its total then replaces smoke plus background (the
+  total already holds the smoke, so adding HRRR's would count it twice), the HRRR smoke mean is
+  still recorded, and the dust is kept beside it. Without the argument, which is how the daily
+  forecast calls this function, nothing differs: same atmosphere, same notes, byte for byte.
 * **Ozone** = the monthly climatology for Phoenix's latitude below (`OZONE_DU_BY_MONTH`),
   looked up by the evening's month. HRRR carries no ozone.
 * **Precipitable water** (`PWAT`, kg m-2) is averaged and recorded. The renderer has no water
@@ -88,6 +93,11 @@ _MONTH_NAMES: Final = (
 )
 
 
+DUST_EXCESS_TOLERANCE: Final = 1e-3
+"""How far an archive's dust optical depth may exceed its total before the pair is refused: the
+two are packed separately, so a total that is all dust can come out a hair below it."""
+
+
 class ReductionError(ValueError):
     """The samples do not hold what the reduction needs (a field missing or empty)."""
 
@@ -120,8 +130,38 @@ class CloudSummary:
 
 
 @dataclass(frozen=True)
+class AerosolColumn:
+    """Total and dust aerosol optical depth at 550 nm from an archive other than HRRR smoke.
+
+    `source` names the archive for the notes. The total includes the dust (and any smoke the
+    archive's model carries), so `dust_aod_550` cannot exceed `total_aod_550` beyond the
+    packing tolerance `DUST_EXCESS_TOLERANCE`.
+    """
+
+    total_aod_550: float
+    dust_aod_550: float
+    source: str
+
+    def __post_init__(self) -> None:
+        for name in ("total_aod_550", "dust_aod_550"):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value < 0.0:
+                raise ValueError(f"{name} must be a finite number >= 0, got {value!r}")
+        if self.dust_aod_550 > self.total_aod_550 + DUST_EXCESS_TOLERANCE:
+            raise ValueError(
+                f"dust optical depth {self.dust_aod_550:.3f} exceeds the total "
+                f"{self.total_aod_550:.3f}"
+            )
+        if not self.source.strip():
+            raise ValueError("an aerosol column needs a named source")
+
+
+@dataclass(frozen=True)
 class AtmosphereV0:
-    """What the v0 reduction decided: the atmosphere to paint and the pieces behind it."""
+    """What the v0 reduction decided: the atmosphere to paint and the pieces behind it.
+
+    `aod_dust` and `aerosol_source` are None unless an `AerosolColumn` was given.
+    """
 
     atmosphere: Atmosphere
     aod_smoke: float
@@ -129,14 +169,24 @@ class AtmosphereV0:
     pwat_kg_m2: float | None
     clouds: CloudSummary
     notes: str
+    aod_dust: float | None = None
+    aerosol_source: str | None = None
 
 
 def _mean(values: list[float]) -> float:
     return math.fsum(values) / len(values)  # exactly rounded, so the order of samples is moot
 
 
-def reduce_transect(samples: Iterable[TransectSample], evening: dt.date) -> AtmosphereV0:
+def reduce_transect(
+    samples: Iterable[TransectSample],
+    evening: dt.date,
+    *,
+    aerosol: AerosolColumn | None = None,
+) -> AtmosphereV0:
     """Reduce HRRR transect samples to the renderer's v0 parameters for the evening `evening`.
+
+    With `aerosol`, its total replaces HRRR smoke plus the fixed background as the aerosol
+    optical depth (see the module text); everything else is read from the samples as ever.
 
     Raises `ReductionError` if `AOTK` or `LCDC` has no value anywhere on the transect: a forecast
     painted from a missing field would read as clean, clear air, which is not evidence.
@@ -162,7 +212,7 @@ def reduce_transect(samples: Iterable[TransectSample], evening: dt.date) -> Atmo
     low = mean_of("LCDC", required=True)
     assert smoke is not None and low is not None  # required fields raise instead of returning None
 
-    aod = smoke + BACKGROUND_AOD
+    aod = smoke + BACKGROUND_AOD if aerosol is None else aerosol.total_aod_550
     ozone = ozone_du(evening.month)
     atmosphere = Atmosphere(aod_550=aod, ozone_du=ozone)
 
@@ -184,7 +234,9 @@ def reduce_transect(samples: Iterable[TransectSample], evening: dt.date) -> Atmo
         ozone_du=ozone,
         pwat_kg_m2=pwat,
         clouds=clouds,
-        notes=_notes(atmosphere.aod_550, smoke, ozone, evening.month, pwat, clouds),
+        notes=_notes(atmosphere.aod_550, smoke, ozone, evening.month, pwat, clouds, aerosol),
+        aod_dust=None if aerosol is None else aerosol.dust_aod_550,
+        aerosol_source=None if aerosol is None else aerosol.source,
     )
 
 
@@ -193,7 +245,13 @@ def _percent(value: float | None) -> str:
 
 
 def _notes(
-    aod: float, smoke: float, ozone: float, month: int, pwat: float | None, clouds: CloudSummary
+    aod: float,
+    smoke: float,
+    ozone: float,
+    month: int,
+    pwat: float | None,
+    clouds: CloudSummary,
+    aerosol: AerosolColumn | None = None,
 ) -> str:
     """The text sealed in the forecast: what v0 used, and what it recorded without rendering.
 
@@ -213,10 +271,20 @@ def _notes(
             f"cloud base median {clouds.base_m:.0f} m and top median {clouds.top_m:.0f} m "
             f"(HRRR geopotential metres; cloud at {clouds.cloudy_points} of {clouds.points} points)"
         )
+    if aerosol is None:
+        aerosol_sentence = (
+            f"Aerosol optical depth at 550 nm {aod:.3f} = {BACKGROUND_AOD:.3f} fixed background "
+            f"+ {smoke:.3f} HRRR smoke (AOTK transect mean). "
+        )
+    else:
+        aerosol_sentence = (
+            f"Aerosol optical depth at 550 nm {aod:.3f} = {aerosol.source} total aerosol "
+            f"(dust {aerosol.dust_aod_550:.3f}); HRRR smoke {smoke:.3f} (AOTK transect mean) "
+            "recorded and not added. "
+        )
     return (
         f"v0 reduction of HRRR along the sightline, {clouds.points} points. "
-        f"Aerosol optical depth at 550 nm {aod:.3f} = {BACKGROUND_AOD:.3f} fixed background "
-        f"+ {smoke:.3f} HRRR smoke (AOTK transect mean). "
+        f"{aerosol_sentence}"
         f"Ozone {ozone:.0f} DU, SBUV monthly climatology for 30-35N, {_MONTH_NAMES[month - 1]}, "
         f"{first}-{last}. "
         f"{water}. "
