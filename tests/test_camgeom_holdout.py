@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import math
 from pathlib import Path
 
@@ -32,6 +33,8 @@ from lastlight.camgeom.orientation import Orientation
 from lastlight.camgeom.skyline import Box, default_overlay_boxes
 
 OVERLAY = default_overlay_boxes(WIDTH, HEIGHT)
+STAMP = "%Y%m%dT%H%M%SZ"
+START = dt.datetime(2026, 10, 11, 0, 0, tzinfo=dt.UTC)
 TRUTH_ROWS = true_skyline_y(TRUE_MODEL)
 O = TRUE_MODEL  # noqa: E741
 
@@ -126,6 +129,11 @@ def test_a_band_must_be_a_positive_number_of_rows(band: float) -> None:
 # --- which frames are held out -------------------------------------------------------------------
 
 
+def named(minutes: int) -> str:
+    """A collector-style frame name for a moment `minutes` after the start of the evening."""
+    return f"{(START + dt.timedelta(minutes=minutes)).strftime(STAMP)}.jpg"
+
+
 def save(path: Path, seed: int) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.fromarray(frame(seed)).save(path, quality=92)
@@ -135,9 +143,9 @@ def save(path: Path, seed: int) -> Path:
 def test_frames_the_fit_was_frozen_on_are_left_out_and_the_rest_are_held_out(
     tmp_path: Path,
 ) -> None:
-    used = save(tmp_path / "a" / "20261011T001000Z.jpg", 1)
-    fresh_one = save(tmp_path / "a" / "20261011T002000Z.jpg", 2)
-    fresh_two = save(tmp_path / "b" / "20261011T003000Z.jpg", 3)
+    used = save(tmp_path / "a" / named(10), 1)
+    fresh_one = save(tmp_path / "a" / named(20), 2)
+    fresh_two = save(tmp_path / "b" / named(30), 3)
     fit = frozen_fit(frames_used=(FrameRecord("2026-10-10", 8.0, frame_sha256(used)),))
     kept, skipped = held_out_paths(fit, [tmp_path / "a", tmp_path / "b"])
     assert sorted(kept) == sorted([fresh_one, fresh_two])
@@ -145,7 +153,7 @@ def test_frames_the_fit_was_frozen_on_are_left_out_and_the_rest_are_held_out(
 
 
 def test_a_frame_found_under_two_roots_is_counted_once(tmp_path: Path) -> None:
-    one = save(tmp_path / "a" / "20261011T001000Z.jpg", 1)
+    one = save(tmp_path / "a" / named(10), 1)
     (tmp_path / "b").mkdir()
     (tmp_path / "b" / "copy.jpg").write_bytes(one.read_bytes())
     kept, skipped = held_out_paths(frozen_fit(), [tmp_path / "a", tmp_path / "b"])
@@ -153,7 +161,7 @@ def test_a_frame_found_under_two_roots_is_counted_once(tmp_path: Path) -> None:
 
 
 def test_results_are_labelled_by_the_start_of_the_hash_and_never_by_name(tmp_path: Path) -> None:
-    path = save(tmp_path / "20261011T001000Z.jpg", 5)
+    path = save(tmp_path / named(10), 5)
     (result,) = holdout_paths(frozen_fit(), [path])
     assert result.label == frame_label(frame_sha256(path)) == frame_sha256(path)[:8]
     assert "2026" not in result.label and ".jpg" not in result.label
