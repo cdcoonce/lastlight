@@ -10,7 +10,11 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "colour-science>=0.4.7",
+    "numpy>=2.5.4",
+    "pillow>=12.3.0",
+]
 
 [project.scripts]
 lastlight = "lastlight.cli:main"
@@ -33,7 +37,7 @@ known-first-party = ["lastlight"]
 
 [dependency-groups]
 dev = [
-    "pillow>=12.3.0",
+    "pvlib>=0.16.1",
     "pytest>=9.1.1",
     "pyyaml>=6.0.3",
     "ruff>=0.17.0",
