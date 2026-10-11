@@ -1,0 +1,166 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_atmosphere_reduction.py",
+    "tests/test_painting.py",
+    "tests/test_vividness.py",
+    "tests/test_hrrr_fetch.py",
+    "tests/test_render_curve.py",
+    "tests/test_render_data.py",
+    "tests/test_cli_daily.py",
+    "tests/test_daily.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_atmosphere_reduction.py",
+    "tests/test_painting.py",
+    "tests/test_vividness.py",
+    "tests/test_hrrr_fetch.py",
+    "tests/test_render_curve.py",
+    "tests/test_render_data.py",
+    "tests/test_cli_daily.py",
+    "tests/test_daily.py"
+  ],
+  "mutants": [
+    {
+      "label": "C15 vividness cloud term sign flipped",
+      "file": "../../src/lastlight/vividness.py",
+      "oracle": "real",
+      "find": "- _CLOUD_WEIGHT * (low_cloud_pct / 100.0)",
+      "replace": "+ _CLOUD_WEIGHT * (low_cloud_pct / 100.0)"
+    },
+    {
+      "label": "C16 vividness sd narrowed",
+      "file": "../../src/lastlight/vividness.py",
+      "oracle": "real",
+      "find": "VIVIDNESS_SD: Final = 0.25",
+      "replace": "VIVIDNESS_SD: Final = 0.05"
+    },
+    {
+      "label": "C17 vividness aerosol cap removed",
+      "file": "../../src/lastlight/vividness.py",
+      "oracle": "real",
+      "find": "min(aod_550 / _AEROSOL_CAP_AOD, 1.0)",
+      "replace": "(aod_550 / _AEROSOL_CAP_AOD)"
+    },
+    {
+      "label": "C18 (retired clamp, now) vividness cloud weight doubled so the mean can leave the scale",
+      "file": "../../src/lastlight/vividness.py",
+      "oracle": "real",
+      "find": "_CLOUD_WEIGHT: Final = 0.30",
+      "replace": "_CLOUD_WEIGHT: Final = 0.60"
+    },
+    {
+      "label": "C19 vividness sees aod and cloud swapped",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "vividness_v0(reduction.clouds.low_pct, reduction.atmosphere.aod_550)",
+      "replace": "vividness_v0(reduction.atmosphere.aod_550, reduction.clouds.low_pct)"
+    },
+    {
+      "label": "C20 every input records the first field's digest",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "digest=fields.digests[spec.name],",
+      "replace": "digest=fields.digests[hrrr.DEFAULT_FIELDS[0].name],"
+    },
+    {
+      "label": "C21 digests are of the field name not the bytes",
+      "file": "../../src/lastlight/inputs/hrrr.py",
+      "oracle": "real",
+      "find": "hashlib.sha256(data).hexdigest() for name, data in messages.items()",
+      "replace": "hashlib.sha256(name.encode()).hexdigest() for name, data in messages.items()"
+    },
+    {
+      "label": "C22 input source label loses the field name",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "source=f\"hrrr:{spec.name}\",",
+      "replace": "source=\"hrrr\","
+    },
+    {
+      "label": "C23 forecast names a strip digest that is not the strip's",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "hashlib.sha256(strip_png).hexdigest()",
+      "replace": "hashlib.sha256(strip_png[:-1]).hexdigest()"
+    },
+    {
+      "label": "C24 vividness rule name dropped from notes",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "notes=f\"{reduction.notes} {RULE_SUMMARY}\",",
+      "replace": "notes=reduction.notes,"
+    },
+    {
+      "label": "C25 a time of day sneaks into the notes",
+      "file": "../../src/lastlight/atmosphere.py",
+      "oracle": "real",
+      "find": "\"Cloud is recorded and not rendered in v0.\"",
+      "replace": "\"Cloud is recorded and not rendered in v0. Run at 18:30 UTC.\""
+    },
+    {
+      "label": "C26 GITHUB_SHA is read again: a dispatch from another ref seals that ref's commit",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "    override = environment.get(_OVERRIDE_VARIABLE, \"\").strip().lower()",
+      "replace": "    override = (environment.get(_OVERRIDE_VARIABLE) or environment.get(\"GITHUB_SHA\", \"\")).strip().lower()"
+    },
+    {
+      "label": "C26b the checkout's HEAD is never consulted",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "    where = Path(__file__).resolve().parent if cwd is None else cwd",
+      "replace": "    return _UNKNOWN_SHA\n    where = Path(__file__).resolve().parent if cwd is None else cwd"
+    },
+    {
+      "label": "C26c an explicit override loses to the checkout",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "    if _SHA.fullmatch(override):\n        return override\n",
+      "replace": "    if False:\n        return override\n"
+    },
+    {
+      "label": "C27 strip PNG keeps image.info metadata",
+      "file": "../../src/lastlight/render/curve.py",
+      "oracle": "real",
+      "find": "clean = Image.frombytes(image.mode, image.size, image.tobytes())",
+      "replace": "clean = image"
+    },
+    {
+      "label": "C28 forecast CLI always makes a strip",
+      "file": "../../src/lastlight/commands/forecast.py",
+      "oracle": "real",
+      "find": "with_strip=args.strip is not None,",
+      "replace": "with_strip=True,"
+    },
+    {
+      "label": "C29 painting uses the wrong evening for the date",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "date=evening,",
+      "replace": "date=evening + dt.timedelta(days=1),"
+    },
+    {
+      "label": "[control] swap the order of two independent constants in the vividness rule",
+      "file": "../../src/lastlight/vividness.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "_AEROSOL_WEIGHT and _AEROSOL_CAP_AOD are separate float constants; neither is computed from the other, so the order they are defined in changes no value anywhere. Holds for module-level constants read after import; not inert for code that read them by source position.",
+      "find": "_AEROSOL_WEIGHT: Final = 0.25\n_AEROSOL_CAP_AOD: Final = 0.4",
+      "replace": "_AEROSOL_CAP_AOD: Final = 0.4\n_AEROSOL_WEIGHT: Final = 0.25"
+    }
+  ]
+}

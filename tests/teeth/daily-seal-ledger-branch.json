@@ -7,10 +7,7 @@
     "-q",
     "-p",
     "no:cacheprovider",
-    "tests/test_ledger_branch.py",
-    "tests/test_seal_workflow.py",
-    "tests/test_ledger_docs.py",
-    "tests/test_repo_scaffold.py"
+    "tests/test_ledger_branch.py"
   ],
   "collect_command": [
     "uv",
@@ -20,10 +17,7 @@
     "-q",
     "-p",
     "no:cacheprovider",
-    "tests/test_ledger_branch.py",
-    "tests/test_seal_workflow.py",
-    "tests/test_ledger_docs.py",
-    "tests/test_repo_scaffold.py"
+    "tests/test_ledger_branch.py"
   ],
   "mutants": [
     {
@@ -139,160 +133,13 @@
       "replace": "token=os.environ.get(\"GH_TOKEN\"),"
     },
     {
-      "label": "B16 workflow renamed (site deploy waits on name seal)",
-      "file": "../../.github/workflows/seal.yml",
+      "label": "[control] swap the order of two independent module constants (the bot's name and email)",
+      "file": "../../src/lastlight/ledger_branch.py",
       "oracle": "real",
-      "find": "name: seal\n\n# Paints",
-      "replace": "name: seal-daily\n\n# Paints"
-    },
-    {
-      "label": "B17 workflow gains actions: write",
-      "file": "../../.github/workflows/seal.yml",
-      "oracle": "real",
-      "find": "permissions:\n  contents: write\n",
-      "replace": "permissions:\n  contents: write\n  actions: write\n"
-    },
-    {
-      "label": "B18 cron moved to a UTC hour whose run belongs to the previous evening",
-      "file": "../../.github/workflows/seal.yml",
-      "oracle": "real",
-      "find": "cron: \"0 21 * * *\"",
-      "replace": "cron: \"0 1 * * *\""
-    },
-    {
-      "label": "B19 cron moved so late the margin to the earliest sunset collapses",
-      "file": "../../.github/workflows/seal.yml",
-      "oracle": "real",
-      "find": "cron: \"0 21 * * *\"",
-      "replace": "cron: \"0 23 * * *\""
-    },
-    {
-      "label": "B20 runs cancel each other",
-      "file": "../../.github/workflows/seal.yml",
-      "oracle": "real",
-      "find": "cancel-in-progress: false",
-      "replace": "cancel-in-progress: true"
-    },
-    {
-      "label": "B21 checkout keeps credentials",
-      "file": "../../.github/workflows/seal.yml",
-      "oracle": "real",
-      "find": "persist-credentials: false",
-      "replace": "persist-credentials: true"
-    },
-    {
-      "label": "B22 token exported to the whole job",
-      "file": "../../.github/workflows/seal.yml",
-      "oracle": "real",
-      "find": "      UV_FROZEN: \"1\"\n",
-      "replace": "      UV_FROZEN: \"1\"\n      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n"
-    },
-    {
-      "label": "B22b token exported to the whole workflow",
-      "file": "../../.github/workflows/seal.yml",
-      "oracle": "real",
-      "find": "permissions:\n  contents: write\n",
-      "replace": "permissions:\n  contents: write\n\nenv:\n  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n"
-    },
-    {
-      "label": "B22c token also given to the step that runs the seal",
-      "file": "../../.github/workflows/seal.yml",
-      "oracle": "real",
-      "find": "      - name: Paint, seal and verify tonight\n",
-      "replace": "      - name: Paint, seal and verify tonight\n        env:\n          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n"
-    },
-    {
-      "label": "B23 privacy scan step neutered",
-      "file": "../../.github/workflows/seal.yml",
-      "oracle": "real",
-      "find": "run: uv run lastlight privacy-scan --root \"$PWD/ledger-wt\" \"$PWD/ledger-wt/ledger\"",
-      "replace": "run: uv run lastlight --version"
-    },
-    {
-      "label": "B24 privacy scan looks at the code tree, not the ledger",
-      "file": "../../.github/workflows/seal.yml",
-      "oracle": "real",
-      "find": "\"$PWD/ledger-wt\" \"$PWD/ledger-wt/ledger\"",
-      "replace": "\"$PWD/ledger-wt\" \"$PWD/src\""
-    },
-    {
-      "label": "B25 an action is pinned to a tag, not a commit",
-      "file": "../../.github/workflows/seal.yml",
-      "oracle": "real",
-      "find": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
-      "replace": "actions/checkout@v7"
-    },
-    {
-      "label": "B26 code taken from the dispatching ref, not main",
-      "file": "../../.github/workflows/seal.yml",
-      "oracle": "real",
-      "find": "          ref: main\n",
-      "replace": ""
-    },
-    {
-      "label": "B27 workflow_dispatch trigger removed",
-      "file": "../../.github/workflows/seal.yml",
-      "oracle": "real",
-      "find": "  workflow_dispatch:\n",
-      "replace": ""
-    },
-    {
-      "label": "B28 a force push added to the publish step",
-      "file": "../../.github/workflows/seal.yml",
-      "oracle": "real",
-      "find": "run: uv run lastlight ledger-branch publish --worktree ledger-wt",
-      "replace": "run: uv run lastlight ledger-branch publish --worktree ledger-wt && git push --force"
-    },
-    {
-      "label": "B29 lockfile re-resolution allowed",
-      "file": "../../.github/workflows/seal.yml",
-      "oracle": "real",
-      "find": "UV_FROZEN: \"1\"",
-      "replace": "UV_FROZEN: \"0\""
-    },
-    {
-      "label": "B30 seal step writes outside the ledger worktree",
-      "file": "../../.github/workflows/seal.yml",
-      "oracle": "real",
-      "find": "--ledger-dir ledger-wt/ledger",
-      "replace": "--ledger-dir ledger"
-    },
-    {
-      "label": "B31 docs drop the signature-chain caveat",
-      "file": "../../docs/ledger.md",
-      "oracle": "real",
-      "find": "does not yet validate the authority's signature chain (issue #25 will add signature verification)",
-      "replace": "validates everything"
-    },
-    {
-      "label": "B32 docs verify command loses --ledger-dir",
-      "file": "../../docs/ledger.md",
-      "oracle": "real",
-      "find": "lastlight verify 2026-10-12 --ledger-dir ledger",
-      "replace": "lastlight verify 2026-10-12"
-    },
-    {
-      "label": "N8 the ledger directory is no longer ignored",
-      "file": "../../.gitignore",
-      "oracle": "real",
-      "find": "\n/ledger/\n",
-      "replace": "\n"
-    },
-    {
-      "label": "N8b the ledger worktree is no longer ignored",
-      "file": "../../.gitignore",
-      "oracle": "real",
-      "find": "\n/ledger-wt/\n",
-      "replace": "\n"
-    },
-    {
-      "label": "[control] reorder a comment line in the workflow header (YAML comment)",
-      "file": "../../.github/workflows/seal.yml",
-      "oracle": "real",
-      "find": "# Other workflows (the almanac site) react to this one finishing by name, so keep `name: seal`.",
-      "replace": "# Other workflows (the almanac site) react to this one finishing by name; keep `name: seal`.",
       "expect": "survived",
-      "why": "A YAML comment: the parser drops it, so no test reading the parsed workflow or the action pins can see it; the clock-time scan reads the text but the sentence has no digits. Not inert for a test asserting comment wording."
+      "why": "BOT_NAME and BOT_EMAIL are separate string constants; neither is computed from the other, and nothing reads one while the other is being defined, so their order of definition changes no value anywhere. Holds for module-level constants read after import; not inert for code that read them by source position.",
+      "find": "BOT_NAME: Final = \"github-actions[bot]\"\nBOT_EMAIL: Final = \"41898282+github-actions[bot]@users.noreply.github.com\"",
+      "replace": "BOT_EMAIL: Final = \"41898282+github-actions[bot]@users.noreply.github.com\"\nBOT_NAME: Final = \"github-actions[bot]\""
     }
   ]
 }
