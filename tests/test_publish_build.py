@@ -117,6 +117,12 @@ def test_the_report_counts_only_the_evenings_that_verify(
 
 
 # --- strips carry no metadata -----------------------------------------------------------------
+#
+# `seal` refuses a strip that is not a PNG or that carries metadata, so a ledger made by lastlight
+# cannot hold one. These tests plant such a file beside a sealed forecast afterwards, the way a
+# hand-edited or hostile ledger could. That evening then fails `verify` (the strip no longer
+# matches `strip_sha256`) and is marked "Not verified", but its page still shows a painting, and
+# the re-encode must make that painting hold pixels and nothing else.
 
 PLAIN = image_factory.plain_png()
 COLOUR_AND_DENSITY = image_factory.COLOUR_AND_DENSITY_CHUNKS
@@ -159,44 +165,78 @@ def test_strips_in_the_site_are_re_encoded_without_metadata(
     assert planted_chunks <= set(chunk_types(source)), "the fixture must really carry the chunk"
     factory.write_strip(ledger_dir, NEWEST, source)
     out = tmp_path / "site"
-    assert build_site(ledger_dir, out).ok
+    report = build_site(ledger_dir, out)
+    assert report.ok
+    assert report.verified == 2, "the tampered evening no longer verifies; the other two do"
     published = (out / "strips" / "2026-10-13.png").read_bytes()
     assert chunk_types(published) == [b"IHDR", b"IDAT", b"IEND"]
     assert_pixels_only(published)
 
 
-def test_re_encoding_keeps_the_pixels(ledger_dir: Path, tmp_path: Path) -> None:
+def sealed_alone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, strip: bytes) -> Path:
+    """A ledger of the newest evening alone, honestly sealed with `strip` as its painting."""
+    ledger = tmp_path / "sealed-ledger"
+    factory.seal_date(ledger, NEWEST, monkeypatch, strip=strip)
+    return ledger
+
+
+def test_re_encoding_keeps_the_pixels(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     painted = Image.new("RGB", (4, 2), (10, 20, 30))
     painted.putpixel((3, 1), (250, 128, 7))
     buffer = io.BytesIO()
     painted.save(buffer, format="PNG")
-    factory.write_strip(ledger_dir, NEWEST, buffer.getvalue())
+    ledger = sealed_alone(tmp_path, monkeypatch, buffer.getvalue())
     out = tmp_path / "site"
-    assert build_site(ledger_dir, out).ok
+    report = build_site(ledger, out)
+    assert report.ok and report.verified == 1, "the painting is the sealed one"
     published = Image.open(out / "strips" / "2026-10-13.png")
     assert published.size == (4, 2)
     assert published.convert("RGB").tobytes() == painted.tobytes()
 
 
-def test_a_paletted_strip_with_transparency_is_flattened_to_plain_rgb(
-    ledger_dir: Path, tmp_path: Path
-) -> None:
+def paletted_with_transparency(chunks: dict[bytes, bytes]) -> bytes:
     palette = Image.new("P", (3, 3))
     palette.putpalette([255, 0, 0, 0, 255, 0] + [0] * 762)
     buffer = io.BytesIO()
     palette.save(buffer, format="PNG", transparency=0)
-    source = image_factory.png_with_chunks_after_ihdr(
-        buffer.getvalue(), image_factory.COLOUR_AND_DENSITY_CHUNKS
-    )
-    carried = set(chunk_types(source))
-    assert {b"PLTE", b"tRNS", *image_factory.COLOUR_AND_DENSITY_CHUNKS} <= carried
-    factory.write_strip(ledger_dir, NEWEST, source)
-    out = tmp_path / "site"
-    assert build_site(ledger_dir, out).ok
+    source = image_factory.png_with_chunks_after_ihdr(buffer.getvalue(), chunks)
+    assert {b"PLTE", b"tRNS", *chunks} <= set(chunk_types(source))
+    return source
+
+
+def assert_published_as_plain_rgb(out: Path) -> None:
     published = (out / "strips" / "2026-10-13.png").read_bytes()
     assert chunk_types(published) == [b"IHDR", b"IDAT", b"IEND"]
     assert_pixels_only(published)
     assert Image.open(out / "strips" / "2026-10-13.png").mode == "RGB"
+
+
+def test_a_sealed_paletted_strip_with_transparency_is_flattened_to_plain_rgb(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The colour and density chunks `seal` lets through (everything but the ICC profile)."""
+    chunks = {
+        name: payload
+        for name, payload in image_factory.COLOUR_AND_DENSITY_CHUNKS.items()
+        if name != b"iCCP"
+    }
+    ledger = sealed_alone(tmp_path, monkeypatch, paletted_with_transparency(chunks))
+    out = tmp_path / "site"
+    report = build_site(ledger, out)
+    assert report.ok and report.verified == 1
+    assert_published_as_plain_rgb(out)
+
+
+def test_a_tampered_paletted_strip_with_an_icc_profile_is_flattened_to_plain_rgb(
+    ledger_dir: Path, tmp_path: Path
+) -> None:
+    """With the ICC profile too, which `seal` refuses, so it can only arrive after sealing."""
+    source = paletted_with_transparency(image_factory.COLOUR_AND_DENSITY_CHUNKS)
+    factory.write_strip(ledger_dir, NEWEST, source)
+    out = tmp_path / "site"
+    report = build_site(ledger_dir, out)
+    assert report.ok and report.verified == 2
+    assert_published_as_plain_rgb(out)
 
 
 def test_an_unreadable_strip_is_a_warning_and_a_placeholder_not_a_failed_build(

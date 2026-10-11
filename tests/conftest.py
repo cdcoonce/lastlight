@@ -43,7 +43,7 @@ def _block_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPat
 
 @pytest.fixture
 def ledger_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A ledger of three sealed evenings (`ledger_factory.DATES`), each with a painting.
+    """A ledger of three sealed evenings (`ledger_factory.DATES`), each sealed with its painting.
 
     `ledger_factory` is imported here, not at the top, because the network-guard tests run this
     file on its own in a throwaway project that does not have the other test helpers.
@@ -52,8 +52,6 @@ def ledger_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
     ledger = tmp_path / "ledger"
     ledger_factory.seal_dates(ledger, monkeypatch)
-    for date in ledger_factory.DATES:
-        ledger_factory.write_strip(ledger, date)
     return ledger
 
 
@@ -68,6 +66,4 @@ def shuffled_ledger_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
 
     ledger = tmp_path / "ledger"
     ledger_factory.seal_dates_out_of_date_order(ledger, monkeypatch)
-    for date in ledger_factory.DATES:
-        ledger_factory.write_strip(ledger, date)
     return ledger

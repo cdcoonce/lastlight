@@ -116,7 +116,8 @@ def test_the_home_page_lists_only_recent_evenings_and_the_archive_lists_all(
     ledger = tmp_path / "ledger"
     first = dt.date(2026, 11, 1)
     for offset in range(16):
-        factory.seal_date(ledger, first + dt.timedelta(days=offset), monkeypatch)
+        date = first + dt.timedelta(days=offset)
+        factory.seal_date(ledger, date, monkeypatch, strip=factory.strip_png())
     out = tmp_path / "site"
     assert build_site(ledger, out).findings == ()
     assert len(read_page(out, "index.html").find("li", "evening")) == 14
@@ -240,8 +241,9 @@ def test_a_hostile_model_name_and_version_are_escaped_on_every_page_that_shows_t
 ) -> None:
     ledger = tmp_path / "ledger"
     name, version = f"{HOSTILE} name", f'{HOSTILE} v"1.0"'
-    factory.seal_date(ledger, NEWEST, monkeypatch, version=version, model_name=name)
-    factory.write_strip(ledger, NEWEST)
+    factory.seal_date(
+        ledger, NEWEST, monkeypatch, version=version, model_name=name, strip=factory.strip_png()
+    )
     out = tmp_path / "site"
     assert build_site(ledger, out).findings == ()
     escaped = f"{HOSTILE_ESCAPED} name {HOSTILE_ESCAPED} v&quot;1.0&quot;"
@@ -401,8 +403,7 @@ def test_a_late_seal_is_marked_not_verified_and_never_featured(
     ledger_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     late = dt.date(2026, 10, 14)
-    factory.seal_date(ledger_dir, late, monkeypatch, late=True)
-    factory.write_strip(ledger_dir, late)
+    factory.seal_date(ledger_dir, late, monkeypatch, strip=factory.strip_png(), late=True)
     out = tmp_path / "site"
     assert build_site(ledger_dir, out).findings == ()
 
