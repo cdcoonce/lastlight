@@ -102,14 +102,16 @@ def _publish_strips(
 
     A date with no painting, or one that is not a readable image, still gets its page, with a
     placeholder; each such date is a warning, so a ledger layout the reader no longer matches
-    shows up as a warning per date rather than as a quietly empty gallery.
+    shows up as a warning per date rather than as a quietly empty gallery. A date that verifies
+    with a forecast naming no painting is not a warning: nothing is missing, none was sealed.
     """
     kept: list[Evening] = []
     warnings: list[str] = []
     for evening in evenings:
         iso = evening.date.isoformat()
         if evening.strip is None:
-            warnings.append(f"there is no painting for {iso}; its page shows a placeholder")
+            if not evening.names_no_painting:
+                warnings.append(f"there is no painting for {iso}; its page shows a placeholder")
         elif not _reencode(evening.strip, staging / pages.strip_name(evening.date)):
             warnings.append(f"the painting for {iso} is not a readable image and was left out")
             evening = dataclasses.replace(evening, strip=None)

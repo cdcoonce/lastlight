@@ -64,11 +64,56 @@ def test_a_late_seal_is_not_verified_and_says_why(
     ledger_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     date = NEWEST.replace(day=14)
-    factory.seal_date(ledger_dir, date, monkeypatch, late=True)
+    factory.seal_date(ledger_dir, date, monkeypatch, strip=factory.strip_png(), late=True)
     late = evening_of(ledger_dir)
     assert late.date == date
     assert late.verified is False
     assert late.reason.startswith("late seal")
+    assert late.strip_verified is False, "verify stopped at the late seal and never checked it"
+
+
+# --- the painting is sealed with the forecast: only `verify` says whether it checked out -------
+
+
+def test_an_evening_sealed_with_its_painting_has_a_verified_strip(ledger_dir: Path) -> None:
+    assert all(evening.strip_verified for evening in read_ledger(ledger_dir).evenings)
+
+
+def test_an_evening_sealed_without_a_painting_verifies_but_has_no_verified_strip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger = tmp_path / "ledger"
+    factory.seal_date(ledger, NEWEST, monkeypatch)
+    bare = evening_of(ledger)
+    assert (bare.verified, bare.reason) == (True, "")
+    assert bare.strip_verified is False
+    assert bare.strip is None
+
+
+@pytest.mark.parametrize("how", ["swapped", "missing"])
+def test_a_painting_that_no_longer_matches_the_forecast_is_not_verified(
+    ledger_dir: Path, how: str
+) -> None:
+    if how == "swapped":
+        factory.write_strip(ledger_dir, NEWEST, factory.strip_png((9, 9, 9)))
+    else:
+        factory.strip_path(ledger_dir, NEWEST).unlink()
+    newest = evening_of(ledger_dir)
+    assert newest.verified is False
+    assert newest.strip_verified is False
+    assert newest.reason.startswith("strip mismatch" if how == "swapped" else "no sealed strip")
+    assert evening_of(ledger_dir, 1).strip_verified is True
+
+
+def test_a_strip_beside_a_forecast_that_names_none_is_not_verified(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger = tmp_path / "ledger"
+    factory.seal_date(ledger, NEWEST, monkeypatch)
+    factory.write_strip(ledger, NEWEST)
+    planted = evening_of(ledger)
+    assert (planted.verified, planted.strip_verified) == (False, False)
+    assert planted.reason.startswith("an unsealed strip")
 
 
 def test_an_edited_forecast_is_not_verified(ledger_dir: Path) -> None:
@@ -86,6 +131,7 @@ def test_an_index_row_that_names_another_digest_is_not_verified(ledger_dir: Path
     index.write_text("".join(json.dumps(row) + "\n" for row in rows))
     newest = evening_of(ledger_dir)
     assert newest.verified is False
+    assert newest.strip_verified is False, "an evening that does not verify seals nothing"
     assert "index" in newest.reason
     assert newest.digest == helpers.digest_hex(
         ledger_paths(ledger_dir, NEWEST).forecast.read_bytes()
@@ -97,7 +143,9 @@ def test_a_missing_painting_is_none_and_a_present_one_is_its_path(ledger_dir: Pa
     assert painting.name == "13.strip.png"
     assert evening_of(ledger_dir).strip == painting
     painting.unlink()
-    assert evening_of(ledger_dir).strip is None
+    gone = evening_of(ledger_dir)
+    assert gone.strip is None
+    assert (gone.verified, gone.strip_verified) == (False, False)
     assert evening_of(ledger_dir, 1).strip is not None
 
 

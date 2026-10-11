@@ -6,6 +6,9 @@ Rules every page follows (docs/design.md section 3, and the accessibility the is
   timestamp; the sky is measured in sun elevation, in degrees. Dates are the only calendar
   quantity. The build runs the privacy scanner over every page before anything is published, so
   a slip here fails the build rather than reaching a visitor.
+- A painting is called sealed only on an evening whose `verify` reported the strip verified
+  (`Evening.strip_verified`). A verified evening whose forecast names no painting says so; an
+  evening that fails verification claims nothing about its painting.
 - Everything that came from the ledger is escaped. Nothing is dropped or tidied: if a note or a
   verification reason holds something the scanner rejects, the build fails and says where.
 - No script and no external resource. Every image has alt text; colours are tokens with
@@ -161,9 +164,22 @@ def _caption(evening: Evening) -> str:
     )
 
 
+def _no_painting(evening: Evening) -> str:
+    """What to say where the painting would be, without a final stop.
+
+    "No painting was sealed" is a statement about the forecast, so it is made only when the
+    evening verified and `verify` did not report a strip: the forecast names none. Any other
+    absence (a sealed painting that is gone, unreadable, or not publishable) is only "no painting",
+    never a claim about what was sealed.
+    """
+    if evening.names_no_painting:
+        return "No painting was sealed for this date"
+    return "No painting for this date"
+
+
 def _figure(evening: Evening) -> str:
     if evening.strip is None:
-        return '<p class="no-painting">No painting for this date.</p>'
+        return f'<p class="no-painting">{_no_painting(evening)}.</p>'
     return f"""<figure class="painting">
 <img src="{strip_name(evening.date)}" alt="{_e(_alt(evening))}">
 {_axis(evening)}
@@ -173,9 +189,18 @@ def _figure(evening: Evening) -> str:
 
 def _status(evening: Evening) -> str:
     if evening.verified:
+        painting = ""
+        if evening.strip_verified:
+            painting = (
+                " The painting is sealed with the forecast: the forecast names the SHA-256 of "
+                "the painting file in the ledger, which <code>lastlight verify</code> found to "
+                "match."
+            )
+            if evening.strip is not None:
+                painting += " The image shown is that painting re-encoded without metadata."
         return (
             '<p class="status verified">Sealed before the evening: verified by '
-            "<code>lastlight verify</code> when this page was built.</p>"
+            f"<code>lastlight verify</code> when this page was built.{painting}</p>"
         )
     return (
         '<p class="status unverified">Not verified. <code>lastlight verify</code> failed '
@@ -224,8 +249,10 @@ check the evening of {iso}.</p>
 <p>The <code>shasum</code> line must print the digest shown above.
 <code>lastlight verify</code> prints PASS only when the forecast file hashes to what the
 timestamp covers and the timestamp was issued before sunset at the reference point;
-otherwise it prints the reason. It does not yet validate the timestamp authority's signature
-chain; that check is a follow-up.</p>
+otherwise it prints the reason. When the forecast names a painting (<code>strip_sha256</code>)
+it also checks the painting file against it, and prints <code>PASS (strip verified)</code>.
+It does not yet validate the timestamp authority's signature chain; that check is a
+follow-up.</p>
 </section>"""
 
 
@@ -244,7 +271,7 @@ def _evening_block(evening: Evening, level: int) -> str:
 def _entry(evening: Evening) -> str:
     iso = evening.date.isoformat()
     if evening.strip is None:
-        picture = '<span class="no-painting">No painting for this date</span>'
+        picture = f'<span class="no-painting">{_no_painting(evening)}</span>'
     else:
         picture = (
             f'<img src="{strip_name(evening.date)}" '
@@ -271,7 +298,9 @@ def _grid(evenings: Sequence[Evening]) -> str:
 def home_page(ledger: Ledger) -> str:
     evenings = ledger.evenings
     featured = next((evening for evening in evenings if evening.verified), None)
-    parts = ["<h1>Latest sealed painting</h1>"]
+    # The newest evening that verifies is featured; it is called a painting only if it has one.
+    sealed = "painting" if featured is None or featured.strip_verified else "forecast"
+    parts = [f"<h1>Latest sealed {sealed}</h1>"]
     if evenings and not evenings[0].verified:
         newest = evenings[0].date
         parts.append(
@@ -332,7 +361,7 @@ def archive_page(ledger: Ledger) -> str:
 def scoreboard_page() -> str:
     body = f"""<h1>Scoreboard</h1>
 <p>No scored evenings yet: tier A public-camera truth arrives in M2.</p>
-<p>Until then every painting here is a sealed forecast and nothing more; none has been
+<p>Until then every painting here is a forecast and nothing more; none has been
 compared with the real sky. When scoring starts, each evening will be scored against the two
 forecasts that are hardest to beat, <em>the same as usual</em> and <em>the same as
 yesterday</em>, split by sky regime and with confidence intervals. "No detectable skill"

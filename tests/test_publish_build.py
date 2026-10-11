@@ -105,6 +105,19 @@ def test_the_report_counts_what_was_built(ledger_dir: Path, tmp_path: Path) -> N
     assert report.warnings == ()
 
 
+def test_an_evening_sealed_without_a_painting_is_not_a_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A forecast that names no painting is a valid seal; there is nothing missing to report."""
+    ledger = tmp_path / "ledger"
+    factory.seal_date(ledger, MIDDLE, monkeypatch, strip=factory.strip_png())
+    factory.seal_date(ledger, NEWEST, monkeypatch)
+    report = build_site(ledger, tmp_path / "site")
+    assert (report.evenings, report.verified) == (2, 2)
+    assert report.warnings == ()
+    assert not (tmp_path / "site" / "strips" / "2026-10-13.png").exists()
+
+
 def test_the_report_counts_only_the_evenings_that_verify(
     ledger_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -294,6 +307,7 @@ def test_a_painting_behind_a_symlinked_directory_is_not_published(
     assert [path for path in out.rglob("*.png")] == []
     page = (out / "2026-10-13.html").read_text(encoding="utf-8")
     assert "No painting for this date" in page and "<img" not in page
+    assert "No painting was sealed" not in page, "a painting was sealed; it is just not published"
 
 
 def test_a_missing_ledger_is_a_warning_and_an_empty_site(tmp_path: Path) -> None:

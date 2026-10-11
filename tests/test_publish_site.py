@@ -22,6 +22,8 @@ from lastlight.seal.ledger import VerifyResult
 
 OLDEST, MIDDLE, NEWEST = factory.DATES
 REPO_URL = "https://github.com/cdcoonce/lastlight"
+NO_PAINTING_SEALED = "No painting was sealed for this date"
+PAINTING_SEALED = "The painting is sealed with the forecast"
 
 
 @pytest.fixture
@@ -377,12 +379,107 @@ def test_text_and_status_colours_meet_the_wcag_aa_contrast_ratio(site: Path, sch
         assert ratio >= 4.5, f"{text} on {background} is {ratio:.2f}:1"
 
 
+# --- a painting is called sealed only when verify says its strip checked out ------------------
+
+SWAPPED = dt.date(2026, 10, 13)
+LATE = dt.date(2026, 10, 14)
+
+
+@pytest.fixture
+def mixed_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Four evenings, one for each way a painting can stand in the ledger.
+
+    2026-10-11 is sealed with its painting. 2026-10-12 is sealed with a forecast that names no
+    painting. 2026-10-13 was sealed with a painting that was swapped for another afterwards.
+    2026-10-14 was sealed with a painting but too late.
+    """
+    ledger = tmp_path / "ledger"
+    strip = factory.strip_png()
+    factory.seal_date(ledger, OLDEST, monkeypatch, version="0.0.1", strip=strip)
+    factory.seal_date(ledger, MIDDLE, monkeypatch, version="0.0.2")
+    factory.seal_date(ledger, SWAPPED, monkeypatch, version="0.0.3", strip=strip)
+    factory.write_strip(ledger, SWAPPED, factory.strip_png((9, 9, 9)))
+    factory.seal_date(ledger, LATE, monkeypatch, version="0.0.4", strip=strip, late=True)
+    out = tmp_path / "site"
+    assert build_site(ledger, out).findings == ()
+    return out
+
+
+def test_an_evening_that_verifies_without_a_strip_says_no_painting_was_sealed(
+    mixed_site: Path,
+) -> None:
+    page = read_page(mixed_site, "2026-10-12.html")
+    assert page.find("img") == []
+    assert NO_PAINTING_SEALED in page.text
+    assert page.find("p", "status")[0].has_class("verified"), "the forecast itself was sealed"
+    assert PAINTING_SEALED not in page.text
+    entry = {
+        name: read_page(mixed_site, name).find("li", "evening")[2]
+        for name in ("index.html", "archive.html")
+    }
+    for name, row in entry.items():
+        assert row.text.startswith("2026-10-12"), name
+        assert NO_PAINTING_SEALED in row.text and "Verified" in row.text, name
+
+
+def test_the_home_page_does_not_call_a_forecast_without_a_painting_a_sealed_painting(
+    mixed_site: Path,
+) -> None:
+    home = read_page(mixed_site, "index.html")
+    assert "2026-10-12" in home.headings(), "the newest evening that verifies is featured"
+    assert "Latest sealed painting" not in home.headings()
+    assert "Latest sealed forecast" in home.headings()
+    assert PAINTING_SEALED not in home.text, "the featured evening has no sealed painting"
+
+
+def test_a_verified_strip_is_called_sealed_where_its_painting_is_shown(site: Path) -> None:
+    home = read_page(site, "index.html")
+    assert "Latest sealed painting" in home.headings()
+    for page in ("index.html", "2026-10-12.html"):
+        probe = read_page(site, page)
+        status = probe.find("p", "status")[0]
+        assert status.has_class("verified"), page
+        assert PAINTING_SEALED in status.text, page
+        assert NO_PAINTING_SEALED not in probe.text, page
+
+
+def test_only_an_evening_whose_strip_verified_calls_its_painting_sealed(
+    mixed_site: Path,
+) -> None:
+    said = {
+        page.name: PAINTING_SEALED in read_page(mixed_site, page.name).text
+        for page in html_pages(mixed_site)
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}\.html", page.name)
+    }
+    assert said == {
+        "2026-10-11.html": True,  # strip sealed and verified
+        "2026-10-12.html": False,  # verified, but the forecast names no strip
+        "2026-10-13.html": False,  # the strip no longer matches the forecast
+        "2026-10-14.html": False,  # sealed late, so verify never reached the strip
+    }
+
+
+def test_a_painting_swapped_after_sealing_is_not_verified_never_featured_and_not_called_sealed(
+    mixed_site: Path,
+) -> None:
+    page = read_page(mixed_site, "2026-10-13.html")
+    status = page.find("p", "status")[0]
+    assert status.has_class("unverified")
+    assert "Not verified" in status.text and "strip mismatch" in status.text
+    assert PAINTING_SEALED not in page.text and NO_PAINTING_SEALED not in page.text
+    home = read_page(mixed_site, "index.html")
+    assert "2026-10-13" not in home.headings() and "2026-10-14" not in home.headings()
+    notice = home.find("p", "notice")[0].text
+    assert "2026-10-14" in notice and "did not verify" in notice
+
+
 # --- when something is wrong or missing -------------------------------------------------------
 
 
-def test_an_evening_without_a_painting_gets_a_text_placeholder(
+def test_a_sealed_painting_that_has_gone_missing_gets_a_text_placeholder_and_is_not_verified(
     ledger_dir: Path, tmp_path: Path
 ) -> None:
+    """The forecast names a painting, so without it `verify` fails: it was not left unsealed."""
     factory.strip_path(ledger_dir, MIDDLE).unlink()
     out = tmp_path / "site"
     assert build_site(ledger_dir, out).findings == ()
@@ -390,9 +487,13 @@ def test_an_evening_without_a_painting_gets_a_text_placeholder(
     page = read_page(out, "2026-10-12.html")
     assert page.find("img") == []
     assert "No painting for this date" in page.text
+    assert NO_PAINTING_SEALED not in page.text, "the forecast did name a painting"
+    status = page.find("p", "status")[0]
+    assert status.has_class("unverified") and "no sealed strip" in status.text
     archive = read_page(out, "archive.html")
     middle = archive.find("li", "evening")[1]
     assert middle.text.startswith("2026-10-12") and "No painting for this date" in middle.text
+    assert "Not verified" in middle.text and NO_PAINTING_SEALED not in middle.text
     assert [img.attrs["src"] for img in archive.find("img")] == [
         "strips/2026-10-13.png",
         "strips/2026-10-11.png",

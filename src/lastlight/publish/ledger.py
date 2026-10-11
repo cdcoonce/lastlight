@@ -1,13 +1,17 @@
 """Read a ledger for the almanac: which evenings were sealed, what they say, whether they verify.
 
-The ledger is the directory `lastlight seal` writes (`lastlight.seal.ledger`), plus one file the
-daily forecast adds beside each sealed forecast, its painting: `YYYY/MM/DD.strip.png`. The list
-of dates comes from `index.jsonl`, newest first.
+The ledger is the directory `lastlight seal` writes (`lastlight.seal.ledger`): per date the
+sealed forecast, its timestamp and, when the forecast names one, its painting
+(`ledger_paths(...).strip`, `YYYY/MM/DD.strip.png`). The painting is sealed with the forecast,
+through `strip_sha256`: the SHA-256 of the PNG is part of the timestamped bytes, and `verify`
+checks the file against it. The list of dates comes from `index.jsonl`, newest first.
 
-Whether an evening was sealed in time is never taken from a file or a clock. It is the result of
-`lastlight.seal.verify`, run again here, so the site shows the same PASS or reason that anyone
-running `lastlight verify` gets. An evening that does not verify is still listed, marked, with the
-reason; it is never featured as a sealed painting.
+Whether an evening was sealed in time, and whether its painting is the sealed one, is never taken
+from a file or a clock. It is the result of `lastlight.seal.verify`, run again here, so the site
+shows the same PASS or reason that anyone running `lastlight verify` gets. `Evening.verified` is
+`verify`'s verdict and `Evening.strip_verified` is its report that the forecast named a painting
+and the file hashed to it; a painting is called sealed only then. An evening that does not verify
+is still listed, marked, with the reason; it is never featured as a sealed painting.
 
 What an evening says about itself is read from the forecast file with no schema check, because
 the schema is `verify`'s job and the site must be able to show (and the privacy scan to catch)
@@ -50,8 +54,18 @@ class Evening:
     verified: bool
     reason: str
     """Why `lastlight verify` failed; empty when it passed."""
+    strip_verified: bool
+    """True only when `verify` passed and reported the painting sealed: the forecast names it
+    (`strip_sha256`) and the file in the ledger hashes to that. False for an evening whose
+    forecast names none, and for any evening that does not verify (including one whose painting
+    is missing or was swapped)."""
     strip: Path | None
-    """The painting on disk, or None when the date has none."""
+    """The painting on disk, or None when the date has none (or it may not be published)."""
+
+    @property
+    def names_no_painting(self) -> bool:
+        """True when the evening verified and its forecast names no painting (no strip verified)."""
+        return self.verified and not self.strip_verified
 
 
 @dataclass(frozen=True)
@@ -69,11 +83,6 @@ class _Row:
     date: dt.date
     digest: str
     model_version: str
-
-
-def strip_path(ledger_dir: Path, date: dt.date) -> Path:
-    """Where the painting of `date` lives: beside its forecast, as `DD.strip.png`."""
-    return ledger_paths(ledger_dir, date).forecast.with_name(f"{date.day:02d}.strip.png")
 
 
 def read_ledger(ledger_dir: Path) -> Ledger:
@@ -140,6 +149,7 @@ def _read_evening(row: _Row, ledger_dir: Path) -> Evening:
         reason = "verification failed"
     if verified and digest != row.digest:
         verified, reason = False, "the index lists a different digest than the sealed forecast"
+    strip_verified = verified and outcome.strip_verified
 
     document = _document(sealed)
     model = _mapping(document.get("model"))
@@ -158,6 +168,7 @@ def _read_evening(row: _Row, ledger_dir: Path) -> Evening:
         notes=_text(document.get("notes")),
         verified=verified,
         reason=reason,
+        strip_verified=strip_verified,
         strip=_painting(ledger_dir, row.date),
     )
 
@@ -168,7 +179,7 @@ def _painting(ledger_dir: Path, date: dt.date) -> Path | None:
     A painting that is itself a symlink is never used, and a symlinked directory above it may not
     lead out of the ledger, or a ledger could publish whatever image its links point at.
     """
-    painting = strip_path(ledger_dir, date)
+    painting = ledger_paths(ledger_dir, date).strip
     if not painting.is_file() or painting.is_symlink():
         return None
     if not painting.resolve().is_relative_to(ledger_dir.resolve()):
