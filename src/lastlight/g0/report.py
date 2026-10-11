@@ -202,7 +202,7 @@ def _caveat(study: Study) -> str:
     channels = (
         f"the {word} rests on one channel: {split}"
         if passed and carrier
-        else (f"by channel, {split}")
+        else f"by channel, {split}"
     )
     seasonal = {
         name: _percent(study.seasonal_channels[name].verdict.fraction) for name in CHANNEL_NAMES

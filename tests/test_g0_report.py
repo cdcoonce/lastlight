@@ -379,8 +379,10 @@ def test_the_channel_floor_sentence_reads_cleanly(outputs) -> None:
 BLUE_OFFSET, RED_OFFSET = -2.62, 0.5
 
 
-def make_blue_study(*, moved: int = 14, n: int = 40, smoke: float = 0.0, spread: bool = True):
-    """Dates that differ only in log(B/G): `moved` of them are 0.2 away in golden and early.
+def make_blue_study(
+    *, moved: int = 14, n: int = 40, smoke: float = 0.0, spread: bool = True, amount: float = 0.2
+):
+    """Dates that differ only in log(B/G): `moved` of them are `amount` away in golden and early.
 
     With `spread` the moved dates are every third one (a minority in every window, so the
     seasonal control sees them too); otherwise they are the first `moved` dates, a block that the
@@ -397,7 +399,7 @@ def make_blue_study(*, moved: int = 14, n: int = 40, smoke: float = 0.0, spread:
             record.contrast[scale][:, :, 1] += BLUE_OFFSET
         if i in shifted:
             for band in ("golden", "early"):
-                record.contrast["nominal"][list(stats.band_members(band)), :, 1] += 0.2
+                record.contrast["nominal"][list(stats.band_members(band)), :, 1] += amount
     return build_study(records, START, days[-1])
 
 
@@ -514,6 +516,19 @@ def test_a_fail_is_read_in_renderer_units_too_and_claims_nothing_about_the_forec
     assert "does not show that the forecast cannot beat climatology or persistence" in section
     assert "PASS" not in section
     assert "does not yet support a claim" not in section
+
+
+def test_a_fail_that_one_channel_alone_would_pass_is_not_said_to_rest_on_that_channel(
+    tmp_path,
+) -> None:
+    # Blue moves by 0.08: D is 0.08 in log(B/G) alone (a hit on 35 percent of dates) but 0.04
+    # over both channels, which is below the threshold, so the verdict is a FAIL.
+    study = make_blue_study(amount=0.08)
+    assert not study.verdict.passed and study.channels["log(B/G)"].verdict.passed
+    section = verdict_section_of(study, tmp_path)
+    assert "Read this FAIL in renderer-v0 units" in section
+    assert "rests on one channel" not in section
+    assert "by channel, log(B/G) alone meets the rule on 35.0 percent of dates" in section
 
 
 def test_when_both_channels_carry_the_result_it_is_not_said_to_rest_on_one(tmp_path) -> None:
