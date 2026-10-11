@@ -262,17 +262,93 @@ def test_a_message_from_another_run_is_refused(tmp_path) -> None:
 
 
 def test_a_message_that_is_not_the_aerosol_the_idx_promised_is_refused(tmp_path) -> None:
+    # The idx lists "total" first and "dust" second, but the file holds the dust message first. The
+    # idx offsets are those of that file (the dust message is shorter than the total), so each
+    # range is one whole message and only the aerosol type shows the swap.
     transport = support.crop_transport(CYCLE_DATE, 0)
-    # The idx says "total" first, but the bytes there are the dust message.
-    url = gefs.chem_url(CYCLE_DATE, 0, 0)
-    dust_then_total = support.edited(
-        support.crop_message("DUST_AOD_550"), cycle=(CYCLE_DATE, 0)
-    ) + support.edited(support.crop_message("TOTAL_AOD_550"), cycle=(CYCLE_DATE, 0))
-    assert len(dust_then_total) == len(support.CROP_GRIB)
-    transport.files[url] = dust_then_total
-    transport.files[gefs.idx_url(CYCLE_DATE, 0, 0)] = support.CROP_IDX_TEXT.encode()
-    with pytest.raises(gefs.AerosolArchiveError):
+    dust = support.edited(support.crop_message("DUST_AOD_550"), cycle=(CYCLE_DATE, 0))
+    total = support.edited(support.crop_message("TOTAL_AOD_550"), cycle=(CYCLE_DATE, 0))
+    first_offset = support.CROP_MESSAGES["DUST_AOD_550"].start
+    assert len(dust) != first_offset  # the swap really moves the second message
+    swapped_idx = support.CROP_IDX_TEXT.replace(f":{first_offset}:", f":{len(dust)}:")
+    assert swapped_idx != support.CROP_IDX_TEXT
+    transport.files[gefs.chem_url(CYCLE_DATE, 0, 0)] = dust + total
+    transport.files[gefs.idx_url(CYCLE_DATE, 0, 0)] = swapped_idx.encode()
+    # The aerosol-type guard's own text. Without that guard the dust would be read as the total and
+    # the total as the dust, and the later "dust exceeds total" check would raise an
+    # AerosolArchiveError of its own: a bare type match could not tell the two apart.
+    with pytest.raises(
+        gefs.AerosolArchiveError,
+        match=r"TOTAL_AOD_550: the idx promised aerosol type 62000 but the message is aerosol "
+        r"type 62001",
+    ):
         gefs.fetch_aerosol(EVENING, LAT, LON, tmp_path, transport=transport)
+
+
+def _serve_edited(
+    total: dict[str, float] | None = None, dust: dict[str, float] | None = None
+) -> hrrr_support.FakeTransport:
+    """The crop with ecCodes keys set on the total and/or dust message (same run, same idx)."""
+    transport = support.crop_transport(CYCLE_DATE, 0)
+    keys = {"TOTAL_AOD_550": total or {}, "DUST_AOD_550": dust or {}}
+    transport.files[gefs.chem_url(CYCLE_DATE, 0, 0)] = b"".join(
+        support.edited(support.crop_message(name), cycle=(CYCLE_DATE, 0), **keys[name])
+        for name in support.CROP_MESSAGES
+    )
+    return transport
+
+
+def _refused_for(tmp_path, transport, text: str) -> None:
+    """The fetch is refused by the guard whose message contains `text`, and by no other guard."""
+    with pytest.raises(gefs.AerosolArchiveError, match=text):
+        gefs.fetch_aerosol(EVENING, LAT, LON, tmp_path, transport=transport)
+
+
+def test_a_message_that_is_not_aerosol_optical_thickness_is_refused(tmp_path) -> None:
+    # The GRIB parameter is (discipline, category, number); the number is the one edited.
+    transport = _serve_edited(total={"parameterNumber": 103})
+    _refused_for(
+        tmp_path,
+        transport,
+        r"TOTAL_AOD_550: the message is GRIB parameter \(0, 20, 103\), expected \(0, 20, 102\)",
+    )
+
+
+def test_a_message_for_a_level_other_than_the_whole_column_is_refused(tmp_path) -> None:
+    transport = _serve_edited(total={"typeOfFirstFixedSurface": 1})  # the ground, not the column
+    _refused_for(
+        tmp_path, transport, r"TOTAL_AOD_550: the message is not for the entire atmosphere"
+    )
+
+
+def test_a_message_of_another_aerosol_type_than_the_idx_promised_is_refused(tmp_path) -> None:
+    # The total message relabelled as dust: the same parameter, level, wavelength and run, and its
+    # value still exceeds the dust message's, so no later check could refuse it.
+    transport = _serve_edited(total={"aerosolType": 62001})
+    _refused_for(
+        tmp_path,
+        transport,
+        r"TOTAL_AOD_550: the idx promised aerosol type 62000 but the message is aerosol type 62001",
+    )
+
+
+def test_a_message_for_a_forecast_hour_other_than_the_one_asked_for_is_refused(tmp_path) -> None:
+    transport = _serve_edited(total={"step": 3})  # the three-hour forecast, not the analysis
+    _refused_for(
+        tmp_path,
+        transport,
+        r"TOTAL_AOD_550: the message is forecast hour 3, not the requested forecast hour 0",
+    )
+
+
+def test_a_message_that_carries_no_wavelength_band_is_refused(tmp_path) -> None:
+    # Product definition template 44 (aerosol, no optical properties) keeps the aerosol type and
+    # drops the wavelength keys, so only the missing-band guard can refuse it. It is a different
+    # length, so it goes in the dust message, the one with an open-ended range.
+    transport = _serve_edited(dust={"productDefinitionTemplateNumber": 44})
+    _refused_for(
+        tmp_path, transport, r"DUST_AOD_550: the message's wavelength band is None, expected"
+    )
 
 
 def test_a_wrong_wavelength_is_refused(tmp_path) -> None:
