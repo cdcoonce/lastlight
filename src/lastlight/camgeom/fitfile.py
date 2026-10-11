@@ -8,7 +8,7 @@ section 2, rule 2) and is what every later slice reads. It holds:
 - the predicted skyline in the frame (the fitted curve the sky mask is cut from);
 - the frames the fit was frozen on, each by the date of its evening, the sun's elevation at the
   frame and the SHA-256 of its bytes: never a file name, a time of day or a pixel;
-- the sun check, the radial-distortion check and (when it was run) the position scan, and
+- the sun check, the radial-distortion check and (when it was run) the position search, and
   the date the fit was frozen.
 
 It does not hold the camera's coordinates. The pixel-to-sky mapping needs only the
@@ -63,7 +63,7 @@ class CameraFit:
     frames_used: tuple[FrameRecord, ...]
     sun_check: dict[str, Any]
     radial_term: dict[str, Any] | None
-    position_scan: dict[str, Any] | None
+    position_search: dict[str, Any] | None
     frozen_on: str
     position_basis: str
 
@@ -132,7 +132,7 @@ class CameraFit:
             ],
             "sun_check": self.sun_check,
             "radial_term": self.radial_term,
-            "position_scan": self.position_scan,
+            "position_search": self.position_search,
             "fit_frozen_on": self.frozen_on,
             "position_basis": self.position_basis,
         }
@@ -173,8 +173,8 @@ class CameraFit:
                 ),
                 sun_check=dict(data["sun_check"]),
                 radial_term=None if data["radial_term"] is None else dict(data["radial_term"]),
-                position_scan=(
-                    None if data["position_scan"] is None else dict(data["position_scan"])
+                position_search=(
+                    None if data["position_search"] is None else dict(data["position_search"])
                 ),
                 frozen_on=str(data["fit_frozen_on"]),
                 position_basis=str(data["position_basis"]),

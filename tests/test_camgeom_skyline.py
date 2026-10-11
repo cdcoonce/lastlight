@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from camgeom_synthetic import HEIGHT, TRUE_MODEL, WIDTH, render_frame, true_skyline_y
+
 from lastlight.camgeom.skyline import (
     Box,
     combine_skylines,

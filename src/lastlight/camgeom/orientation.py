@@ -39,13 +39,21 @@ from lastlight.camgeom.skyline import (
 
 _COARSE_BLUR = 4.0  # extra smoothing of the edge map for the coarse search, in pixels
 _COARSE_AZIMUTH_STEP = 1.0
-_COARSE_HFOV_STEP = 6.0
+_COARSE_HFOV_RATIO = 1.15  # neighbouring candidate fields of view differ by this factor
 _COARSE_SHIFT_STEP = 5.0
 _CANDIDATES_KEPT = 6
 _BANDS = (30.0, 18.0, 12.0)  # half-widths of the trace band, wide to narrow
 _ROBUST_SCALE_PX = 2.0
 _MISSING_PENALTY_PX = 30.0  # residual charged to a column the predicted curve does not cover
 RADIAL_K1_BOUND = 0.6  # the radial term is searched within plus or minus this
+DEFAULT_HFOV_RANGE_DEG = (10.0, 120.0)  # from a long telephoto to a wide angle: a physical lens
+HFOV_BOUND_TOLERANCE_DEG = 0.05  # a fit this close to a limit counts as pinned to it
+
+
+def hfov_is_pinned(hfov_deg: float, bounds: tuple[float, float] = DEFAULT_HFOV_RANGE_DEG) -> bool:
+    """True when a fitted field of view sits on a limit of the range it was searched in."""
+    low, high = bounds
+    return hfov_deg <= low + HFOV_BOUND_TOLERANCE_DEG or hfov_deg >= high - HFOV_BOUND_TOLERANCE_DEG
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,7 +82,7 @@ class Prior:
     azimuth_halfwidth_deg: float = 20.0
     elevation_halfwidth_deg: float = 10.0
     roll_halfwidth_deg: float = 5.0
-    hfov_range_deg: tuple[float, float] = (35.0, 110.0)
+    hfov_range_deg: tuple[float, float] = DEFAULT_HFOV_RANGE_DEG
 
 
 @dataclass(frozen=True)
@@ -190,7 +198,8 @@ def _coarse_candidates(
         _COARSE_AZIMUTH_STEP,
     )
     low, high = prior.hfov_range_deg
-    hfovs = np.linspace(low, high, max(2, math.ceil((high - low) / _COARSE_HFOV_STEP) + 1))
+    count = max(2, math.ceil(math.log(high / low) / math.log(_COARSE_HFOV_RATIO)) + 1)
+    hfovs = np.geomspace(low, high, count)
     shifts = np.arange(-height, height + 1.0, _COARSE_SHIFT_STEP)
     columns = np.arange(width)[None, :]
     found: list[tuple[float, Orientation]] = []
@@ -299,7 +308,7 @@ def _fit_to_skyline(
         bounds=(low, high),
         loss="soft_l1",
         f_scale=_ROBUST_SCALE_PX,
-        x_scale=np.array([1.0, 1.0, 1.0, 5.0]),
+        x_scale=np.array([1.0, 1.0, 1.0, 0.07 * start.hfov_deg]),
         diff_step=1e-6,
     )
     return Orientation(*result.x)
@@ -381,10 +390,22 @@ def fit_radial_term(
 
     origin = np.append(start.as_array(), 0.0)
     low = np.array(
-        [start.azimuth_deg - 10.0, start.elevation_deg - 10.0, -5.0, 30.0, -RADIAL_K1_BOUND]
+        [
+            start.azimuth_deg - 10.0,
+            start.elevation_deg - 10.0,
+            -5.0,
+            0.6 * start.hfov_deg,
+            -RADIAL_K1_BOUND,
+        ]
     )
     high = np.array(
-        [start.azimuth_deg + 10.0, start.elevation_deg + 10.0, 5.0, 120.0, RADIAL_K1_BOUND]
+        [
+            start.azimuth_deg + 10.0,
+            start.elevation_deg + 10.0,
+            5.0,
+            min(1.6 * start.hfov_deg, 170.0),
+            RADIAL_K1_BOUND,
+        ]
     )
     result = optimize.least_squares(
         residual,
@@ -392,7 +413,7 @@ def fit_radial_term(
         bounds=(low, high),
         loss="soft_l1",
         f_scale=_ROBUST_SCALE_PX,
-        x_scale=np.array([1.0, 1.0, 1.0, 5.0, 0.1]),
+        x_scale=np.array([1.0, 1.0, 1.0, 0.07 * start.hfov_deg, 0.1]),
         diff_step=1e-6,
     )
     final = residual(result.x)

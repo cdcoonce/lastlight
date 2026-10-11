@@ -8,6 +8,7 @@ import math
 import numpy as np
 import pytest
 from camgeom_synthetic import TRUE_MODEL
+
 from lastlight.camgeom.model import CameraModel
 
 

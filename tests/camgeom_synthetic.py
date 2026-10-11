@@ -13,11 +13,12 @@ from pathlib import Path
 
 import numpy as np
 import rasterio
+from rasterio.transform import from_origin
+from scipy import ndimage
+
 from lastlight.camgeom.dem import Dem
 from lastlight.camgeom.model import CameraModel
 from lastlight.camgeom.skyline import Box
-from rasterio.transform import from_origin
-from scipy import ndimage
 
 REF_LAT, REF_LON = 33.45, -112.07
 REF_ELEV_M = 340.0

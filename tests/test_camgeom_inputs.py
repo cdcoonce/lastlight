@@ -9,6 +9,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 from camgeom_synthetic import REF_LAT, REF_LON
+from PIL import Image
+
 from lastlight.camgeom.frames import (
     discover_frames,
     evening_of,
@@ -17,7 +19,6 @@ from lastlight.camgeom.frames import (
     parse_frame_time,
 )
 from lastlight.camgeom.sites import SITES_ENV, SiteFileError, load_camera_site, resolve_site_file
-from PIL import Image
 
 STAMP = "%Y%m%dT%H%M%SZ"
 WHEN = dt.datetime(2026, 10, 11, 0, 30, 9, tzinfo=dt.UTC)
@@ -83,7 +84,7 @@ def test_a_frame_is_identified_by_the_sha256_of_its_bytes(tmp_path: Path) -> Non
 
 
 def test_the_evening_is_the_local_mean_solar_date_so_a_late_frame_keeps_its_day() -> None:
-    # 00:30 UTC on the 11th is the late afternoon of the 10th at this longitude.
+    # Just after midnight UTC on the 11th is still the late afternoon of the 10th here.
     assert evening_of(WHEN, REF_LON) == dt.date(2026, 10, 10)
     assert evening_of(dt.datetime(2026, 10, 10, 21, 0, tzinfo=dt.UTC), REF_LON) == dt.date(
         2026, 10, 10

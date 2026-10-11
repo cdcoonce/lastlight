@@ -24,7 +24,7 @@ from lastlight.camgeom.fitfile import (
 )
 from lastlight.camgeom.mask import sky_mask, write_mask_png
 from lastlight.camgeom.model import CameraModel
-from lastlight.camgeom.orientation import Orientation
+from lastlight.camgeom.orientation import Orientation, hfov_is_pinned
 from lastlight.camgeom.skyline import default_overlay_boxes
 from lastlight.privacy.rules import text_hits
 
@@ -241,7 +241,7 @@ def test_the_committed_whtm1_fit_is_a_valid_frozen_fit() -> None:
     assert COMMITTED.parent == GEOMETRY_DIR
     assert (fit.width, fit.height) == (800, 300)
     assert abs(fit.orientation.azimuth_deg - 274.0) < 20.0, "within the operator's stated view"
-    assert 30.0 < fit.orientation.hfov_deg < 120.0
+    assert not hfov_is_pinned(fit.orientation.hfov_deg), "a fit on a limit is not a fit"
     assert abs(fit.orientation.elevation_deg) < 10.0 and abs(fit.orientation.roll_deg) < 5.0
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", fit.frozen_on)
     assert 0.0 < fit.skyline_rms_px < 2.0, "the issue's target for the skyline residual"

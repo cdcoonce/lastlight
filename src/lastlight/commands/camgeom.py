@@ -65,14 +65,18 @@ def _configure(parser: argparse.ArgumentParser) -> None:
         help="skip frames with the sun below this elevation in degrees (default 0)",
     )
     fit.add_argument(
-        "--scan-position-km",
+        "--position-box-km",
         type=float,
         default=0.0,
-        help="also refit with the camera moved over a grid inside +-this many km of the site, "
-        "and record how much the residual and orientation move (default 0: no scan)",
+        help="search the camera's position inside +-this many km of the site file's position "
+        "and fit there (default 0: the camera stands at the site)",
     )
     fit.add_argument(
-        "--scan-step-km", type=float, default=2.0, help="grid spacing of the scan (default 2)"
+        "--position-step-km",
+        type=float,
+        default=4.0,
+        help="grid spacing of the coarse position search; a finer grid of half the step "
+        "follows around the best (default 4)",
     )
     fit.add_argument(
         "--frozen-on",
@@ -126,7 +130,7 @@ def _run_fit(args: argparse.Namespace) -> int:
             dem_module.tiles_for_bounds(reach[1], reach[3], reach[0], reach[2]),
             args.dem_cache or dem_module.default_cache_dir(),
         )
-        margin = 0.02 + args.scan_position_km / 90.0  # room for the camera to be moved in a scan
+        margin = 0.02 + args.position_box_km / 90.0  # room for the camera to be moved
         bounds = dem_module.view_bounds(site.lat, site.lon, rays, max_range_km, margin_deg=margin)
         terrain = dem_module.read_dem(paths, bounds)
         calibration = calibrate_camera(
@@ -137,8 +141,8 @@ def _run_fit(args: argparse.Namespace) -> int:
             frozen_on=args.frozen_on or dt.date.today(),
             min_sun_elevation_deg=args.min_sun_elevation,
             max_range_km=max_range_km,
-            scan_box_km=args.scan_position_km,
-            scan_step_km=args.scan_step_km,
+            position_box_km=args.position_box_km,
+            position_step_km=args.position_step_km,
         )
     except (CalibrationError, SiteFileError, FileNotFoundError, ValueError) as error:
         return _fail(str(error))
@@ -178,14 +182,17 @@ def _print_fit_summary(camera: str, calibration, out: Path, min_sun: float) -> N
         f"{camera}: radial term k1 {radial.get('k1', 0.0):+.3f} would give rms "
         f"{radial.get('skyline_rms_px', 0.0):.2f} px (not adopted)"
     )
-    scan = fit.position_scan
-    if scan is not None:
+    search = fit.position_search
+    if search is not None:
         print(
-            f"{camera}: position scan over {scan['positions']} positions: skyline rms "
-            f"{scan['rms_px_min']:.2f} to {scan['rms_px_max']:.2f} px, azimuth "
-            f"{scan['azimuth_deg_range'][0]:.1f} to {scan['azimuth_deg_range'][1]:.1f}, hfov "
-            f"{scan['hfov_deg_range'][0]:.1f} to {scan['hfov_deg_range'][1]:.1f} degrees "
-            "(position held at the described site)"
+            f"{camera}: position search over {search['positions']} positions, offset "
+            f"{search['offset_east_km']:+.1f} km east {search['offset_north_km']:+.1f} km north "
+            f"of the site file; {search['near_best_positions']} within 10 percent of the best "
+            f"rms, azimuth {search['near_best_azimuth_deg_range'][0]:.1f} to "
+            f"{search['near_best_azimuth_deg_range'][1]:.1f}, hfov "
+            f"{search['near_best_hfov_deg_range'][0]:.1f} to "
+            f"{search['near_best_hfov_deg_range'][1]:.1f} degrees"
+            + (" (the best is on the edge of the box)" if search["best_on_box_edge"] else "")
         )
     print(f"{camera}: sun check {fit.sun_check['status']}: {fit.sun_check['reason']}")
     print(f"{camera}: wrote {out}")

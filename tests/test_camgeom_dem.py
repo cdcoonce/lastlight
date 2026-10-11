@@ -116,41 +116,47 @@ def test_the_horizon_is_computed_for_every_azimuth_requested_in_order() -> None:
     assert found[2] > found[0] and found[2] > found[1]
 
 
+# Grid positions below are offsets from the corner of the one-degree tile that holds the
+# reference point, so that no coordinate pair is spelled out in this file.
+TILE_LAT, TILE_LON = math.floor(REF_LAT), math.floor(REF_LON)
+TOP, LEFT = TILE_LAT + 1.0, TILE_LON + 0.0  # the tile's north-west corner
+
+
 # --- reading elevations ---------------------------------------------------------------------------
 
 
 def small_dem() -> Dem:
     values = np.array([[0.0, 10.0, 20.0], [100.0, 110.0, 120.0], [200.0, 210.0, 220.0]])
     return Dem(
-        values.astype(np.float32), lat_top=34.0, lon_left=-113.0, step_lat_deg=0.5, step_lon_deg=0.5
+        values.astype(np.float32), lat_top=TOP, lon_left=LEFT, step_lat_deg=0.5, step_lon_deg=0.5
     )
 
 
 def test_sampling_a_node_returns_its_value_and_a_cell_centre_the_average() -> None:
     dem = small_dem()
-    assert dem.sample(34.0, -113.0) == pytest.approx(0.0)
-    assert dem.sample(33.5, -112.5) == pytest.approx(110.0)
-    assert dem.sample(33.75, -112.75) == pytest.approx(55.0)  # mean of 0, 10, 100, 110
+    assert dem.sample(TOP, LEFT) == pytest.approx(0.0)
+    assert dem.sample(TOP - 0.5, LEFT + 0.5) == pytest.approx(110.0)
+    assert dem.sample(TOP - 0.25, LEFT + 0.25) == pytest.approx(55.0)  # mean of 0, 10, 100, 110
 
 
 def test_sampling_outside_the_grid_is_nan() -> None:
     dem = small_dem()
-    assert math.isnan(float(dem.sample(34.2, -112.5)))
-    assert math.isnan(float(dem.sample(33.5, -114.0)))
-    assert math.isnan(float(dem.sample(32.9, -112.5)))
+    assert math.isnan(float(dem.sample(TOP + 0.2, LEFT + 0.5)))
+    assert math.isnan(float(dem.sample(TOP - 0.5, LEFT - 1.0)))
+    assert math.isnan(float(dem.sample(TOP - 1.1, LEFT + 0.5)))
 
 
 def test_sampling_takes_arrays_of_points() -> None:
     dem = small_dem()
-    values = dem.sample(np.array([34.0, 33.0]), np.array([-113.0, -112.0]))
+    values = dem.sample(np.array([TOP, TOP - 1.0]), np.array([LEFT, LEFT + 1.0]))
     assert values == pytest.approx([0.0, 220.0])
 
 
 def test_a_dem_with_a_nodata_hole_gives_nan_there_and_not_a_wrong_number() -> None:
     values = np.array([[1.0, 2.0], [3.0, math.nan]], dtype=np.float32)
-    dem = Dem(values, 34.0, -113.0, 0.5, 0.5)
-    assert math.isnan(float(dem.sample(33.75, -112.75)))
-    assert dem.sample(34.0, -113.0) == pytest.approx(1.0)
+    dem = Dem(values, TOP, LEFT, 0.5, 0.5)
+    assert math.isnan(float(dem.sample(TOP - 0.25, LEFT + 0.25)))
+    assert dem.sample(TOP, LEFT) == pytest.approx(1.0)
 
 
 def test_a_geotiff_reads_back_with_its_elevations_and_georeferencing(tmp_path: Path) -> None:
@@ -200,19 +206,21 @@ def test_reading_a_window_of_a_geotiff_returns_only_that_window(tmp_path: Path) 
 
 def test_two_adjacent_tiles_read_as_one_continuous_grid(tmp_path: Path) -> None:
     step = 0.1
-    west = Dem(np.arange(100, dtype=np.float32).reshape(10, 10), 34.0, -113.0, step, step)
-    east = Dem(1000.0 + np.arange(100, dtype=np.float32).reshape(10, 10), 34.0, -112.0, step, step)
+    west = Dem(np.arange(100, dtype=np.float32).reshape(10, 10), TOP, LEFT, step, step)
+    east = Dem(
+        1000.0 + np.arange(100, dtype=np.float32).reshape(10, 10), TOP, LEFT + 1.0, step, step
+    )
     paths = [write_geotiff(tmp_path / "w.tif", west), write_geotiff(tmp_path / "e.tif", east)]
-    got = read_dem(paths, bounds=(-113.05, 33.05, -111.05, 34.05))
+    got = read_dem(paths, bounds=(LEFT - 0.05, TOP - 0.95, LEFT + 1.95, TOP + 0.05))
     assert got.elevation_m.shape == (10, 20)
     assert np.allclose(got.elevation_m[:, :10], west.elevation_m)
     assert np.allclose(got.elevation_m[:, 10:], east.elevation_m)
 
 
 def test_ground_outside_every_tile_reads_as_no_data(tmp_path: Path) -> None:
-    tile = Dem(np.ones((10, 10), dtype=np.float32), 34.0, -113.0, 0.1, 0.1)
+    tile = Dem(np.ones((10, 10), dtype=np.float32), TOP, LEFT, 0.1, 0.1)
     path = write_geotiff(tmp_path / "t.tif", tile)
-    got = read_dem([path], bounds=(-113.05, 33.05, -111.55, 34.05))
+    got = read_dem([path], bounds=(LEFT - 0.05, TOP - 0.95, LEFT + 1.45, TOP + 0.05))
     assert np.isnan(got.elevation_m[:, -1]).all()
     assert np.isfinite(got.elevation_m[:, 0]).all()
 
@@ -240,15 +248,22 @@ def test_a_tile_url_points_at_the_public_bucket() -> None:
 
 
 def test_tiles_for_bounds_lists_every_tile_the_box_touches() -> None:
-    assert tiles_for_bounds(33.2, 33.9, -112.9, -112.1) == [tile_name(33, -113)]
-    four = tiles_for_bounds(32.8, 33.2, -112.2, -111.8)
+    one = tiles_for_bounds(TILE_LAT + 0.2, TILE_LAT + 0.9, TILE_LON + 0.1, TILE_LON + 0.9)
+    assert one == [tile_name(TILE_LAT, TILE_LON)]
+    four = tiles_for_bounds(TILE_LAT - 0.2, TILE_LAT + 0.2, TILE_LON + 0.8, TILE_LON + 1.2)
     assert sorted(four) == sorted(
-        [tile_name(32, -113), tile_name(32, -112), tile_name(33, -113), tile_name(33, -112)]
+        [
+            tile_name(TILE_LAT - 1, TILE_LON),
+            tile_name(TILE_LAT - 1, TILE_LON + 1),
+            tile_name(TILE_LAT, TILE_LON),
+            tile_name(TILE_LAT, TILE_LON + 1),
+        ]
     )
 
 
 def test_a_box_that_ends_exactly_on_a_tile_edge_does_not_pull_in_the_next_tile() -> None:
-    assert tiles_for_bounds(33.0, 34.0, -113.0, -112.0) == [tile_name(33, -113)]
+    edges = tiles_for_bounds(TILE_LAT + 0.0, TILE_LAT + 1.0, TILE_LON + 0.0, TILE_LON + 1.0)
+    assert edges == [tile_name(TILE_LAT, TILE_LON)]
 
 
 def test_fetch_tiles_downloads_once_and_reuses_the_cache(tmp_path: Path) -> None:

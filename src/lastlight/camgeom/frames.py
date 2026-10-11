@@ -68,6 +68,6 @@ def evening_of(when_utc: dt.datetime, lon: float) -> dt.date:
     """The local mean solar date of an instant: the evening a late-afternoon frame belongs to.
 
     Local mean solar time is UTC plus four minutes per degree of east longitude. A frame taken
-    after 00:00 UTC is usually still the previous evening in Arizona, and this keeps it there.
+    after midnight UTC is usually still the previous evening in Arizona, and this keeps it there.
     """
     return (when_utc + dt.timedelta(hours=lon / 15.0)).date()
