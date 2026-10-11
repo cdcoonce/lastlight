@@ -45,7 +45,7 @@ You can also check the pieces by hand: `sha256sum` of the forecast file is the d
 
 An RFC 3161 timestamp is a signed statement by an independent timestamp authority that a given hash existed at or before the time it names. Here it proves that the exact forecast bytes, and through `strip_sha256` the exact painting, existed before sunset on that date. The seal job's public run log and the commit message `seal: YYYY-MM-DD <first 12 hex of the digest>` on the `ledger` branch are two further witnesses, which agree or do not.
 
-It does not prove the forecast is good: whether it was right is what the scoring half of the project measures after dusk. It also does not, today, prove that the timestamp response is authentic: `lastlight verify` checks the imprint and the time but does not yet validate the authority's signature chain (a follow-up), so until then it trusts the response as delivered. The signature can be checked independently with `openssl ts -verify` against the authority's published certificates.
+It does not prove the forecast is good: whether it was right is what the scoring half of the project measures after dusk. It also does not, today, prove that the timestamp response is authentic: `lastlight verify` checks the imprint and the time but does not yet validate the authority's signature chain (issue #25 will add signature verification), so until then it trusts the response as delivered. The signature can be checked independently with `openssl ts -verify` against the authority's published certificates.
 
 ## Missing and late days
 

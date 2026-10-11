@@ -40,6 +40,18 @@ def test_the_guide_says_what_the_timestamp_does_not_prove(text: str) -> None:
     assert "does not prove" in text and "signature" in text
 
 
+def test_the_guide_keeps_its_signature_chain_caveat_until_verify_checks_the_signature(
+    text: str,
+) -> None:
+    # `lastlight verify` does not validate the timestamp authority's signature (issue #25 adds
+    # it). Until then the guide must say so in these words; the caveat goes when the check lands.
+    assert (
+        "`lastlight verify` checks the imprint and the time but does not yet validate the "
+        "authority's signature chain (issue #25 will add signature verification), so until then "
+        "it trusts the response as delivered."
+    ) in text
+
+
 def test_the_guide_spells_no_clock_time_or_position(text: str) -> None:
     assert not contains_clock_time(text)
     assert text_hits(text) == []
