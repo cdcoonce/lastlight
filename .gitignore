@@ -23,6 +23,15 @@ htmlcov/
 /site/
 /.site-*.build/
 
+# Sealed days live on the orphan `ledger` branch, never on main. The README's local commands
+# write them here (`seal-daily --ledger-dir ledger`, the seal workflow's `ledger-wt` worktree)
+# and the painting commands write a forecast and its strip; none of it is ever committed.
+# Anchored to the repo root, like data/, so no package directory is ignored by accident.
+/ledger/
+/ledger-wt/
+/forecast.json
+/strip.png
+
 # Local environment
 .env
 

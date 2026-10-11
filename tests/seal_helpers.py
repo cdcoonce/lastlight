@@ -3,7 +3,10 @@
 `stub-forecast.json` is a hand-written, deliberately untidy forecast (shuffled keys, float
 noise). `STUB_CANONICAL` is its canonical form written out by hand, so the golden bytes do not
 depend on the code under test. `stub-forecast.tsr` is a real RFC 3161 response from the public
-TSA, recorded once for exactly those canonical bytes and sealed a day ahead of the stub's date.
+TSA, recorded once and issued a day ahead of the stub's date. It was recorded before the forecast
+gained its `strip_sha256` field, so it covers the canonical bytes of that earlier schema;
+`recorded_tsr()` re-points its fixed-width imprint at the current `STUB_DIGEST` (the same
+in-place patch `make_tsr` uses), and `recorded_response()` is the file exactly as the TSA sent it.
 
 Tests never write a clock time. Where a scenario needs "before" or "after" sunset, it computes
 the geometric sunset at the reference point and offsets from it; `make_tsr` then re-dates a copy
@@ -60,12 +63,14 @@ STUB_CANONICAL = (
     b'"notes":"stub forecast for the seal tests",'
     b'"reference_point":{"elev_m":340.0,"lat":33.45,"lon":-112.07},'
     b'"schema_version":1,'
+    b'"strip_sha256":null,'
     b'"vividness":{"mean":0.42,"sd":0.07}}'
 )
 STUB_DIGEST = hashlib.sha256(STUB_CANONICAL).hexdigest()  # sha256 of the golden bytes
 
 # The request the client sends for STUB_CANONICAL: DER, SHA-256 imprint, no nonce, certReq set.
-STUB_REQUEST_HEX = "30390201013031300d060960864801650304020105000420" + STUB_DIGEST + "0101ff"
+REQUEST_PREFIX_HEX = "30390201013031300d060960864801650304020105000420"
+STUB_REQUEST_HEX = REQUEST_PREFIX_HEX + STUB_DIGEST + "0101ff"
 
 
 def digest_hex(data: bytes) -> str:
@@ -88,8 +93,17 @@ def stub_forecast() -> Forecast:
     return Forecast.model_validate(stub_dict())
 
 
-def recorded_tsr() -> bytes:
+def recorded_response() -> bytes:
+    """The recorded TSA response, byte for byte as the TSA sent it."""
     return (FIXTURES / "stub-forecast.tsr").read_bytes()
+
+
+def recorded_tsr() -> bytes:
+    """The recorded response with its imprint re-pointed at `STUB_DIGEST`; the time is unchanged."""
+    raw = recorded_response()
+    recorded_imprint = decode_timestamp_response(raw).tst_info.message_imprint.message
+    assert raw.count(recorded_imprint) == 1
+    return raw.replace(recorded_imprint, bytes.fromhex(STUB_DIGEST))
 
 
 def sunset(date: dt.date) -> dt.datetime:

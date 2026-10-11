@@ -11,7 +11,7 @@ Day 0 (2026-10-10). The design contract is in [`docs/design.md`](docs/design.md)
 ## How it works
 
 1. **Forecast.** Public weather-model fields (cloud, smoke, dust, water vapour, ozone) are sampled along the line the setting sun's light travels, then pushed through a spectral model of the atmosphere. The output is the colour of the western sky at each view elevation as the sun sinks from +6 to -8 degrees, plus a single "vividness" number with uncertainty.
-2. **Seal.** The forecast's SHA-256 digest is pushed to this repo and witnessed by an RFC 3161 timestamp before sunset. Missed seals are recorded as missed.
+2. **Seal.** The forecast's SHA-256 digest (which covers its painting) is pushed to this repo and witnessed by an RFC 3161 timestamp before sunset. Missed seals are recorded as missed.
 3. **Observe.** Public air-quality webcams that look west over the Valley (Arizona DEQ's PhoenixVis cameras) are sampled through twilight. Their exposure and white balance are automatic, so lastlight scores colour *contrasts within each frame* (horizon versus higher sky), which those automatic settings cancel out of.
 4. **Score.** Colour error is measured on those within-frame contrasts; vividness is scored by CRPS. Both are compared with climatology and persistence, by regime (clear, dust, smoke, cloud), with confidence intervals and the minimum detectable effect.
 
@@ -25,10 +25,14 @@ uv run lastlight --version
 uv run lastlight hrrr-transect --date 2026-10-10   # HRRR cloud, aerosol and vapour along the sightline
 uv run ruff check && uv run ruff format --check && uv run pytest
 uv run lastlight privacy-scan
-uv run lastlight seal FORECAST.json --ledger-dir ledger   # canonical JSON, SHA-256, RFC 3161 timestamp
-uv run lastlight verify 2026-10-11 --ledger-dir ledger    # PASS, or FAIL with the reason
+uv run lastlight forecast --date 2026-10-10 --out forecast.json --strip strip.png   # paint an evening
+uv run lastlight seal forecast.json --strip strip.png --ledger-dir ledger   # canonical JSON, SHA-256, RFC 3161 timestamp
+uv run lastlight verify 2026-10-10 --ledger-dir ledger    # PASS, or FAIL with the reason
+uv run lastlight seal-daily --ledger-dir ledger           # what the scheduled job runs: paint, seal, verify
 uv run lastlight site build --ledger-dir ledger --out site  # the almanac; privacy-scans its own output
 ```
+
+Sealed days are kept on the orphan `ledger` branch, written once a day by the `seal` workflow; [`docs/ledger.md`](docs/ledger.md) explains how anyone can fetch it and verify a day, what is sealed (the forecast and the SHA-256 of its painting) and what the RFC 3161 timestamp proves.
 
 Public-camera frames are collected on the always-on capture host by `lastlight collect` (see `uv run lastlight collect --help`); the owner's install steps are in [`docs/runbooks/collector.md`](docs/runbooks/collector.md).
 

@@ -17,6 +17,12 @@ The schema is strict on purpose, because a sealed forecast can never be edited o
 
 `cycle_hour_utc` is the hour of the weather-model cycle an input came from (for example the
 18 of an 18Z run). It is a public model-run label, not the time of anything lastlight did.
+
+`strip_sha256` seals the painting. The strip is the picture of the curve that the almanac shows;
+if only the numbers were sealed, the picture could be swapped afterwards. The field is required
+but may be null: a forecast always says whether it has a strip, and a code path that forgets the
+painting fails validation instead of sealing a forecast without one. `lastlight verify` checks
+the PNG beside the forecast against it.
 """
 
 from __future__ import annotations
@@ -66,6 +72,7 @@ def _clean_text(value: str) -> str:
 
 
 IsoDate = Annotated[dt.date, BeforeValidator(_plain_date)]
+Sha256Hex = Annotated[str, Field(strict=True, pattern=r"^[0-9a-f]{64}$")]
 Text = Annotated[str, AfterValidator(_clean_text)]
 Number = Annotated[float, Field(strict=True, allow_inf_nan=False)]
 Spread = Annotated[float, Field(strict=True, allow_inf_nan=False, ge=0)]
@@ -141,3 +148,4 @@ class Forecast(_Record):
     curve: tuple[CurvePoint, ...]
     vividness: Vividness
     notes: Text
+    strip_sha256: Sha256Hex | None

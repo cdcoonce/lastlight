@@ -121,6 +121,22 @@ def test_integers_stay_integers_and_floats_stay_floats() -> None:
     assert b'"schema_version":1,' in out
 
 
+def test_a_forecast_without_a_strip_says_so_with_an_explicit_null() -> None:
+    # Absent and null are different statements in a document nobody can edit afterwards, and a
+    # forecast always says which one it makes.
+    assert b'"strip_sha256":null,' in helpers.STUB_CANONICAL
+    assert b'"strip_sha256":null,' in canonical_of(helpers.stub_dict())
+
+
+def test_the_strip_digest_is_part_of_the_sealed_bytes() -> None:
+    digest = "cd" * 32
+    with_strip = canonical_of(with_value(("strip_sha256",), digest))
+    assert b'"strip_sha256":"' + digest.encode() + b'",' in with_strip
+    assert digest_hex(with_strip) != helpers.STUB_DIGEST
+    other = canonical_of(with_value(("strip_sha256",), "cd" * 31 + "ce"))
+    assert digest_hex(other) != digest_hex(with_strip)
+
+
 def test_canonical_bytes_are_a_fixed_point_of_parse_and_canonicalise() -> None:
     again = canonical_bytes(Forecast.model_validate_json(helpers.STUB_CANONICAL))
     assert again == helpers.STUB_CANONICAL
