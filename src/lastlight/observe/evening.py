@@ -7,6 +7,11 @@ whose sun elevation is inside the window (default +6 to -6 degrees, civil twilig
 each kept frame's contrast profile (`lastlight.observe.contrast`). Every frame it does not keep is
 counted by reason, never silently skipped (`docs/design.md` section 2, rule 5).
 
+The sun's elevation is geometric (no refraction) and is read at the camera's registry position,
+which for tier A is the public reference point until a public camera position is recorded, so it
+reads about 0.2 degrees below the camera's own site; the window edges and the light-dome threshold
+are on that same scale, and the document says so (`sun_elevation_basis`).
+
 The document is derived numbers only (`docs/design.md` section 3): a frame is identified by a
 short prefix of its SHA-256 and the sun's elevation, never by its name, its time or its pixels.
 It names the geometry it used (the SHA-256 of the frozen fit file and the fit's `provisional`
@@ -60,6 +65,13 @@ VIEW_ELEVATION_NOTE: Final = (
     "with a range from that fit's px_per_deg uncertainty. The observation itself is in pixel "
     "rows above the frozen skyline and does not depend on it."
 )
+
+SUN_ELEVATION_BASIS: Final = (
+    "geometric sun elevation (no refraction) at the camera's registry position, which is the "
+    "public reference point for tier A until a public camera position is recorded; it reads "
+    "about 0.2 degrees below the camera's site"
+)
+"""Where `sun_elevation_deg` is read, as the document says it."""
 
 _UNIT: Final = (
     "pixel rows above the frozen skyline, column by column; the band [lo, hi) is the rows lo to "
@@ -141,6 +153,7 @@ class Observation:
                 "min_valid_pixels": MIN_VALID_PIXELS,
             },
             "view_elevation_note": VIEW_ELEVATION_NOTE,
+            "sun_elevation_basis": SUN_ELEVATION_BASIS,
             "sun_window_deg": {"max": self.max_sun_elev, "min": self.min_sun_elev},
             "frames_found": self.frames_found,
             "frames_used": len(self.frames),

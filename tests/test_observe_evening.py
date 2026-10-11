@@ -27,9 +27,11 @@ from lastlight.camgeom.frames import parse_frame_time
 from lastlight.camgeom.model import pixels_per_degree
 from lastlight.camgeom.orientation import Orientation
 from lastlight.geometry import solar_position
+from lastlight.observe import evening as evening_module
 from lastlight.observe.evening import (
     DROP_REASONS,
     SCHEMA_VERSION,
+    SUN_ELEVATION_BASIS,
     ObserveError,
     observe_evening,
     write_observed,
@@ -306,6 +308,32 @@ def test_the_light_dome_is_echoed_as_provisional_until_it_is_refit(archive: Path
     assert document["contrast_definition"]["light_dome_provisional"] is False
 
 
+def test_the_document_says_what_its_sun_elevation_is_and_where_it_is_read(
+    archive: Path, tmp_path: Path
+) -> None:
+    observation = observe(archive)
+    basis = observation.to_json()["sun_elevation_basis"]
+    assert basis == SUN_ELEVATION_BASIS
+    # The sentence a scorer reads: geometric, at the registry position, which is the public
+    # reference point for tier A until a public camera position is recorded, and about 0.2
+    # degrees below the camera's own site.
+    for phrase in (
+        "geometric",
+        "registry position",
+        "public reference point",
+        "until a public camera position is recorded",
+        "about 0.2 degrees below the camera's site",
+    ):
+        assert phrase in basis, phrase
+    written = json.loads(write_observed(observation, tmp_path / "observed.json").read_text())
+    assert written["sun_elevation_basis"] == basis
+
+
+def test_the_evening_module_documents_the_sun_elevation_basis_too() -> None:
+    doc = " ".join((evening_module.__doc__ or "").split())
+    assert "public reference point" in doc and "about 0.2 degrees below" in doc
+
+
 def test_the_window_and_the_counts_are_recorded(archive: Path) -> None:
     document = observe(archive).to_json()
     assert document["sun_window_deg"] == {"max": 6.0, "min": -6.0}
@@ -443,7 +471,8 @@ def test_the_written_file_has_no_file_name_time_or_pixel_array(
 
     leaves = dict(walk(document))
     assert leaves, "the walk must reach the leaves"
-    prose = {"/view_elevation_note", "/contrast_definition/unit"}  # the two sentences in the file
+    # the sentences the file carries
+    prose = {"/view_elevation_note", "/contrast_definition/unit", "/sun_elevation_basis"}
     long_strings = [k for k, v in leaves.items() if isinstance(v, str) and len(v) > 80]
     assert set(long_strings) <= prose, long_strings
 
