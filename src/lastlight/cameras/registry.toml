@@ -6,9 +6,13 @@
 # publish_thumbnails defaults to false, and true is refused unless `basis` says why publishing
 # is acceptable. An unknown key is an error, so a typo cannot silently change a default.
 #
-# Positions are approximate and public: the operator's site names the town or landmark and
-# publishes no coordinates, so each is the place named, rounded to 0.01 degrees (about 1 km).
-# That is far finer than the collector needs: sun elevation changes about 0.01 degrees per km.
+# Positions are INTERIM: both cameras use the public reference point (downtown Phoenix,
+# docs/design.md section 3). The operator's pages name only the town or landmark and publish
+# no coordinates. Sun elevation changes about 0.01 degrees per km, so for the collector the
+# error is under 0.3 degrees (about a minute on the polling window). Replace a position with
+# the operator's named place when camera calibration needs it; that adds coordinates other
+# than the reference point, which `lastlight privacy-scan` flags until an allowlist entry
+# with a reason is added.
 
 [[camera]]
 id = "WHTM1"
@@ -19,12 +23,12 @@ view_azimuth_deg = 274
 attribution = "Image source: Arizona Department of Environmental Quality, PhoenixVis (phoenixvis.net)"
 publish_thumbnails = true
 basis = "Public page; robots.txt allows all; ADEQ terms silent on automated use; owner decision 2026-10-10; removed on request"
-position_note = "White Tank Mountains view, looking west from Avondale; place named by the operator, coordinates approximate"
+position_note = "Interim: the public reference point, not the camera's own site. White Tank Mountains view, looking west from Avondale."
 
 [camera.position]
-lat = 33.43
-lon = -112.35
-elev_m = 320
+lat = 33.45
+lon = -112.07
+elev_m = 340
 
 [[camera]]
 id = "ESMO1"
@@ -35,9 +39,9 @@ view_azimuth_deg = 225
 attribution = "Image source: Arizona Department of Environmental Quality, PhoenixVis (phoenixvis.net)"
 publish_thumbnails = true
 basis = "Public page; robots.txt allows all; ADEQ terms silent on automated use; owner decision 2026-10-10; removed on request"
-position_note = "Estrella Mountains view, looking southwest (nominal 225 degrees) from North Mountain; place named by the operator, coordinates approximate"
+position_note = "Interim: the public reference point, not the camera's own site. Estrella Mountains view, looking southwest (nominal 225 degrees) from North Mountain."
 
 [camera.position]
-lat = 33.58
-lon = -112.09
-elev_m = 640
+lat = 33.45
+lon = -112.07
+elev_m = 340

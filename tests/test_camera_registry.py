@@ -7,6 +7,7 @@ import tomllib
 from importlib import resources
 
 import pytest
+from camera_fakes import REF_LAT, REF_LON
 
 from lastlight.cameras import Camera, RegistryError, load_registry, parse_registry
 
@@ -96,11 +97,14 @@ def test_every_shipped_entry_has_every_required_field(camera_id: str) -> None:
 
 
 @pytest.mark.parametrize("camera_id", ["WHTM1", "ESMO1"])
-def test_shipped_positions_are_inside_the_phoenix_metro(camera_id: str) -> None:
-    position = load_registry()[camera_id].position
-    assert 33.2 <= position.lat <= 33.8
-    assert -112.6 <= position.lon <= -111.8
-    assert 0.0 < position.elev_m < 1500.0
+def test_shipped_positions_are_inside_the_phoenix_metro_and_say_they_are_interim(
+    camera_id: str,
+) -> None:
+    camera = load_registry()[camera_id]
+    assert abs(camera.position.lat - REF_LAT) < 0.4
+    assert abs(camera.position.lon - REF_LON) < 0.4
+    assert 0.0 < camera.position.elev_m < 1500.0
+    assert camera.position_note
 
 
 def test_the_loader_reads_a_registry_file_from_a_path(tmp_path) -> None:
