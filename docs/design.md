@@ -28,7 +28,7 @@ The forecast computes the same invariants from its rendered spectra for each cam
 
 ## 2. Honesty rules
 
-1. **Seal before you see.** A forecast counts only if its SHA-256 digest was pushed to the public repo, and witnessed by an RFC 3161 timestamp, before local sunset at the reference point. Late or missing seals are logged as missing, never back-filled.
+1. **Seal before you see.** A forecast counts only if its SHA-256 digest was pushed to the public repo, and witnessed by an RFC 3161 timestamp, before local sunset at the reference point. The forecast carries the SHA-256 of its painting (`strip_sha256`), so the one digest covers the numbers and the picture. Late or missing seals are logged as missing, never back-filled: the seal job refuses to run once the sun is at the horizon, and `lastlight verify` fails any seal whose timestamp is not strictly before it.
 2. **Freeze before you score.** Any fitted correction (debias, calibration offsets, regime thresholds) is fitted on a declared window and frozen by commit before the evenings it is scored on. The scored window never overlaps the fit window.
 3. **Report the null.** Every skill number ships with a confidence interval (Newey-West, serial correlation) and the minimum detectable effect at 80 percent power. "No detectable skill" is a result and is published with the same prominence as a win.
 4. **Baselines are first-class.** Climatology and persistence run through the same scoring code as the model. A change that improves the model's score but is not applied to the baselines is a bug.
@@ -66,8 +66,13 @@ Python 3.12, `uv`, `src/lastlight/`, pytest, ruff. Small modules with one job ea
 | `inputs.goes` | GOES-18 ABI clear-sky mask along the transect at twilight (regime labels) |
 | `inputs.*` | Later: RRFS-SD dust and smoke, CAMS aerosol and ozone, AirNow PM |
 | `render` | Spectral atmosphere model → radiance per (sun elevation, view elevation) → CIE XYZ → camera RGB and sRGB; v0 single scattering, v1 Bruneton precomputed-scattering lookup table |
-| `forecast` | The sealed forecast schema (pydantic v2): strict fields, no time of day, only the public reference point |
-| `seal` | Canonical forecast JSON, SHA-256, RFC 3161 timestamp (`rfc3161-client`), ledger writer, `verify` (imprint and time; the TSA signature chain is a follow-up) |
+| `forecast` | The sealed forecast schema (pydantic v2): strict fields, no time of day, only the public reference point, and the nullable `strip_sha256` that seals the painting |
+| `atmosphere` | v0 reduction of HRRR transect samples to the renderer's parameters: AOD = HRRR `AOTK` plus a fixed 0.06 background, ozone from a bundled monthly climatology for 30 to 35 N (NASA SBUV), cloud summarised in the notes and not rendered; reused by the G0 spread study |
+| `vividness` | The v0 vividness rule: a named placeholder with a deliberately wide sd, until the pre-registered definition and the M4 physics exist |
+| `painting` | The daily forecast end to end before sealing: HRRR run, transect, reduction, curve and strip, `Forecast` with every input's source, cycle and digest |
+| `daily` | The scheduled seal: paint, seal, verify; idempotent (a sealed evening is left alone) and never late (refuses once the sun is at the horizon) |
+| `ledger_branch` | The orphan `ledger` branch as a git worktree: open it, commit a seal to it, push it (never forced) |
+| `seal` | Canonical forecast JSON, SHA-256, RFC 3161 timestamp (`rfc3161-client`), ledger writer (forecast, timestamp, strip), `verify` (imprint, time, and the strip against `strip_sha256`; the TSA signature chain is a follow-up) |
 | `cameras` | Registry of tier A cameras (operator, image URL, position, view azimuth, attribution); polite collector (conditional GET, identifying User-Agent, timeouts and retries, stale-frame rejection by Last-Modified and burned-in stamp) writing a private archive on the capture host |
 | `camgeom` | Per-camera pixel-to-(azimuth, elevation) calibration from the sun's track and the horizon ridge; sky mask |
 | `observe` | Frames → within-frame log-chromaticity contrast profile and vividness (tier A); later absolute colour (tier B) |
@@ -78,8 +83,11 @@ Python 3.12, `uv`, `src/lastlight/`, pytest, ruff. Small modules with one job ea
 
 ### Data layout
 
-- `ledger/YYYY/MM/DD.forecast.json`: the sealed forecast (canonical JSON, elevation-referenced, no clock times).
+Daily data never lives on `main`. It lives on an orphan branch named `ledger` (no history shared with `main`, no code in it), whose root holds only `ledger/`; the seal workflow is the only thing that writes to it. How to fetch and verify it is in `docs/ledger.md`.
+
+- `ledger/YYYY/MM/DD.forecast.json`: the sealed forecast (canonical JSON, elevation-referenced, no clock times). Its `strip_sha256` is the SHA-256 of the painting below, or null for a forecast with none.
 - `ledger/YYYY/MM/DD.forecast.tsr`: the RFC 3161 timestamp response for the digest.
+- `ledger/YYYY/MM/DD.strip.png`: the painting (the curve as a strip, sun elevation across and view elevation up), no metadata, present exactly when `strip_sha256` is set. `verify` fails if it is missing, changed, or present without being named.
 - `ledger/YYYY/MM/DD.observed.json`: observed curve and vividness (later).
 - `ledger/index.jsonl`: one line per sealed forecast: date, digest, model version.
 - `site/`: the generated almanac (not hand-edited).
@@ -94,7 +102,7 @@ Python 3.12, `uv`, `src/lastlight/`, pytest, ruff. Small modules with one job ea
 
 ### Where things run
 
-- **Forecast and seal**: a scheduled GitHub Actions job at a fixed clock time; it needs only public inputs. Its run log is a second public witness.
+- **Forecast and seal**: the scheduled GitHub Actions workflow `seal` (`.github/workflows/seal.yml`), once a day at a fixed clock time that does not depend on any site; it needs only public inputs. It writes to the `ledger` branch and nothing else (`contents: write` is its only permission), and the almanac site rebuilds when it completes. Its run log is a second public witness.
 - **Collect, observe, score**: the always-on capture host at home (an Ubuntu server), running the tier A collector during each evening's twilight window and pushing only derived, elevation-referenced numbers. The owner installs its timer; agents never install timers themselves.
 
 ## 5. Milestones and gates
