@@ -7,15 +7,16 @@
     "-q",
     "-p",
     "no:cacheprovider",
-    "tests/test_camgeom_cli.py",
-    "tests/test_camgeom_dem.py",
+    "tests/test_camgeom_position.py",
     "tests/test_camgeom_fitfile.py",
     "tests/test_camgeom_inputs.py",
+    "tests/test_camgeom_dem.py",
+    "tests/test_camgeom_holdout.py",
+    "tests/test_camgeom_suncheck.py",
+    "tests/test_camgeom_skyline.py",
     "tests/test_camgeom_model.py",
     "tests/test_camgeom_orientation.py",
-    "tests/test_camgeom_position.py",
-    "tests/test_camgeom_skyline.py",
-    "tests/test_camgeom_suncheck.py"
+    "tests/test_camgeom_cli.py"
   ],
   "collect_command": [
     "uv",
@@ -25,15 +26,16 @@
     "-q",
     "-p",
     "no:cacheprovider",
-    "tests/test_camgeom_cli.py",
-    "tests/test_camgeom_dem.py",
+    "tests/test_camgeom_position.py",
     "tests/test_camgeom_fitfile.py",
     "tests/test_camgeom_inputs.py",
+    "tests/test_camgeom_dem.py",
+    "tests/test_camgeom_holdout.py",
+    "tests/test_camgeom_suncheck.py",
+    "tests/test_camgeom_skyline.py",
     "tests/test_camgeom_model.py",
     "tests/test_camgeom_orientation.py",
-    "tests/test_camgeom_position.py",
-    "tests/test_camgeom_skyline.py",
-    "tests/test_camgeom_suncheck.py"
+    "tests/test_camgeom_cli.py"
   ],
   "mutants": [
     {
@@ -112,6 +114,335 @@
       "oracle": "real",
       "find": "        if distance < best_distance:",
       "replace": "        if True:"
+    },
+    {
+      "label": "position grid stops a step short of the box",
+      "file": "../../src/lastlight/camgeom/calibration.py",
+      "oracle": "real",
+      "find": "    count = math.floor(box_km / step_km + 1e-9)\n    steps = range(-count, count + 1)",
+      "replace": "    count = math.floor(box_km / step_km + 1e-9) - 1\n    steps = range(-count, count + 1)"
+    },
+    {
+      "label": "position grid overshoots the box (ceil)",
+      "file": "../../src/lastlight/camgeom/calibration.py",
+      "oracle": "real",
+      "find": "    count = math.floor(box_km / step_km + 1e-9)\n    steps = range(-count, count + 1)",
+      "replace": "    count = math.ceil(box_km / step_km - 1e-9)\n    steps = range(-count, count + 1)"
+    },
+    {
+      "label": "a ring probe can be chosen as the best position",
+      "file": "../../src/lastlight/camgeom/calibration.py",
+      "oracle": "real",
+      "find": "    return PositionSearch(choose_position(trials), trials, ring)",
+      "replace": "    return PositionSearch(choose_position(trials + ring), trials, ring)"
+    },
+    {
+      "label": "no ring is probed",
+      "file": "../../src/lastlight/camgeom/calibration.py",
+      "oracle": "real",
+      "find": "    if len(offsets) > 1:\n        ring",
+      "replace": "    if False:\n        ring"
+    },
+    {
+      "label": "the ring lies on the edge of the box, not outside it",
+      "file": "../../src/lastlight/camgeom/calibration.py",
+      "oracle": "real",
+      "find": "    half = box_km + gap_km",
+      "replace": "    half = box_km"
+    },
+    {
+      "label": "best_on_box_edge needs the best on the edge itself, not within a step",
+      "file": "../../src/lastlight/camgeom/calibration.py",
+      "oracle": "real",
+      "find": "max(abs(best.east_km), abs(best.north_km)) >= box_km - step_km - 1e-9",
+      "replace": "max(abs(best.east_km), abs(best.north_km)) >= box_km - 1e-9"
+    },
+    {
+      "label": "residual_falls_beyond_box inverted",
+      "file": "../../src/lastlight/camgeom/calibration.py",
+      "oracle": "real",
+      "find": "ring_best < best.skyline_rms_px",
+      "replace": "ring_best > best.skyline_rms_px"
+    },
+    {
+      "label": "a ring fit pinned to a field-of-view limit counts as a better fit",
+      "file": "../../src/lastlight/camgeom/calibration.py",
+      "oracle": "real",
+      "find": "ring_usable = [t.skyline_rms_px for t in ring if not hfov_is_pinned(t.orientation.hfov_deg)]",
+      "replace": "ring_usable = [t.skyline_rms_px for t in ring]"
+    },
+    {
+      "label": "near-best threshold widened from 10 to 20 percent",
+      "file": "../../src/lastlight/camgeom/calibration.py",
+      "oracle": "real",
+      "find": "NEAR_BEST_FACTOR = 1.1 ",
+      "replace": "NEAR_BEST_FACTOR = 1.2 "
+    },
+    {
+      "label": "near-best threshold narrowed from 10 to 5 percent",
+      "file": "../../src/lastlight/camgeom/calibration.py",
+      "oracle": "real",
+      "find": "NEAR_BEST_FACTOR = 1.1 ",
+      "replace": "NEAR_BEST_FACTOR = 1.05 "
+    },
+    {
+      "label": "uncertainty is a lower bound only when both the edge and the ring say so",
+      "file": "../../src/lastlight/camgeom/calibration.py",
+      "oracle": "real",
+      "find": "bool(summary[\"best_on_box_edge\"] or summary[\"residual_falls_beyond_box\"])",
+      "replace": "bool(summary[\"best_on_box_edge\"] and summary[\"residual_falls_beyond_box\"])"
+    },
+    {
+      "label": "the ring's gap and spacing are not checked",
+      "file": "../../src/lastlight/camgeom/calibration.py",
+      "oracle": "real",
+      "find": "    if gap_km <= 0 or spacing_km <= 0:\n        raise ValueError(\"the ring's gap and spacing must be positive\")\n",
+      "replace": ""
+    },
+    {
+      "label": "east offset moves the camera west",
+      "file": "../../src/lastlight/camgeom/calibration.py",
+      "oracle": "real",
+      "find": "lon = site.lon + east_km /",
+      "replace": "lon = site.lon - east_km /"
+    },
+    {
+      "label": "north offset moves the camera south",
+      "file": "../../src/lastlight/camgeom/calibration.py",
+      "oracle": "real",
+      "find": "lat = site.lat + north_km /",
+      "replace": "lat = site.lat - north_km /"
+    },
+    {
+      "label": "east offset ignores the cosine of the latitude",
+      "file": "../../src/lastlight/camgeom/calibration.py",
+      "oracle": "real",
+      "find": "(KM_PER_DEGREE_LAT * math.cos(math.radians(site.lat)))",
+      "replace": "KM_PER_DEGREE_LAT"
+    },
+    {
+      "label": "the mount height is dropped from the camera's height",
+      "file": "../../src/lastlight/camgeom/calibration.py",
+      "oracle": "real",
+      "find": "return Observer(lat, lon, float(ground) + site.mount_height_m)",
+      "replace": "return Observer(lat, lon, float(ground))"
+    },
+    {
+      "label": "a failed or skipped sun check does not make the fit provisional",
+      "file": "../../src/lastlight/camgeom/calibration.py",
+      "oracle": "real",
+      "find": "provisional=sun_check.status != \"passed\"",
+      "replace": "provisional=sun_check.status == \"failed\""
+    },
+    {
+      "label": "the stated azimuth is recorded with the wrong sign",
+      "file": "../../src/lastlight/camgeom/calibration.py",
+      "oracle": "real",
+      "find": "else azimuth_difference_deg(o.azimuth_deg, stated_azimuth_deg)",
+      "replace": "else azimuth_difference_deg(stated_azimuth_deg, o.azimuth_deg)"
+    },
+    {
+      "label": "the azimuth difference does not wrap through north",
+      "file": "../../src/lastlight/camgeom/fitfile.py",
+      "oracle": "real",
+      "find": "    return (fitted - stated + 180.0) % 360.0 - 180.0",
+      "replace": "    return fitted - stated"
+    },
+    {
+      "label": "pixel scale range is not ordered from the field-of-view range",
+      "file": "../../src/lastlight/camgeom/fitfile.py",
+      "oracle": "real",
+      "find": "scale = sorted(pixels_per_degree(h, width) for h in hfov_deg)",
+      "replace": "scale = [pixels_per_degree(h, width) for h in hfov_deg]"
+    },
+    {
+      "label": "a fit file's provisional flag need not agree with its sun check",
+      "file": "../../src/lastlight/camgeom/fitfile.py",
+      "oracle": "real",
+      "find": "        if provisional != (sun_check.get(\"status\") != \"passed\"):",
+      "replace": "        if False:"
+    },
+    {
+      "label": "the stated azimuth difference is not checked on load",
+      "file": "../../src/lastlight/camgeom/fitfile.py",
+      "oracle": "real",
+      "find": "            if abs(difference - expected) > 0.02:",
+      "replace": "            if False:"
+    },
+    {
+      "label": "a fit file's field of view may be zero or beyond 180 degrees",
+      "file": "../../src/lastlight/camgeom/fitfile.py",
+      "oracle": "real",
+      "find": "        if not 0.0 < orientation.hfov_deg < 180.0:",
+      "replace": "        if False:"
+    },
+    {
+      "label": "a fit file's image size may be zero",
+      "file": "../../src/lastlight/camgeom/fitfile.py",
+      "oracle": "real",
+      "find": "    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:",
+      "replace": "    if isinstance(value, bool) or not isinstance(value, int):"
+    },
+    {
+      "label": "a fit file may hold NaN or infinity",
+      "file": "../../src/lastlight/camgeom/fitfile.py",
+      "oracle": "real",
+      "find": "    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):",
+      "replace": "    if isinstance(value, bool) or not isinstance(value, int | float):"
+    },
+    {
+      "label": "a fit file's skyline columns may repeat or run backwards",
+      "file": "../../src/lastlight/camgeom/fitfile.py",
+      "oracle": "real",
+      "find": "        if any(b <= a for a, b in zip(x_px, x_px[1:], strict=False)):",
+      "replace": "        if False:"
+    },
+    {
+      "label": "the sky mask margin uses the wrong pixel scale",
+      "file": "../../src/lastlight/camgeom/mask.py",
+      "oracle": "real",
+      "find": "margin_deg * pixels_per_degree(fit.orientation.hfov_deg, fit.width)",
+      "replace": "margin_deg * 10.0"
+    },
+    {
+      "label": "a failed sun check exits 0",
+      "file": "../../src/lastlight/commands/camgeom.py",
+      "oracle": "real",
+      "find": "            file=sys.stderr,\n        )\n        return 1",
+      "replace": "            file=sys.stderr,\n        )\n        return 0"
+    },
+    {
+      "label": "a fit that cannot write its file is not reported (OSError escapes)",
+      "file": "../../src/lastlight/commands/camgeom.py",
+      "oracle": "real",
+      "find": "except (CalibrationError, SiteFileError, FileNotFoundError, ValueError, OSError) as error:",
+      "replace": "except (CalibrationError, SiteFileError, FileNotFoundError, ValueError) as error:"
+    },
+    {
+      "label": "the stated azimuth is never read from the registry",
+      "file": "../../src/lastlight/commands/camgeom.py",
+      "oracle": "real",
+      "find": "    camera = load_registry().get(camera_id)\n    return None if camera is None else camera.view_azimuth_deg",
+      "replace": "    return None"
+    },
+    {
+      "label": "an unreadable frame escapes as a traceback",
+      "file": "../../src/lastlight/camgeom/frames.py",
+      "oracle": "real",
+      "find": "    except (OSError, SyntaxError, ValueError, Image.DecompressionBombError) as error:\n        raise FrameError(f\"{path.name} is not a readable JPEG",
+      "replace": "    except ZeroDivisionError as error:\n        raise FrameError(f\"{path.name} is not a readable JPEG"
+    },
+    {
+      "label": "a file that cannot be read for its hash escapes",
+      "file": "../../src/lastlight/camgeom/frames.py",
+      "oracle": "real",
+      "find": "    except OSError as error:\n        raise FrameError(f\"{path.name} cannot be read",
+      "replace": "    except ZeroDivisionError as error:\n        raise FrameError(f\"{path.name} cannot be read"
+    },
+    {
+      "label": "a corrupt DEM tile escapes as a traceback (open)",
+      "file": "../../src/lastlight/camgeom/dem.py",
+      "oracle": "real",
+      "find": "            except (RasterioError, OSError) as error:\n                raise DemError(f\"tile {path.name} cannot be read",
+      "replace": "            except ZeroDivisionError as error:\n                raise DemError(f\"tile {path.name} cannot be read"
+    },
+    {
+      "label": "a DEM that cannot be decoded escapes as a traceback (merge)",
+      "file": "../../src/lastlight/camgeom/dem.py",
+      "oracle": "real",
+      "find": "        except (RasterioError, OSError) as error:\n            names =",
+      "replace": "        except ZeroDivisionError as error:\n            names ="
+    },
+    {
+      "label": "a cached tile is trusted without a check",
+      "file": "../../src/lastlight/camgeom/dem.py",
+      "oracle": "real",
+      "find": "            if _file_problem(path) is None:",
+      "replace": "            if True:"
+    },
+    {
+      "label": "a download is cached without a check",
+      "file": "../../src/lastlight/camgeom/dem.py",
+      "oracle": "real",
+      "find": "            if problem is not None:\n                raise DemError(f\"the download",
+      "replace": "            if False:\n                raise DemError(f\"the download"
+    },
+    {
+      "label": "a tile need not start like a TIFF",
+      "file": "../../src/lastlight/camgeom/dem.py",
+      "oracle": "real",
+      "find": "    if head[:4] not in _TIFF_SIGNATURES:",
+      "replace": "    if False:"
+    },
+    {
+      "label": "a tile may be a stub of any size",
+      "file": "../../src/lastlight/camgeom/dem.py",
+      "oracle": "real",
+      "find": "    if size < MIN_TILE_BYTES:",
+      "replace": "    if False:"
+    },
+    {
+      "label": "a failed download escapes as an OSError",
+      "file": "../../src/lastlight/camgeom/dem.py",
+      "oracle": "real",
+      "find": "        except OSError as error:\n            raise DemError(f\"could not fetch tile",
+      "replace": "        except ZeroDivisionError as error:\n            raise DemError(f\"could not fetch tile"
+    },
+    {
+      "label": "holdout ignores the band",
+      "file": "../../src/lastlight/camgeom/holdout.py",
+      "oracle": "real",
+      "find": "half_width=band_rows",
+      "replace": "half_width=30.0"
+    },
+    {
+      "label": "holdout counts the timestamp's edges",
+      "file": "../../src/lastlight/camgeom/holdout.py",
+      "oracle": "real",
+      "find": "edge_strength(image, fit.overlay_boxes)",
+      "replace": "edge_strength(image)"
+    },
+    {
+      "label": "holdout reports the median as the rms",
+      "file": "../../src/lastlight/camgeom/holdout.py",
+      "oracle": "real",
+      "find": "    rms = float(np.sqrt(np.mean(difference**2)))",
+      "replace": "    rms = float(np.median(np.abs(difference)))"
+    },
+    {
+      "label": "holdout reports degrees at the wrong scale",
+      "file": "../../src/lastlight/camgeom/holdout.py",
+      "oracle": "real",
+      "find": "rms_deg=rms / (focal * math.pi / 180.0)",
+      "replace": "rms_deg=rms / focal"
+    },
+    {
+      "label": "holdout also checks the frames the fit was frozen on",
+      "file": "../../src/lastlight/camgeom/holdout.py",
+      "oracle": "real",
+      "find": "            if digest in used:",
+      "replace": "            if False:"
+    },
+    {
+      "label": "holdout counts a frame found twice twice",
+      "file": "../../src/lastlight/camgeom/holdout.py",
+      "oracle": "real",
+      "find": "            if digest in seen:\n                continue",
+      "replace": "            if False:\n                continue"
+    },
+    {
+      "label": "holdout accepts a frame of the wrong size",
+      "file": "../../src/lastlight/camgeom/holdout.py",
+      "oracle": "real",
+      "find": "    if (width, height) != (fit.width, fit.height):",
+      "replace": "    if False:"
+    },
+    {
+      "label": "the README drops the Copernicus credit",
+      "file": "../../README.md",
+      "oracle": "real",
+      "find": "provided under COPERNICUS by the European Union and ESA",
+      "replace": "provided by ESA"
     }
   ]
 }
