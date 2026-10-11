@@ -29,6 +29,7 @@ uv run lastlight forecast --date 2026-10-10 --out forecast.json --strip strip.pn
 uv run lastlight seal forecast.json --strip strip.png --ledger-dir ledger   # canonical JSON, SHA-256, RFC 3161 timestamp
 uv run lastlight verify 2026-10-10 --ledger-dir ledger    # PASS, or FAIL with the reason
 uv run lastlight seal-daily --ledger-dir ledger           # what the scheduled job runs: paint, seal, verify
+uv run lastlight site build --ledger-dir ledger --out site  # the almanac; privacy-scans its own output
 ```
 
 Sealed days are kept on the orphan `ledger` branch, written once a day by the `seal` workflow; [`docs/ledger.md`](docs/ledger.md) explains how anyone can fetch it and verify a day, what is sealed (the forecast and the SHA-256 of its painting) and what the RFC 3161 timestamp proves.

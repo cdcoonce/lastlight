@@ -19,6 +19,10 @@ htmlcov/
 # Anchored to the repo root so a future package data directory is not ignored by accident.
 /data/
 
+# The generated almanac (`lastlight site build --out site`) and its staging directory.
+/site/
+/.site-*.build/
+
 # Sealed days live on the orphan `ledger` branch, never on main. The README's local commands
 # write them here (`seal-daily --ledger-dir ledger`, the seal workflow's `ledger-wt` worktree)
 # and the painting commands write a forecast and its strip; none of it is ever committed.
