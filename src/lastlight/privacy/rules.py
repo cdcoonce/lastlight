@@ -49,14 +49,16 @@ _CLOCK_TIME = re.compile(
         [
             # 2026-10-10T00:24:00Z, 2026-10-10 17:42
             rf"(?<!\d)\d{{4}}-\d{{2}}-\d{{2}}[T ]{_HOUR2}:{_MINUTE}{_SECONDS}{_ZONE}(?!\d)",
-            # 20261010T002400Z
-            r"(?<!\d)\d{8}T\d{4}(?:\d{2})?Z?(?!\d)",
+            # 20261010T002400Z, 20261010T002400-07:00
+            rf"(?<!\d)\d{{8}}T\d{{4}}(?:\d{{2}})?{_ZONE}(?!\d)",
             # T17:42Z, the time half of an ISO datetime
             rf"(?<![A-Za-z0-9])T{_HOUR2}:{_MINUTE}{_SECONDS}{_ZONE}(?!\d)",
             # 17:42, 5:42 PM, 17:42:09.125. Letters and punctuation may touch it (a leak
-            # named `sunset-17:42` or `frame_17:42` is still a leak), but not slices
-            # (a[10:20]), UTC offsets (UTC-07:00), or the tail of a longer number.
-            rf"(?<![\d.:\[])(?<![\dZ][+-])(?<![Uu][Tt][Cc][+-])(?<![Gg][Mm][Tt][+-])"
+            # named `sunset-17:42` or `frame_17:42` is still a leak, and so is the second time
+            # of a range, 17:30-18:05), but not slices (a[10:20]), UTC offsets named in words
+            # (UTC-07:00), or the tail of a longer number. The offset of an ISO datetime is
+            # part of that datetime's match above, so it never reaches this alternative.
+            rf"(?<![\d.:\[])(?<![Uu][Tt][Cc][+-])(?<![Gg][Mm][Tt][+-])"
             rf"{_HOUR}:{_MINUTE}{_SECONDS}(?:\s?{_MERIDIEM}\b\.?)?(?![\d:\]]|\.\d)",
             # 17h42, but not a duration such as 17h42m
             rf"(?<![\d.]){_HOUR}[hH]{_MINUTE}(?!\w)",

@@ -54,6 +54,16 @@ P001_LEAKS = [
     "2026-10-10 17:42:09",
     "20261010T002400Z",
     "T17:42Z",
+    # A genuine UTC offset belongs to its datetime: still exactly one finding, whole excerpt.
+    "2026-10-10T00:24:00-07:00",
+    "2026-10-10T00:24:00+05:30",
+    "2026-10-10T00:24-07:00",
+    "2026-10-10T00:24:00-0700",
+    "2026-10-10T17:42:00.125-07:00",
+    "2026-10-10 17:42:09-07:00",
+    "T17:42:00-07:00",
+    "20261010T002400-07:00",
+    "20261010T002400-0700",
 ]
 
 
@@ -96,6 +106,28 @@ def test_p001_flags_the_edges_of_the_hour_and_minute_ranges_in_every_form(
     leak = form.format(h=hour)
     (finding,) = scan_text(tmp_path, f"taken at {leak} sharp\n")
     assert (finding.rule, finding.excerpt) == ("P001", leak)
+
+
+@pytest.mark.parametrize(
+    ("text", "times"),
+    [
+        ("2026-10-10-17:42", ["17:42"]),
+        ("2026-10-10-17:42:09", ["17:42:09"]),
+        ("run-3-17:42", ["17:42"]),
+        ("7+17:42", ["17:42"]),
+        ("17:30-18:05", ["17:30", "18:05"]),
+        ("9:00-17:30", ["9:00", "17:30"]),
+        ("17:30+18:05", ["17:30", "18:05"]),
+    ],
+)
+def test_p001_sees_a_time_that_follows_a_digit_and_a_sign(
+    tmp_path: Path, text: str, times: list[str]
+) -> None:
+    # A date joined to a time by a hyphen, a digit-hyphen-time, and both ends of a range are
+    # leaks. Only a UTC offset inside an ISO datetime (consumed with its datetime, see
+    # P001_LEAKS) or one named UTC/GMT (see the clean twins) is not a second time.
+    findings = scan_text(tmp_path, f"taken {text} sharp\n")
+    assert sorted((f.rule, f.excerpt) for f in findings) == sorted(("P001", t) for t in times)
 
 
 def test_p001_reports_the_line_and_the_matched_text(tmp_path: Path) -> None:
