@@ -1,0 +1,133 @@
+name: pages
+
+# Builds the almanac from main's code and the `ledger` branch's data, privacy-scans it, and
+# deploys it to GitHub Pages. One job and narrow triggers, because public-repository minutes
+# still draw down the owner's shared included-minutes meter.
+#
+# Which events can start it:
+#   - push to `ledger` (pushes made by a person or a PAT; see the note below),
+#   - push to `main`, but only when the generator, the CLI or the lockfile changed,
+#   - the `seal` workflow finishing (issue #8 names its workflow `seal`), and
+#   - a manual run.
+# `ledger` is an orphan branch with no workflow file of its own, and a push made with
+# GITHUB_TOKEN starts no workflow run, so the `workflow_run` trigger is the one that fires after
+# each daily seal. Pushes to `main` never match the `ledger/**` entry: `main` carries no daily
+# data.
+on:
+  push:
+    branches: [main, ledger]
+    paths:
+      - "src/lastlight/publish/**"
+      - "src/lastlight/cli.py"
+      - "src/lastlight/commands/site.py"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/pages.yml"
+      - "ledger/**"
+  workflow_run:
+    workflows: [seal]
+    types: [completed]
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    # A seal that failed has nothing new to publish.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      # `uv run` must not re-resolve: the committed uv.lock is the environment CI tests.
+      UV_FROZEN: "1"
+    steps:
+      # Code always comes from main, whichever ref started the run.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+
+      # Absent until the first seal. Exit status 2 from `git ls-remote --exit-code` means "no such
+      # branch"; anything else (a network error) must fail the job, never publish an empty site.
+      - id: ledger
+        name: Look for the ledger branch
+        run: |
+          set -uo pipefail
+          status=0
+          git ls-remote --exit-code --heads "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" ledger > /dev/null || status=$?
+          case "$status" in
+            0)
+              echo "present=true" >> "$GITHUB_OUTPUT"
+              ;;
+            2)
+              echo "present=false" >> "$GITHUB_OUTPUT"
+              echo "::notice title=No ledger branch yet::Building the empty-state site."
+              ;;
+            *)
+              echo "::error title=Could not list branches::git ls-remote exited with status ${status}"
+              exit 1
+              ;;
+          esac
+
+      - if: steps.ledger.outputs.present == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ledger
+          path: data
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.8.0"
+          enable-cache: false
+
+      - run: uv sync --frozen
+
+      # With no ledger checkout, data/ledger does not exist and the build makes the empty-state site.
+      - name: Build the site
+        run: uv run lastlight site build --ledger-dir data/ledger --out site
+
+      - name: Privacy-scan the site
+        run: uv run lastlight privacy-scan site
+
+      # GitHub Pages is off until the owner enables it. Skip the deploy then, with a notice. A 404 is
+      # the only answer that means "off"; any other error fails the job.
+      - id: pages
+        name: Check that GitHub Pages is enabled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          status=0
+          output=$(gh api "repos/${GITHUB_REPOSITORY}/pages" 2>&1) || status=$?
+          if [ "$status" -eq 0 ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          elif printf '%s' "$output" | grep -q 'HTTP 404'; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=GitHub Pages is not enabled::The site was built and privacy-scanned but not deployed. Enable Pages (source: GitHub Actions) in the repository settings."
+          else
+            echo "::error title=Could not read the Pages configuration::${output//$'\n'/ }"
+            exit 1
+          fi
+
+      - if: steps.pages.outputs.enabled == 'true'
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - if: steps.pages.outputs.enabled == 'true'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+      - id: deployment
+        if: steps.pages.outputs.enabled == 'true'
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
