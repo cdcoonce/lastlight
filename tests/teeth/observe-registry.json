@@ -1,0 +1,159 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_observe_contrast.py",
+    "tests/test_observe_bands.py",
+    "tests/test_observe_evening.py",
+    "tests/test_observe_command.py",
+    "tests/test_observe_vividness.py",
+    "tests/test_camera_registry_contrast.py",
+    "tests/test_camera_registry.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_observe_contrast.py",
+    "tests/test_observe_bands.py",
+    "tests/test_observe_evening.py",
+    "tests/test_observe_command.py",
+    "tests/test_observe_vividness.py",
+    "tests/test_camera_registry_contrast.py",
+    "tests/test_camera_registry.py"
+  ],
+  "mutants": [
+    {
+      "label": "registry: lo == hi allowed",
+      "file": "../../src/lastlight/cameras/registry.py",
+      "oracle": "real",
+      "find": "if not 0 <= low < high:",
+      "replace": "if not 0 <= low <= high:"
+    },
+    {
+      "label": "registry: touching-overlap bands refused (<=)",
+      "file": "../../src/lastlight/cameras/registry.py",
+      "oracle": "real",
+      "find": "if low < first_high:",
+      "replace": "if low <= first_high:"
+    },
+    {
+      "label": "registry: descending order allowed",
+      "file": "../../src/lastlight/cameras/registry.py",
+      "oracle": "real",
+      "find": "if low < first_low:",
+      "replace": "if False:"
+    },
+    {
+      "label": "registry: band inside margin allowed (<= margin)",
+      "file": "../../src/lastlight/cameras/registry.py",
+      "oracle": "real",
+      "find": "if bands[0][0] < margin:",
+      "replace": "if bands[0][0] < margin - 1:"
+    },
+    {
+      "label": "registry: reference inside margin allowed",
+      "file": "../../src/lastlight/cameras/registry.py",
+      "oracle": "real",
+      "find": "if reference[0] < margin:",
+      "replace": "if False:"
+    },
+    {
+      "label": "registry: reference one row inside the margin allowed",
+      "file": "../../src/lastlight/cameras/registry.py",
+      "oracle": "real",
+      "find": "if reference[0] < margin:",
+      "replace": "if reference[0] < margin - 1:"
+    },
+    {
+      "label": "registry: reference overlap with a band allowed",
+      "file": "../../src/lastlight/cameras/registry.py",
+      "oracle": "real",
+      "find": "if reference[0] < high and low < reference[1]:",
+      "replace": "if False:"
+    },
+    {
+      "label": "registry: bool accepted as whole number",
+      "file": "../../src/lastlight/cameras/registry.py",
+      "oracle": "real",
+      "find": "isinstance(value, int) and not isinstance(value, bool)",
+      "replace": "isinstance(value, int)"
+    },
+    {
+      "label": "registry: unknown contrast key accepted",
+      "file": "../../src/lastlight/cameras/registry.py",
+      "oracle": "real",
+      "find": "unknown = sorted(set(raw) - _CONTRAST_KEYS)\n    if unknown:",
+      "replace": "unknown = sorted(set(raw) - _CONTRAST_KEYS)\n    if False:"
+    },
+    {
+      "label": "registry: unknown-key check forgives the typo light_dome_column",
+      "file": "../../src/lastlight/cameras/registry.py",
+      "oracle": "real",
+      "find": "unknown = sorted(set(raw) - _CONTRAST_KEYS)",
+      "replace": "unknown = sorted(set(raw) - (_CONTRAST_KEYS | {\"light_dome_column\"}))"
+    },
+    {
+      "label": "registry: unknown-key check forgives any key ending in _row",
+      "file": "../../src/lastlight/cameras/registry.py",
+      "oracle": "real",
+      "find": "unknown = sorted(set(raw) - _CONTRAST_KEYS)",
+      "replace": "unknown = sorted(k for k in set(raw) - _CONTRAST_KEYS if not k.endswith(\"_row\"))"
+    },
+    {
+      "label": "registry: negative margin accepted",
+      "file": "../../src/lastlight/cameras/registry.py",
+      "oracle": "real",
+      "find": "if not _whole(margin) or margin < 0:",
+      "replace": "if not _whole(margin):"
+    },
+    {
+      "label": "N1: registry drops the provisional flag",
+      "file": "../../src/lastlight/cameras/registry.py",
+      "oracle": "real",
+      "find": "light_dome_provisional=provisional,",
+      "replace": "light_dome_provisional=False,"
+    },
+    {
+      "label": "N1: registry defaults the flag to true",
+      "file": "../../src/lastlight/cameras/registry.py",
+      "oracle": "real",
+      "find": "raw.get(\"light_dome_provisional\", False)",
+      "replace": "raw.get(\"light_dome_provisional\", True)"
+    },
+    {
+      "label": "N1: registry accepts a non-boolean flag",
+      "file": "../../src/lastlight/cameras/registry.py",
+      "oracle": "real",
+      "find": "if not isinstance(provisional, bool):",
+      "replace": "if False:"
+    },
+    {
+      "label": "N1: registry does not know the flag (refused as an unknown key)",
+      "file": "../../src/lastlight/cameras/registry.py",
+      "oracle": "real",
+      "find": "        \"light_dome_provisional\",\n    }\n)",
+      "replace": "    }\n)"
+    },
+    {
+      "label": "[control] reorder the _Measured __slots__ tuple",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "__slots__ = (\"excluded\", \"log_bg\", \"log_rg\", \"n_pixels\", \"view_elevation\")",
+      "replace": "__slots__ = (\"view_elevation\", \"n_pixels\", \"log_rg\", \"log_bg\", \"excluded\")",
+      "expect": "survived",
+      "why": "__slots__ order fixes only the order descriptors are created in; nothing iterates, pickles or indexes __slots__ in this repo (grep), so every path the suite reaches is unchanged. Not inert for code that relied on slot order, of which there is none."
+    }
+  ]
+}

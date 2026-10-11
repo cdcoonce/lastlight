@@ -1,0 +1,152 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_observe_contrast.py",
+    "tests/test_observe_bands.py",
+    "tests/test_observe_evening.py",
+    "tests/test_observe_command.py",
+    "tests/test_observe_vividness.py",
+    "tests/test_camera_registry_contrast.py",
+    "tests/test_camera_registry.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_observe_contrast.py",
+    "tests/test_observe_bands.py",
+    "tests/test_observe_evening.py",
+    "tests/test_observe_command.py",
+    "tests/test_observe_vividness.py",
+    "tests/test_camera_registry_contrast.py",
+    "tests/test_camera_registry.py"
+  ],
+  "mutants": [
+    {
+      "label": "window max edge exclusive (>=)",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "if sun.elevation_deg > max_sun_elev:",
+      "replace": "if sun.elevation_deg >= max_sun_elev:"
+    },
+    {
+      "label": "window min edge exclusive (<=)",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "if sun.elevation_deg < min_sun_elev:",
+      "replace": "if sun.elevation_deg <= min_sun_elev:"
+    },
+    {
+      "label": "default window max 8",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "DEFAULT_MAX_SUN_ELEV: Final = 6.0",
+      "replace": "DEFAULT_MAX_SUN_ELEV: Final = 8.0"
+    },
+    {
+      "label": "default window min -8",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "DEFAULT_MIN_SUN_ELEV: Final = -6.0",
+      "replace": "DEFAULT_MIN_SUN_ELEV: Final = -8.0"
+    },
+    {
+      "label": "sun position with lat/lon swapped",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "sun = solar_position(frame.when_utc, camera.position.lat, camera.position.lon)",
+      "replace": "sun = solar_position(frame.when_utc, camera.position.lon, camera.position.lat)"
+    },
+    {
+      "label": "sun position with longitude sign flipped",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "sun = solar_position(frame.when_utc, camera.position.lat, camera.position.lon)",
+      "replace": "sun = solar_position(frame.when_utc, camera.position.lat, -camera.position.lon)"
+    },
+    {
+      "label": "stamp misread as local MST (UTC - 7h)",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "sun = solar_position(frame.when_utc, camera.position.lat, camera.position.lon)",
+      "replace": "sun = solar_position(frame.when_utc - dt.timedelta(hours=7), camera.position.lat, camera.position.lon)"
+    },
+    {
+      "label": "stamp shifted by +30 min",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "sun = solar_position(frame.when_utc, camera.position.lat, camera.position.lon)",
+      "replace": "sun = solar_position(frame.when_utc + dt.timedelta(minutes=30), camera.position.lat, camera.position.lon)"
+    },
+    {
+      "label": "reads the collector's sidecar sun_elevation_deg instead of computing it",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "sun = solar_position(frame.when_utc, camera.position.lat, camera.position.lon)",
+      "replace": "sun = solar_position(frame.when_utc, camera.position.lat, camera.position.lon)\n        _sc = frame.path.with_suffix('.json')\n        if _sc.exists():\n            sun = type(sun)(json.loads(_sc.read_text())['sun_elevation_deg'], sun.azimuth_deg)"
+    },
+    {
+      "label": "sun elevation passed to contrast_profile is the max edge",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "contrast_profile(rgb, fit, camera.contrast, sun_elevation_deg=sun.elevation_deg)",
+      "replace": "contrast_profile(rgb, fit, camera.contrast, sun_elevation_deg=max_sun_elev)"
+    },
+    {
+      "label": "no contrast-table refusal",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "if camera.contrast is None:",
+      "replace": "if False:"
+    },
+    {
+      "label": "bands never validated against the fit",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "validate_contrast(fit, camera.contrast)",
+      "replace": "pass"
+    },
+    {
+      "label": "missing evening folder not refused",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "if not directory.is_dir():",
+      "replace": "if False:"
+    },
+    {
+      "label": "empty window not refused",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "if min_sun_elev > max_sun_elev:",
+      "replace": "if False:"
+    },
+    {
+      "label": "N4: design curve row loses the default +6 to -6 window",
+      "file": "../../docs/design.md",
+      "oracle": "real",
+      "find": " (the forecast renders that whole range; tier A scores the part its observed window keeps, by default +6 to -6 degrees, and `lastlight observe --min-sun-elev -8` extends it to -8)",
+      "replace": ""
+    },
+    {
+      "label": "[control] reorder the _Measured __slots__ tuple",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "__slots__ = (\"excluded\", \"log_bg\", \"log_rg\", \"n_pixels\", \"view_elevation\")",
+      "replace": "__slots__ = (\"view_elevation\", \"n_pixels\", \"log_rg\", \"log_bg\", \"excluded\")",
+      "expect": "survived",
+      "why": "__slots__ order fixes only the order descriptors are created in; nothing iterates, pickles or indexes __slots__ in this repo (grep), so every path the suite reaches is unchanged. Not inert for code that relied on slot order, of which there is none."
+    }
+  ]
+}

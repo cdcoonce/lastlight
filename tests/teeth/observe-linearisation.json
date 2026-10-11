@@ -1,0 +1,145 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_observe_contrast.py",
+    "tests/test_observe_bands.py",
+    "tests/test_observe_evening.py",
+    "tests/test_observe_command.py",
+    "tests/test_observe_vividness.py",
+    "tests/test_camera_registry_contrast.py",
+    "tests/test_camera_registry.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_observe_contrast.py",
+    "tests/test_observe_bands.py",
+    "tests/test_observe_evening.py",
+    "tests/test_observe_command.py",
+    "tests/test_observe_vividness.py",
+    "tests/test_camera_registry_contrast.py",
+    "tests/test_camera_registry.py"
+  ],
+  "mutants": [
+    {
+      "label": "no linearisation (logs of the codes)",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "return np.where(encoded <= 0.04045, encoded / 12.92, np.power((encoded + 0.055) / 1.055, 2.4))",
+      "replace": "return encoded"
+    },
+    {
+      "label": "gamma 2.2 approximation instead of the sRGB curve",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "return np.where(encoded <= 0.04045, encoded / 12.92, np.power((encoded + 0.055) / 1.055, 2.4))",
+      "replace": "return np.power(encoded, 2.2)"
+    },
+    {
+      "label": "linear toe slope 12.0 not 12.92",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "encoded / 12.92,",
+      "replace": "encoded / 12.0,"
+    },
+    {
+      "label": "power-segment exponent 2.2 not 2.4",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "/ 1.055, 2.4)",
+      "replace": "/ 1.055, 2.2)"
+    },
+    {
+      "label": "sRGB knee at 0.05 (code 11 falls on the toe)",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "np.where(encoded <= 0.04045,",
+      "replace": "np.where(encoded <= 0.05,"
+    },
+    {
+      "label": "sRGB knee at 0.03 (code 10 falls on the power segment)",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "np.where(encoded <= 0.04045,",
+      "replace": "np.where(encoded <= 0.03,"
+    },
+    {
+      "label": "mean for median (log_rg)",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "out.log_rg = float(np.median(",
+      "replace": "out.log_rg = float(np.mean("
+    },
+    {
+      "label": "mean for median (log_bg)",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "out.log_bg = float(np.median(",
+      "replace": "out.log_bg = float(np.mean("
+    },
+    {
+      "label": "ratio of medians for median of ratios (log_rg)",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "out.log_rg = float(np.median(np.log(linear[:, 0] / linear[:, 1])))",
+      "replace": "out.log_rg = float(np.median(np.log(linear[:, 0])) - np.median(np.log(linear[:, 1])))"
+    },
+    {
+      "label": "ratio of medians for median of ratios (log_bg)",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "out.log_bg = float(np.median(np.log(linear[:, 2] / linear[:, 1])))",
+      "replace": "out.log_bg = float(np.median(np.log(linear[:, 2])) - np.median(np.log(linear[:, 1])))"
+    },
+    {
+      "label": "reference subtraction sign flipped (log_rg)",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "log_rg=band.log_rg - reference.log_rg if has_contrast else None,",
+      "replace": "log_rg=reference.log_rg - band.log_rg if has_contrast else None,"
+    },
+    {
+      "label": "reference subtraction sign flipped (log_bg)",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "log_bg=band.log_bg - reference.log_bg if has_contrast else None,",
+      "replace": "log_bg=reference.log_bg - band.log_bg if has_contrast else None,"
+    },
+    {
+      "label": "reference not subtracted (log_rg)",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "band.log_rg - reference.log_rg",
+      "replace": "band.log_rg"
+    },
+    {
+      "label": "reference not subtracted (log_bg)",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "band.log_bg - reference.log_bg",
+      "replace": "band.log_bg"
+    },
+    {
+      "label": "[control] reorder the _Measured __slots__ tuple",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "__slots__ = (\"excluded\", \"log_bg\", \"log_rg\", \"n_pixels\", \"view_elevation\")",
+      "replace": "__slots__ = (\"view_elevation\", \"n_pixels\", \"log_rg\", \"log_bg\", \"excluded\")",
+      "expect": "survived",
+      "why": "__slots__ order fixes only the order descriptors are created in; nothing iterates, pickles or indexes __slots__ in this repo (grep), so every path the suite reaches is unchanged. Not inert for code that relied on slot order, of which there is none."
+    }
+  ]
+}

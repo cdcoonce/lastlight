@@ -7,10 +7,18 @@ each evening's twilight window and archives the frames privately on the capture 
 
 from lastlight.cameras.registry import (
     Camera,
+    ContrastBands,
     Position,
     RegistryError,
     load_registry,
     parse_registry,
 )
 
-__all__ = ["Camera", "Position", "RegistryError", "load_registry", "parse_registry"]
+__all__ = [
+    "Camera",
+    "ContrastBands",
+    "Position",
+    "RegistryError",
+    "load_registry",
+    "parse_registry",
+]

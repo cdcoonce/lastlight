@@ -1,0 +1,89 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_observe_contrast.py",
+    "tests/test_observe_bands.py",
+    "tests/test_observe_evening.py",
+    "tests/test_observe_command.py",
+    "tests/test_observe_vividness.py",
+    "tests/test_camera_registry_contrast.py",
+    "tests/test_camera_registry.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_observe_contrast.py",
+    "tests/test_observe_bands.py",
+    "tests/test_observe_evening.py",
+    "tests/test_observe_command.py",
+    "tests/test_observe_vividness.py",
+    "tests/test_camera_registry_contrast.py",
+    "tests/test_camera_registry.py"
+  ],
+  "mutants": [
+    {
+      "label": "vividness: minimum not maximum",
+      "file": "../../src/lastlight/observe/vividness.py",
+      "oracle": "real",
+      "find": "return max(values) if values else None",
+      "replace": "return min(values) if values else None"
+    },
+    {
+      "label": "vividness: no usable frame gives 0.0",
+      "file": "../../src/lastlight/observe/vividness.py",
+      "oracle": "real",
+      "find": "return max(values) if values else None",
+      "replace": "return max(values) if values else 0.0"
+    },
+    {
+      "label": "vividness: top band, not lowest",
+      "file": "../../src/lastlight/observe/vividness.py",
+      "oracle": "real",
+      "find": "profile.bands[0].log_rg\n        for profile",
+      "replace": "profile.bands[-1].log_rg\n        for profile"
+    },
+    {
+      "label": "vividness: log_bg not log_rg (value)",
+      "file": "../../src/lastlight/observe/vividness.py",
+      "oracle": "real",
+      "find": "profile.bands[0].log_rg\n        for profile",
+      "replace": "profile.bands[0].log_bg\n        for profile"
+    },
+    {
+      "label": "N2: observed vividness rule string back to the shared v0-placeholder",
+      "file": "../../src/lastlight/observe/vividness.py",
+      "oracle": "real",
+      "find": "\"observed-v0-placeholder: max over frames",
+      "replace": "\"v0-placeholder: max over frames"
+    },
+    {
+      "label": "N2: observed vividness rule string is exactly the forecast's",
+      "file": "../../src/lastlight/observe/vividness.py",
+      "oracle": "real",
+      "find": "OBSERVED_VIVIDNESS_V0_RULE: Final = (\n    \"observed-v0-placeholder: max over frames of the lowest band's log(R/G) contrast\"\n)",
+      "replace": "OBSERVED_VIVIDNESS_V0_RULE: Final = \"v0-placeholder\""
+    },
+    {
+      "label": "[control] reorder the _Measured __slots__ tuple",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "__slots__ = (\"excluded\", \"log_bg\", \"log_rg\", \"n_pixels\", \"view_elevation\")",
+      "replace": "__slots__ = (\"view_elevation\", \"n_pixels\", \"log_rg\", \"log_bg\", \"excluded\")",
+      "expect": "survived",
+      "why": "__slots__ order fixes only the order descriptors are created in; nothing iterates, pickles or indexes __slots__ in this repo (grep), so every path the suite reaches is unchanged. Not inert for code that relied on slot order, of which there is none."
+    }
+  ]
+}

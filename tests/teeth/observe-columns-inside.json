@@ -1,0 +1,135 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_observe_contrast.py",
+    "tests/test_observe_bands.py",
+    "tests/test_observe_evening.py",
+    "tests/test_observe_command.py",
+    "tests/test_observe_vividness.py",
+    "tests/test_camera_registry_contrast.py",
+    "tests/test_camera_registry.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_observe_contrast.py",
+    "tests/test_observe_bands.py",
+    "tests/test_observe_evening.py",
+    "tests/test_observe_command.py",
+    "tests/test_observe_vividness.py",
+    "tests/test_camera_registry_contrast.py",
+    "tests/test_camera_registry.py"
+  ],
+  "mutants": [
+    {
+      "label": "columns_inside: row 0 treated as off the frame",
+      "file": "../../src/lastlight/observe/bands.py",
+      "oracle": "real",
+      "find": "(row_index >= 0) & (row_index < fit.height)",
+      "replace": "(row_index > 0) & (row_index < fit.height)"
+    },
+    {
+      "label": "[documented survivor] columns_inside: last row treated as off the frame",
+      "file": "../../src/lastlight/observe/bands.py",
+      "oracle": "real",
+      "find": "(row_index >= 0) & (row_index < fit.height)",
+      "replace": "(row_index >= 0) & (row_index < fit.height - 1)",
+      "expect": "survived",
+      "why": "Unreachable while the skyline is inside the frame: a band's rows are all above the skyline, so none reaches the last frame row (WHTM1's lowest skyline is row 194.2 of 300). Fails to be inert for a camera whose skyline sits in the last band-height rows, which validate_contrast would refuse at the coverage step first."
+    },
+    {
+      "label": "columns_inside: ignores the mask",
+      "file": "../../src/lastlight/observe/bands.py",
+      "oracle": "real",
+      "find": "return seen & in_frame & in_mask",
+      "replace": "return seen & in_frame"
+    },
+    {
+      "label": "columns_inside: band rows off by one vs contrast",
+      "file": "../../src/lastlight/observe/bands.py",
+      "oracle": "real",
+      "find": "row_index = top_int[None, :] - np.arange(low, high)[:, None]",
+      "replace": "row_index = top_int[None, :] - np.arange(low + 1, high + 1)[:, None]"
+    },
+    {
+      "label": "coverage threshold 0.90",
+      "file": "../../src/lastlight/observe/bands.py",
+      "oracle": "real",
+      "find": "MIN_COLUMN_COVERAGE: Final = 0.95",
+      "replace": "MIN_COLUMN_COVERAGE: Final = 0.90"
+    },
+    {
+      "label": "coverage threshold 0.99",
+      "file": "../../src/lastlight/observe/bands.py",
+      "oracle": "real",
+      "find": "MIN_COLUMN_COVERAGE: Final = 0.95",
+      "replace": "MIN_COLUMN_COVERAGE: Final = 0.99"
+    },
+    {
+      "label": "coverage: exactly the threshold fails (<=)",
+      "file": "../../src/lastlight/observe/bands.py",
+      "oracle": "real",
+      "find": "if entry.fraction < minimum:",
+      "replace": "if entry.fraction <= minimum:"
+    },
+    {
+      "label": "coverage: threshold 0.9 at the use site",
+      "file": "../../src/lastlight/observe/bands.py",
+      "oracle": "real",
+      "find": "if entry.fraction < minimum:",
+      "replace": "if entry.fraction < 0.9:"
+    },
+    {
+      "label": "coverage: reference not validated",
+      "file": "../../src/lastlight/observe/bands.py",
+      "oracle": "real",
+      "find": "entries.append((contrast.reference_rows, True))",
+      "replace": "pass"
+    },
+    {
+      "label": "[documented survivor] coverage: margin ignored",
+      "file": "../../src/lastlight/observe/bands.py",
+      "oracle": "real",
+      "find": "fraction=int(columns_inside(fit, rows, margin_rows=margin).sum()) / fit.width,",
+      "replace": "fraction=int(columns_inside(fit, rows, margin_rows=0).sum()) / fit.width,",
+      "expect": "survived",
+      "why": "band_coverage ignoring skyline_margin_rows is covered by the registry's own refusal of a band starting inside the margin; both would have to fail together to matter. Equivalent on any table the registry accepts."
+    },
+    {
+      "label": "coverage: validation never raises",
+      "file": "../../src/lastlight/observe/bands.py",
+      "oracle": "real",
+      "find": "if problems:",
+      "replace": "if False:"
+    },
+    {
+      "label": "validate: dome run past width check off by one",
+      "file": "../../src/lastlight/observe/bands.py",
+      "oracle": "real",
+      "find": "if high > fit.width:",
+      "replace": "if high >= fit.width:"
+    },
+    {
+      "label": "[control-candidate] columns_inside: drop redundant seen &",
+      "file": "../../src/lastlight/observe/bands.py",
+      "oracle": "real",
+      "find": "return seen & in_frame & in_mask",
+      "replace": "return in_frame & in_mask",
+      "expect": "survived",
+      "why": "sky_mask_rows is False wherever the skyline was not seen (comparison with NaN is False), so in_mask already implies seen; inert as long as sky_mask_rows keeps that, which test_the_row_mask_excludes_the_overlay_boxes_and_unseen_skyline_columns pins."
+    }
+  ]
+}

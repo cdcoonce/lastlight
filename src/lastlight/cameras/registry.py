@@ -5,6 +5,11 @@ it, and refuses anything that could make the collector or the site misbehave qui
 missing field, a typo'd key, an id that is not a safe directory name, or a camera that is
 published without a recorded reason (`publish_thumbnails = true` needs a `basis`;
 `docs/design.md` section 3).
+
+A camera may also carry a `[camera.contrast]` table: the tier A observation's bands, defined in
+pixel rows above the camera's frozen skyline (`ContrastBands`). Whether those rows lie inside the
+camera's sky is a question for its frozen fit, so it is answered by `lastlight.observe.bands`,
+not here; the loader checks only that the table is well formed.
 """
 
 from __future__ import annotations
@@ -27,9 +32,19 @@ _KNOWN_KEYS: Final = frozenset(
         "publish_thumbnails",
         "basis",
         "position_note",
+        "contrast",
     }
 )
 _POSITION_KEYS: Final = ("lat", "lon", "elev_m")
+_CONTRAST_KEYS: Final = frozenset(
+    {
+        "skyline_margin_rows",
+        "bands_rows",
+        "reference_rows",
+        "light_dome_columns",
+        "light_dome_provisional",
+    }
+)
 
 
 class RegistryError(ValueError):
@@ -49,6 +64,34 @@ class Position:
 
 
 @dataclass(frozen=True, slots=True)
+class ContrastBands:
+    """Where a camera's tier A contrast bands are, in pixel space.
+
+    Rows are counted upward from the frozen skyline, column by column: a pair `(lo, hi)` is the
+    half-open range of offsets `lo <= d < hi`, where `d` is how many rows a pixel sits above the
+    skyline in its own column. The bands are in pixels, not degrees, because the pixel scale of a
+    public camera is not identified until the sun enters its frame (`docs/design.md` section 1).
+
+    - `skyline_margin_rows`: rows kept clear above the skyline, where terrain and sky blend. No
+      band or reference may start inside it.
+    - `bands_rows`: the scored bands, lowest first, ascending and not overlapping.
+    - `reference_rows`: the band every other band is differenced against.
+    - `light_dome_columns`: half-open column ranges `(lo, hi)` of artificial city light, excluded
+      from every band while the sun is below -4 degrees. Columns, not azimuths: the frame is only
+      about 19 degrees wide.
+    - `light_dome_provisional`: true while the dome's columns rest on too little data to be
+      called a measurement (one overcast frame with the sun below -6 degrees). Echoed into
+      `observed.json`, so every observation says whether it was read with a seed or a refit.
+    """
+
+    skyline_margin_rows: int
+    bands_rows: tuple[tuple[int, int], ...]
+    reference_rows: tuple[int, int]
+    light_dome_columns: tuple[tuple[int, int], ...] = ()
+    light_dome_provisional: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class Camera:
     """One tier A camera. `view_azimuth_deg` is degrees clockwise from true north."""
 
@@ -62,6 +105,7 @@ class Camera:
     publish_thumbnails: bool = False
     basis: str = ""
     position_note: str = ""
+    contrast: ContrastBands | None = None
 
 
 def _number(value: object) -> bool:
@@ -102,6 +146,100 @@ def _position(entry: dict[str, Any], label: str) -> Position:
     if not -90.0 <= lat <= 90.0 or not -180.0 <= lon <= 180.0:
         raise RegistryError(f"{label}: position {lat}, {lon} is outside the globe")
     return Position(lat=lat, lon=lon, elev_m=elev_m)
+
+
+def _whole(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _range_list(
+    value: object, label: str, field: str, *, many: bool
+) -> tuple[tuple[int, int], ...]:
+    """`[[lo, hi], ...]` (or one `[lo, hi]` when not `many`) of whole numbers, 0 <= lo < hi."""
+    pairs = value if many else [value]
+    if not isinstance(pairs, list) or (many and not pairs):
+        shape = "a non-empty list of [lo, hi] pairs" if many else "a [lo, hi] pair"
+        raise RegistryError(f"{label}: contrast '{field}' must be {shape}")
+    out: list[tuple[int, int]] = []
+    for pair in pairs:
+        if not isinstance(pair, list) or len(pair) != 2 or not all(_whole(v) for v in pair):
+            raise RegistryError(
+                f"{label}: contrast '{field}' entries must be [lo, hi] whole numbers"
+            )
+        low, high = pair
+        if not 0 <= low < high:
+            raise RegistryError(
+                f"{label}: contrast '{field}' entry {pair} must have 0 <= lo < hi (half-open)"
+            )
+        out.append((low, high))
+    return tuple(out)
+
+
+def _check_ascending(ranges: tuple[tuple[int, int], ...], label: str, field: str) -> None:
+    """Refuse ranges that are out of order or overlap (touching ends are fine: half-open)."""
+    for (first_low, first_high), (low, _high) in zip(ranges, ranges[1:], strict=False):
+        if low < first_low:
+            raise RegistryError(f"{label}: contrast '{field}' must be in ascending order")
+        if low < first_high:
+            raise RegistryError(f"{label}: contrast '{field}' must not overlap, got {list(ranges)}")
+
+
+def _contrast(entry: dict[str, Any], label: str) -> ContrastBands | None:
+    if "contrast" not in entry:
+        return None
+    raw = entry["contrast"]
+    if not isinstance(raw, dict):
+        raise RegistryError(
+            f"{label}: 'contrast' must be a table with skyline_margin_rows, bands_rows and "
+            "reference_rows"
+        )
+    for key in ("skyline_margin_rows", "bands_rows", "reference_rows"):
+        if key not in raw:
+            raise RegistryError(f"{label}: contrast is missing required field '{key}'")
+    unknown = sorted(set(raw) - _CONTRAST_KEYS)
+    if unknown:
+        raise RegistryError(f"{label}: contrast has unknown key(s) {unknown}")
+
+    margin = raw["skyline_margin_rows"]
+    if not _whole(margin) or margin < 0:
+        raise RegistryError(f"{label}: contrast 'skyline_margin_rows' must be a whole number >= 0")
+    bands = _range_list(raw["bands_rows"], label, "bands_rows", many=True)
+    (reference,) = _range_list(raw["reference_rows"], label, "reference_rows", many=False)
+    domes = (
+        _range_list(raw["light_dome_columns"], label, "light_dome_columns", many=True)
+        if "light_dome_columns" in raw
+        else ()
+    )
+
+    provisional = raw.get("light_dome_provisional", False)
+    if not isinstance(provisional, bool):
+        raise RegistryError(f"{label}: contrast 'light_dome_provisional' must be true or false")
+
+    _check_ascending(bands, label, "bands_rows")
+    _check_ascending(domes, label, "light_dome_columns")
+    if bands[0][0] < margin:
+        raise RegistryError(
+            f"{label}: contrast bands start at row {bands[0][0]}, inside the "
+            f"skyline_margin_rows of {margin}"
+        )
+    if reference[0] < margin:
+        raise RegistryError(
+            f"{label}: contrast reference_rows start at row {reference[0]}, inside the "
+            f"skyline_margin_rows of {margin}"
+        )
+    for low, high in bands:
+        if reference[0] < high and low < reference[1]:
+            raise RegistryError(
+                f"{label}: contrast reference_rows {list(reference)} overlap the band "
+                f"[{low}, {high}]"
+            )
+    return ContrastBands(
+        skyline_margin_rows=margin,
+        bands_rows=bands,
+        reference_rows=reference,
+        light_dome_columns=domes,
+        light_dome_provisional=provisional,
+    )
 
 
 def _camera(entry: object, index: int) -> Camera:
@@ -155,6 +293,7 @@ def _camera(entry: object, index: int) -> Camera:
         publish_thumbnails=publish,
         basis=basis,
         position_note=note,
+        contrast=_contrast(entry, label),
     )
 
 

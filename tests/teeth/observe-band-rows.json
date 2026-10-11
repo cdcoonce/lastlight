@@ -1,0 +1,159 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_observe_contrast.py",
+    "tests/test_observe_bands.py",
+    "tests/test_observe_evening.py",
+    "tests/test_observe_command.py",
+    "tests/test_observe_vividness.py",
+    "tests/test_camera_registry_contrast.py",
+    "tests/test_camera_registry.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_observe_contrast.py",
+    "tests/test_observe_bands.py",
+    "tests/test_observe_evening.py",
+    "tests/test_observe_command.py",
+    "tests/test_observe_vividness.py",
+    "tests/test_camera_registry_contrast.py",
+    "tests/test_camera_registry.py"
+  ],
+  "mutants": [
+    {
+      "label": "reference measured on the top band, not reference_rows",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "reference = _measure(frame, fit, contrast.reference_rows, margin_rows=margin, dome=dome)",
+      "replace": "reference = _measure(frame, fit, contrast.bands_rows[-1], margin_rows=margin, dome=dome)"
+    },
+    {
+      "label": "reference measured on the lowest band",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "reference = _measure(frame, fit, contrast.reference_rows, margin_rows=margin, dome=dome)",
+      "replace": "reference = _measure(frame, fit, contrast.bands_rows[0], margin_rows=margin, dome=dome)"
+    },
+    {
+      "label": "band reads from a fixed row, not the column's skyline",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "row_index = top_int[used][None, :] - np.arange(low, high)[:, None]",
+      "replace": "row_index = 200 - np.arange(low, high)[:, None] + 0 * used[None, :]"
+    },
+    {
+      "label": "band is one row too high (off by one)",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "row_index = top_int[used][None, :] - np.arange(low, high)[:, None]",
+      "replace": "row_index = top_int[used][None, :] - np.arange(low + 1, high + 1)[:, None]"
+    },
+    {
+      "label": "band is one row too low (off by one)",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "row_index = top_int[used][None, :] - np.arange(low, high)[:, None]",
+      "replace": "row_index = top_int[used][None, :] - np.arange(low - 1, high - 1)[:, None]"
+    },
+    {
+      "label": "band includes its end row (inclusive hi)",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "row_index = top_int[used][None, :] - np.arange(low, high)[:, None]",
+      "replace": "row_index = top_int[used][None, :] - np.arange(low, high + 1)[:, None]"
+    },
+    {
+      "label": "skyline truncated, not rounded half up",
+      "file": "../../src/lastlight/camgeom/mask.py",
+      "oracle": "real",
+      "find": "return np.floor(fit.skyline_y(np.arange(fit.width)) + 0.5)",
+      "replace": "return np.floor(fit.skyline_y(np.arange(fit.width)))"
+    },
+    {
+      "label": "skyline rounded half to even (np.rint)",
+      "file": "../../src/lastlight/camgeom/mask.py",
+      "oracle": "real",
+      "find": "return np.floor(fit.skyline_y(np.arange(fit.width)) + 0.5)",
+      "replace": "return np.rint(fit.skyline_y(np.arange(fit.width)))"
+    },
+    {
+      "label": "skyline rounded up (ceil)",
+      "file": "../../src/lastlight/camgeom/mask.py",
+      "oracle": "real",
+      "find": "return np.floor(fit.skyline_y(np.arange(fit.width)) + 0.5)",
+      "replace": "return np.ceil(fit.skyline_y(np.arange(fit.width)))"
+    },
+    {
+      "label": "overlay boxes ignored by the row mask",
+      "file": "../../src/lastlight/camgeom/mask.py",
+      "oracle": "real",
+      "find": "mask[box.y0 : box.y1, box.x0 : box.x1] = False\n    return mask\n\n\ndef write_mask_png",
+      "replace": "pass\n    return mask\n\n\ndef write_mask_png"
+    },
+    {
+      "label": "overlay box last row left in",
+      "file": "../../src/lastlight/camgeom/mask.py",
+      "oracle": "real",
+      "find": "mask[box.y0 : box.y1, box.x0 : box.x1] = False\n    return mask\n\n\ndef write_mask_png",
+      "replace": "mask[box.y0 : box.y1 - 1, box.x0 : box.x1] = False\n    return mask\n\n\ndef write_mask_png"
+    },
+    {
+      "label": "overlay box last column left in",
+      "file": "../../src/lastlight/camgeom/mask.py",
+      "oracle": "real",
+      "find": "mask[box.y0 : box.y1, box.x0 : box.x1] = False\n    return mask\n\n\ndef write_mask_png",
+      "replace": "mask[box.y0 : box.y1, box.x0 : box.x1 - 1] = False\n    return mask\n\n\ndef write_mask_png"
+    },
+    {
+      "label": "overlay box first column left in",
+      "file": "../../src/lastlight/camgeom/mask.py",
+      "oracle": "real",
+      "find": "mask[box.y0 : box.y1, box.x0 : box.x1] = False\n    return mask\n\n\ndef write_mask_png",
+      "replace": "mask[box.y0 : box.y1, box.x0 + 1 : box.x1] = False\n    return mask\n\n\ndef write_mask_png"
+    },
+    {
+      "label": "row mask: margin strict (d > margin)",
+      "file": "../../src/lastlight/camgeom/mask.py",
+      "oracle": "real",
+      "find": "mask = np.arange(fit.height, dtype=float)[:, None] <= limit[None, :]",
+      "replace": "mask = np.arange(fit.height, dtype=float)[:, None] < limit[None, :]"
+    },
+    {
+      "label": "row mask: negative margin allowed",
+      "file": "../../src/lastlight/camgeom/mask.py",
+      "oracle": "real",
+      "find": "if margin_rows < 0:",
+      "replace": "if margin_rows < -1:"
+    },
+    {
+      "label": "row mask ignores the margin",
+      "file": "../../src/lastlight/camgeom/mask.py",
+      "oracle": "real",
+      "find": "limit = skyline_top_rows(fit) - margin_rows",
+      "replace": "limit = skyline_top_rows(fit)"
+    },
+    {
+      "label": "[control] reorder the _Measured __slots__ tuple",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "__slots__ = (\"excluded\", \"log_bg\", \"log_rg\", \"n_pixels\", \"view_elevation\")",
+      "replace": "__slots__ = (\"view_elevation\", \"n_pixels\", \"log_rg\", \"log_bg\", \"excluded\")",
+      "expect": "survived",
+      "why": "__slots__ order fixes only the order descriptors are created in; nothing iterates, pickles or indexes __slots__ in this repo (grep), so every path the suite reaches is unchanged. Not inert for code that relied on slot order, of which there is none."
+    }
+  ]
+}

@@ -1,0 +1,201 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_observe_contrast.py",
+    "tests/test_observe_bands.py",
+    "tests/test_observe_evening.py",
+    "tests/test_observe_command.py",
+    "tests/test_observe_vividness.py",
+    "tests/test_camera_registry_contrast.py",
+    "tests/test_camera_registry.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_observe_contrast.py",
+    "tests/test_observe_bands.py",
+    "tests/test_observe_evening.py",
+    "tests/test_observe_command.py",
+    "tests/test_observe_vividness.py",
+    "tests/test_camera_registry_contrast.py",
+    "tests/test_camera_registry.py"
+  ],
+  "mutants": [
+    {
+      "label": "no_time_in_name not counted",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "dropped[\"no_time_in_name\"] += 1",
+      "replace": "pass"
+    },
+    {
+      "label": "sun_above_window not counted",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "dropped[\"sun_above_window\"] += 1",
+      "replace": "pass"
+    },
+    {
+      "label": "sun_below_window not counted",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "dropped[\"sun_below_window\"] += 1",
+      "replace": "pass"
+    },
+    {
+      "label": "unreadable not counted",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "dropped[\"unreadable\"] += 1",
+      "replace": "pass"
+    },
+    {
+      "label": "wrong_size not counted",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "dropped[\"wrong_size\"] += 1",
+      "replace": "pass"
+    },
+    {
+      "label": "above/below reasons swapped",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "dropped[\"sun_above_window\"] += 1",
+      "replace": "dropped[\"sun_below_window\"] += 1"
+    },
+    {
+      "label": "wrong-size frame reaches contrast_profile",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "if rgb.shape[:2] != (fit.height, fit.width):",
+      "replace": "if False:"
+    },
+    {
+      "label": "frames_found counts only used frames",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "\"frames_found\": self.frames_found,",
+      "replace": "\"frames_found\": len(self.frames),"
+    },
+    {
+      "label": "frames_used reports frames found",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "\"frames_used\": len(self.frames),",
+      "replace": "\"frames_used\": self.frames_found,"
+    },
+    {
+      "label": "drop counts only nonzero reasons",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "\"frames_dropped\": {reason: self.dropped[reason] for reason in DROP_REASONS},",
+      "replace": "\"frames_dropped\": {reason: count for reason, count in self.dropped.items() if count},"
+    },
+    {
+      "label": "provisional flag inverted",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "\"provisional\": self.provisional}",
+      "replace": "\"provisional\": not self.provisional}"
+    },
+    {
+      "label": "provisional flag always False",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "provisional=fit.provisional,",
+      "replace": "provisional=False,"
+    },
+    {
+      "label": "fit digest of the camera id, not the file",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "fit_sha256 = hashlib.sha256((geometry_dir / f\"{camera.id}.json\").read_bytes()).hexdigest()",
+      "replace": "fit_sha256 = hashlib.sha256(camera.id.encode()).hexdigest()"
+    },
+    {
+      "label": "schema version 2",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "SCHEMA_VERSION: Final = 1",
+      "replace": "SCHEMA_VERSION: Final = 2"
+    },
+    {
+      "label": "sha prefix 8 chars",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "SHA_PREFIX_CHARS: Final = 12",
+      "replace": "SHA_PREFIX_CHARS: Final = 8"
+    },
+    {
+      "label": "sun elevation rounded to whole degrees in the file",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "\"sun_elevation_deg\": round(self.sun_elevation_deg, 2),",
+      "replace": "\"sun_elevation_deg\": round(self.sun_elevation_deg, 0),"
+    },
+    {
+      "label": "sun elevation rounded to one decimal in the file",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "\"sun_elevation_deg\": round(self.sun_elevation_deg, 2),",
+      "replace": "\"sun_elevation_deg\": round(self.sun_elevation_deg, 1),"
+    },
+    {
+      "label": "excluded totals skip the reference",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "reference += frame.profile.reference.excluded",
+      "replace": "pass"
+    },
+    {
+      "label": "excluded totals pile every band onto band 0",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "bands[index] += band.excluded",
+      "replace": "bands[0] += band.excluded"
+    },
+    {
+      "label": "N3: sun_elevation_basis not written",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "            \"sun_elevation_basis\": SUN_ELEVATION_BASIS,\n",
+      "replace": ""
+    },
+    {
+      "label": "N3: basis loses the offset from the site",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "about 0.2 degrees below the camera's site",
+      "replace": "the same as the camera's site"
+    },
+    {
+      "label": "N3: basis loses the registry position",
+      "file": "../../src/lastlight/observe/evening.py",
+      "oracle": "real",
+      "find": "at the camera's registry position, which is the ",
+      "replace": "somewhere, which is the "
+    },
+    {
+      "label": "[control] reorder the _Measured __slots__ tuple",
+      "file": "../../src/lastlight/observe/contrast.py",
+      "oracle": "real",
+      "find": "__slots__ = (\"excluded\", \"log_bg\", \"log_rg\", \"n_pixels\", \"view_elevation\")",
+      "replace": "__slots__ = (\"view_elevation\", \"n_pixels\", \"log_rg\", \"log_bg\", \"excluded\")",
+      "expect": "survived",
+      "why": "__slots__ order fixes only the order descriptors are created in; nothing iterates, pickles or indexes __slots__ in this repo (grep), so every path the suite reaches is unchanged. Not inert for code that relied on slot order, of which there is none."
+    }
+  ]
+}
