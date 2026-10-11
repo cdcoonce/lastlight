@@ -19,10 +19,7 @@ from pathlib import Path
 from lastlight import geometry
 from lastlight.cli import Command
 from lastlight.inputs.http import FetchError, Transport, UrllibTransport
-
-# The public reference point (docs/design.md section 3), downtown Phoenix.
-REFERENCE_LAT = 33.45
-REFERENCE_LON = -112.07
+from lastlight.site import REFERENCE_POINT
 
 DEFAULT_CACHE_DIR = Path("data/hrrr")  # under /data/, which git ignores
 _MAX_FORECAST_HOUR = 48
@@ -78,12 +75,13 @@ def execute(args: argparse.Namespace, *, transport: Transport, now_utc: dt.datet
     """Run the command with the transport and clock given (the tests give their own)."""
     from lastlight.inputs import hrrr  # deferred: importing it loads the GRIB library
 
+    reference_lat, reference_lon, _ = REFERENCE_POINT
     distances = [float(distance) for distance in hrrr.TRANSECT_DISTANCES_KM]
     try:
         plan = hrrr.plan_run(
             args.date,
-            REFERENCE_LAT,
-            REFERENCE_LON,
+            reference_lat,
+            reference_lon,
             cycle_hour=args.cycle,
             forecast_hour=args.fhour,
             now_utc=now_utc,
@@ -97,7 +95,7 @@ def execute(args: argparse.Namespace, *, transport: Transport, now_utc: dt.datet
             args.cache_dir,
             transport=transport,
         )
-        points = geometry.transect(args.date, REFERENCE_LAT, REFERENCE_LON, distances)
+        points = geometry.transect(args.date, reference_lat, reference_lon, distances)
         samples = hrrr.sample_transect(fields, points)
     except (hrrr.HrrrError, FetchError, ValueError) as error:
         print(f"hrrr-transect: {error}", file=sys.stderr)

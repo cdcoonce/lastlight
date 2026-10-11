@@ -13,7 +13,6 @@
 - **Transport is a small protocol.** `UrllibTransport` is the real one; tests pass a fake that serves the recorded files and records every request, so what is asked for (exact ranges, no whole-file read, no repeat request on a cache hit) is tested, not only what comes back. A server that ignores `Range` and answers 200 is refused before a byte of the body is read. There are no retries: a flaky bucket should fail the run, and the seal job (#8) can decide its own retry policy.
 - **The cache** is a file per URL plus range (`<sha256>.grib2`), written to a temporary name and renamed, and a cached file that is the wrong length or lacks the markers is dropped and fetched again. The idx is always read again, because it names the ranges. The CLI caches under `data/hrrr`, which git ignores.
 - **Fixtures** (`tests/fixtures/hrrr/`, about 380 kB; the issue allows 2 MB): the real idx of one run, verbatim, for byte-range selection against NOAA's offsets, and the nine default fields cropped to 141 by 151 cells around Phoenix, with an idx of their own, so the whole fetch path runs offline. `tools/make_hrrr_fixture.py` rebuilds them from the bucket and fails if a cropped value differs from the original; running it again reproduced the committed files byte for byte.
-- **The reference point is repeated in the command module** (33.45, -112.07) because `lastlight.site` is not on every branch yet; it should import it once it is.
 
 **Rejected alternatives:**
 
