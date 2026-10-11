@@ -26,7 +26,8 @@ def test_the_default_tsa_is_freetsa() -> None:
 
 
 def test_the_request_asks_for_a_sha256_imprint_of_the_data_without_a_nonce() -> None:
-    # These exact bytes were accepted by the public TSA when the fixture was recorded.
+    # The structure (everything around the digest) is what the public TSA accepted when the
+    # fixture was recorded; the digest is that of the current stub.
     assert tsa.build_request(helpers.STUB_CANONICAL).hex() == helpers.STUB_REQUEST_HEX
 
 

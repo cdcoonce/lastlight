@@ -22,6 +22,7 @@ TOP_LEVEL_FIELDS = {
     "curve",
     "vividness",
     "notes",
+    "strip_sha256",
 }
 
 
@@ -123,6 +124,58 @@ def test_every_top_level_field_is_required(field: str) -> None:
 def test_only_schema_version_one_is_accepted(version: object) -> None:
     with pytest.raises(ValidationError):
         Forecast.model_validate(with_path(("schema_version",), version))
+
+
+# --- the painting's digest ----------------------------------------------------------------
+
+STRIP_DIGEST = "ab" * 32
+
+
+def test_the_stub_declares_no_strip() -> None:
+    assert helpers.stub_forecast().strip_sha256 is None
+
+
+def test_a_forecast_can_declare_the_sha256_of_its_strip() -> None:
+    forecast = make(strip_sha256=STRIP_DIGEST)
+    assert forecast.strip_sha256 == STRIP_DIGEST
+
+
+def test_strip_sha256_is_required_but_may_be_null() -> None:
+    # Required: a code path that forgets the painting must fail, not seal a forecast without one.
+    data = helpers.stub_dict()
+    del data["strip_sha256"]
+    with pytest.raises(ValidationError) as caught:
+        Forecast.model_validate(data)
+    assert error_locations(caught.value) == [("strip_sha256",)]
+    assert make(strip_sha256=None).strip_sha256 is None
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        STRIP_DIGEST.upper(),
+        STRIP_DIGEST[:-1],
+        STRIP_DIGEST + "0",
+        STRIP_DIGEST + "\n",
+        " " + STRIP_DIGEST,
+        "g" * 64,
+        "",
+        0,
+        True,
+        b"ab" * 32,
+        ["ab" * 32],
+    ],
+)
+def test_strip_sha256_is_64_lowercase_hex_characters_or_null(bad: object) -> None:
+    with pytest.raises(ValidationError) as caught:
+        Forecast.model_validate(with_path(("strip_sha256",), bad))
+    assert error_locations(caught.value) == [("strip_sha256",)]
+
+
+def test_the_json_schema_marks_strip_sha256_as_a_nullable_string() -> None:
+    schema = Forecast.model_json_schema()["properties"]["strip_sha256"]
+    kinds = {option.get("type") for option in schema["anyOf"]}
+    assert kinds == {"string", "null"}
 
 
 # --- dates --------------------------------------------------------------------------------
