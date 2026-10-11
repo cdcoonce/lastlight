@@ -12,8 +12,8 @@ Day 0 (2026-10-10). The design contract is in [`docs/design.md`](docs/design.md)
 
 1. **Forecast.** Public weather-model fields (cloud, smoke, dust, water vapour, ozone) are sampled along the line the setting sun's light travels, then pushed through a spectral model of the atmosphere. The output is the colour of the western sky at each view elevation as the sun sinks from +6 to -8 degrees, plus a single "vividness" number with uncertainty.
 2. **Seal.** The forecast's SHA-256 digest is pushed to this repo and witnessed by an RFC 3161 timestamp before sunset. Missed seals are recorded as missed.
-3. **Observe.** A fixed, west-facing camera shoots bracketed RAW frames through twilight. A colour chart and dark frames calibrate it.
-4. **Score.** Colour error is delta-E 2000 in the camera's own colour space; vividness is scored by CRPS. Both are compared with climatology and persistence, by regime (clear, dust, smoke, cloud), with confidence intervals and the minimum detectable effect.
+3. **Observe.** Public air-quality webcams that look west over the Valley (Arizona DEQ's PhoenixVis cameras) are sampled through twilight. Their exposure and white balance are automatic, so lastlight scores colour *contrasts within each frame* (horizon versus higher sky), which those automatic settings cancel out of.
+4. **Score.** Colour error is measured on those within-frame contrasts; vividness is scored by CRPS. Both are compared with climatology and persistence, by regime (clear, dust, smoke, cloud), with confidence intervals and the minimum detectable effect.
 
 Expect honest nulls: a year of evenings can detect a moderate edge, not a tiny one. The interesting evenings are dust storms, wildfire smoke and monsoon cloud.
 
