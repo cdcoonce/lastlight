@@ -1,0 +1,25 @@
+# User unit: lastlight public-camera collector. Started daily by lastlight-collect.timer.
+# The collector waits for the evening twilight window itself, then polls the cameras and
+# exits 0 when the sun is below the stop elevation. Install steps: docs/runbooks/collector.md.
+#
+# Assumes the repository is cloned at ~/lastlight and set up with `uv sync --frozen --no-dev`.
+# Frames go to $LASTLIGHT_ARCHIVE, else ~/.local/share/lastlight/frames; to change the
+# archive, add an `Environment=LASTLIGHT_ARCHIVE=...` line below.
+
+[Unit]
+Description=lastlight public-camera collector (waits for the twilight window)
+Documentation=https://github.com/cdcoonce/lastlight/blob/main/docs/runbooks/collector.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/lastlight
+ExecStart=%h/lastlight/.venv/bin/lastlight collect
+# A crash mid-evening restarts the collector, which resumes inside the window (or exits 0 if
+# the window has closed). Exit 2 is a refusal (bad option, archive inside a git work tree):
+# configuration, not a crash, so it is not retried.
+Restart=on-failure
+RestartSec=60
+RestartPreventExitStatus=2
+Nice=10

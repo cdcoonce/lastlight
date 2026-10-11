@@ -1,0 +1,47 @@
+# Tier A cameras: public webcams whose frames are lastlight's primary truth.
+# Contract: docs/design.md sections 1 (truth tiers), 3 (third-party camera frames) and 4.
+#
+# Every camera needs: id (also its archive directory name), operator, page_url, image_url,
+# view_azimuth_deg (degrees clockwise from true north), attribution, and a [camera.position].
+# publish_thumbnails defaults to false, and true is refused unless `basis` says why publishing
+# is acceptable. An unknown key is an error, so a typo cannot silently change a default.
+#
+# Positions are INTERIM: both cameras use the public reference point (downtown Phoenix,
+# docs/design.md section 3). The operator's pages name only the town or landmark and publish
+# no coordinates. Sun elevation changes about 0.01 degrees per km, so for the collector the
+# error is under 0.3 degrees (about a minute on the polling window). Replace a position with
+# the operator's named place when camera calibration needs it; that adds coordinates other
+# than the reference point, which `lastlight privacy-scan` flags until an allowlist entry
+# with a reason is added.
+
+[[camera]]
+id = "WHTM1"
+operator = "Arizona Department of Environmental Quality (ADEQ), PhoenixVis"
+page_url = "https://phoenixvis.net/site.aspx?site=whtm1"
+image_url = "https://phoenixvis.net/images/photos-main/WHTM1.jpg"
+view_azimuth_deg = 274
+attribution = "Image source: Arizona Department of Environmental Quality, PhoenixVis (phoenixvis.net)"
+publish_thumbnails = true
+basis = "Public page; robots.txt allows all; ADEQ terms silent on automated use; owner decision 2026-10-10; removed on request"
+position_note = "Interim: the public reference point, not the camera's own site. White Tank Mountains view, looking west from Avondale."
+
+[camera.position]
+lat = 33.45
+lon = -112.07
+elev_m = 340
+
+[[camera]]
+id = "ESMO1"
+operator = "Arizona Department of Environmental Quality (ADEQ), PhoenixVis"
+page_url = "https://phoenixvis.net/site.aspx?site=esmo1"
+image_url = "https://phoenixvis.net/images/photos-main/ESMO1.jpg"
+view_azimuth_deg = 225
+attribution = "Image source: Arizona Department of Environmental Quality, PhoenixVis (phoenixvis.net)"
+publish_thumbnails = true
+basis = "Public page; robots.txt allows all; ADEQ terms silent on automated use; owner decision 2026-10-10; removed on request"
+position_note = "Interim: the public reference point, not the camera's own site. Estrella Mountains view, looking southwest (nominal 225 degrees) from North Mountain."
+
+[camera.position]
+lat = 33.45
+lon = -112.07
+elev_m = 340

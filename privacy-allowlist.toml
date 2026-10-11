@@ -9,3 +9,15 @@ path = "uv.lock"
 rule = "P001"
 match = "upload-time"
 reason = "PyPI upload stamps of third-party wheels, written by uv; they are not ours and say nothing about the camera site"
+
+[[allow]]
+path = "deploy/systemd/lastlight-collect.timer"
+rule = "P001"
+match = "15:00:00"
+reason = "The collector timer's fixed start time. It is the same on every host, does not depend on the camera site, and design.md section 3 allows scheduled jobs a fixed clock time; the collector itself waits for the twilight window by sun elevation"
+
+[[allow]]
+path = "docs/runbooks/collector.md"
+rule = "P001"
+match = "15:00"
+reason = "The runbook names the collector timer's fixed start time (deploy/systemd/lastlight-collect.timer); it is the same on every host and says nothing about the camera site"
