@@ -290,6 +290,26 @@ def test_a_failed_download_leaves_no_partial_file_behind(tmp_path: Path) -> None
     assert list(tmp_path.iterdir()) == []
 
 
+def test_an_interrupted_write_leaves_neither_the_tile_nor_a_partial_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_write = Path.write_bytes
+
+    def half_then_fail(self: Path, data: bytes) -> int:
+        real_write(self, data[: len(data) // 2])
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "write_bytes", half_then_fail)
+    name = tile_name(TILE_LAT, TILE_LON)
+    with pytest.raises(OSError, match="disk full"):
+        fetch_tiles([name], tmp_path, fetch=lambda url: b"x" * 100)
+    assert list(tmp_path.iterdir()) == [], "a truncated tile would be trusted by the next run"
+
+    monkeypatch.undo()
+    (path,) = fetch_tiles([name], tmp_path, fetch=lambda url: b"x" * 100)
+    assert path.read_bytes() == b"x" * 100
+
+
 @pytest.mark.network
 def test_the_real_tile_for_the_phoenix_area_is_a_tiff_on_the_public_bucket() -> None:
     url = tile_url(tile_name(33, -113))

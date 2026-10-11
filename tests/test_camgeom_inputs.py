@@ -49,10 +49,11 @@ def test_an_impossible_timestamp_has_no_time() -> None:
 
 def test_discovery_walks_the_archive_and_orders_frames_by_time(tmp_path: Path) -> None:
     early, late = WHEN, WHEN + dt.timedelta(minutes=20)
-    save_jpeg(tmp_path / "2026-10-11" / f"{late.strftime(STAMP)}.jpg")
-    save_jpeg(tmp_path / "2026-10-10" / f"{early.strftime(STAMP)}.jpg")
-    save_jpeg(tmp_path / "2026-10-10" / "mystery.jpg")
-    (tmp_path / "2026-10-10" / f"{early.strftime(STAMP)}.json").write_text("{}")
+    # The later frame sits in the directory that sorts first, so path order is not time order.
+    save_jpeg(tmp_path / "alpha" / f"{late.strftime(STAMP)}.jpg")
+    save_jpeg(tmp_path / "zeta" / f"{early.strftime(STAMP)}.jpg")
+    save_jpeg(tmp_path / "zeta" / "mystery.jpg")
+    (tmp_path / "zeta" / f"{early.strftime(STAMP)}.json").write_text("{}")
     (tmp_path / "notes.txt").write_text("not a frame")
 
     found = discover_frames(tmp_path)
