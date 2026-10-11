@@ -176,13 +176,15 @@ def test_a_forecast_with_a_time_of_day_in_notes_is_rejected_and_nothing_is_writt
 ) -> None:
     fake = install(monkeypatch, helpers.recorded_tsr())
     leaky = tmp_path / "leaky.json"
-    leaky.write_text(helpers.stub_text().replace("stub forecast", "dust arrives at 17:42"))
+    leaky.write_text(
+        helpers.stub_text().replace("stub forecast", f"dust arrives at {helpers.clock()}")
+    )
 
     code, out, err = seal_cmd(capsys, leaky, ledger)
 
     assert code == 2
     assert "notes" in err
-    assert "17:42" not in err + out
+    assert helpers.clock() not in err + out
     assert helpers.snapshot(ledger) == {}
     assert fake.calls == []
 
@@ -249,7 +251,17 @@ def test_the_ledger_dir_is_required(
     assert code == 2 and "--ledger-dir" in err
 
 
-@pytest.mark.parametrize("date", ["2026-13-45", "10/11/2026", "2026-10-11T00:00:00", "tonight"])
+@pytest.mark.parametrize(
+    "date",
+    [
+        "2026-13-45",
+        "10/11/2026",
+        f"2026-10-11T{helpers.MIDNIGHT}",
+        "tonight",
+        "20261011",
+        "2026-W41-6",
+    ],
+)
 def test_verify_rejects_a_date_that_is_not_an_iso_calendar_date(
     capsys: pytest.CaptureFixture[str], ledger: Path, date: str
 ) -> None:

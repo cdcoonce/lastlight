@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -131,6 +132,34 @@ def test_an_already_sealed_date_is_refused_and_the_ledger_is_unchanged(
     assert fake.calls == [], "a refused seal must not spend a timestamp"
 
 
+class RacingTsa(helpers.FakeTsa):
+    """A TSA reply that arrives after another process has already started sealing the date."""
+
+    def __init__(self, reply: bytes, *, create: Path) -> None:
+        super().__init__(reply)
+        self.create = create
+
+    def __call__(self, url: str, request: bytes, **options: object) -> bytes:
+        self.create.parent.mkdir(parents=True, exist_ok=True)
+        self.create.write_bytes(b"theirs")
+        return super().__call__(url, request, **options)
+
+
+@pytest.mark.parametrize("raced", ["forecast", "timestamp"])
+def test_a_seal_that_loses_a_race_replaces_nothing_and_removes_only_its_own_files(
+    monkeypatch: pytest.MonkeyPatch, ledger: Path, raced: str
+) -> None:
+    paths = ledger_paths(ledger, DATE)
+    theirs = paths.forecast if raced == "forecast" else paths.timestamp
+    ours = paths.timestamp if raced == "forecast" else paths.forecast
+    monkeypatch.setattr(tsa, "post_request", RacingTsa(helpers.recorded_tsr(), create=theirs))
+    with pytest.raises(AlreadySealedError, match="2026-10-11"):
+        seal(helpers.stub_forecast(), ledger, tsa_url=TSA_URL)
+    assert theirs.read_bytes() == b"theirs"
+    assert not ours.exists()
+    assert not paths.index.exists()
+
+
 def test_an_index_line_for_another_date_does_not_block_this_one(
     monkeypatch: pytest.MonkeyPatch, ledger: Path
 ) -> None:
@@ -138,6 +167,16 @@ def test_an_index_line_for_another_date_does_not_block_this_one(
     (ledger / "index.jsonl").write_text('{"date":"2026-10-10","digest":"00","model_version":"x"}\n')
     sealed_with(monkeypatch, ledger)
     assert len((ledger / "index.jsonl").read_text().splitlines()) == 2
+
+
+def test_an_index_whose_last_line_was_left_open_gets_the_new_row_on_its_own_line(
+    monkeypatch: pytest.MonkeyPatch, ledger: Path
+) -> None:
+    ledger.mkdir()
+    (ledger / "index.jsonl").write_text('{"date":"2026-10-10","digest":"00","model_version":"x"}')
+    sealed_with(monkeypatch, ledger)
+    rows = [json.loads(line) for line in (ledger / "index.jsonl").read_text().splitlines()]
+    assert [row["date"] for row in rows] == ["2026-10-10", "2026-10-11"]
 
 
 def test_a_tsa_failure_writes_nothing(monkeypatch: pytest.MonkeyPatch, ledger: Path) -> None:
@@ -231,6 +270,17 @@ def test_a_timestamp_a_whole_day_late_is_still_late(
     sealed_with(monkeypatch, ledger, helpers.tsr_after_sunset(DATE, helpers.STUB_DIGEST, 24 * 60))
     outcome = verify(DATE, ledger)
     assert not outcome.ok and "late seal" in (outcome.reason or "")
+
+
+@pytest.mark.parametrize(
+    ("minutes", "pattern"),
+    [(2 / 3, r"\b\d+ seconds\b"), (12, r"\b12 minutes\b"), (5 * 60, r"\b5\.0 hours\b")],
+)
+def test_the_late_seal_reason_gives_the_lateness_in_readable_units(
+    monkeypatch: pytest.MonkeyPatch, ledger: Path, minutes: float, pattern: str
+) -> None:
+    sealed_with(monkeypatch, ledger, helpers.tsr_after_sunset(DATE, helpers.STUB_DIGEST, minutes))
+    assert re.search(pattern, verify(DATE, ledger).reason or "")
 
 
 def test_the_late_seal_reason_has_no_clock_time(

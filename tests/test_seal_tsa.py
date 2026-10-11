@@ -181,13 +181,36 @@ def test_transport_failures_become_tsa_errors(
 
 @pytest.mark.parametrize(
     "url",
-    ["file:///etc/passwd", "ftp://tsa.example/tsr", "tsa.example/tsr", "", "//tsa.example/tsr"],
+    [
+        "file:///etc/passwd",
+        "file://localhost/etc/passwd",
+        "ftp://tsa.example/tsr",
+        "tsa.example/tsr",
+        "",
+        "//tsa.example/tsr",
+        "https:///tsr",
+    ],
 )
 def test_only_http_and_https_urls_are_used(monkeypatch: pytest.MonkeyPatch, url: str) -> None:
     seen = patch_urlopen(monkeypatch, b"never")
     with pytest.raises(TsaError, match="http"):
         tsa.post_request(url, b"q")
     assert seen == []
+
+
+def test_the_response_is_read_with_a_bound(monkeypatch: pytest.MonkeyPatch) -> None:
+    sizes: list[int] = []
+
+    class Endless(FakeHttpResponse):
+        def read(self, size: int | None = -1) -> bytes:
+            assert size is not None and size > 0, "the read must be bounded"
+            sizes.append(size)
+            return b"x" * min(size, 2 * 1024 * 1024)
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda request, timeout=None: Endless())
+    with pytest.raises(TsaError, match="large"):
+        tsa.post_request("https://tsa.example/tsr", b"q")
+    assert sizes == [tsa.MAX_RESPONSE_BYTES + 1]
 
 
 def test_an_oversized_response_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:

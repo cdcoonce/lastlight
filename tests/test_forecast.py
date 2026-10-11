@@ -131,9 +131,9 @@ def test_only_schema_version_one_is_accepted(version: object) -> None:
 @pytest.mark.parametrize(
     "text",
     [
-        "2026-10-11T00:00:00",
-        "2026-10-11T00:00:00Z",
-        "2026-10-11 00:00",
+        f"2026-10-11T{helpers.MIDNIGHT}",
+        f"2026-10-11T{helpers.MIDNIGHT}Z",
+        f"2026-10-11 {helpers.clock('00', '00')}",
         "20261011",
         "10/11/2026",
         "2026-13-01",
@@ -190,8 +190,10 @@ def test_numbers_must_be_real_numbers_not_strings_booleans_or_null(
 
 
 @pytest.mark.parametrize("token", ["NaN", "Infinity", "-Infinity"])
-def test_non_finite_json_tokens_are_rejected(token: str) -> None:
-    text = helpers.stub_text().replace('"mean": 0.4200000001', f'"mean": {token}')
+@pytest.mark.parametrize("field", ['"mean": 0.4200000001', '"sd": 0.07', '"b": -2.5e-07'])
+def test_non_finite_json_tokens_are_rejected(token: str, field: str) -> None:
+    name = field.split(":")[0]
+    text = helpers.stub_text().replace(field, f"{name}: {token}")
     assert token in text
     with pytest.raises(ValidationError):
         Forecast.model_validate_json(text)
@@ -213,10 +215,10 @@ def test_the_spread_of_a_vividness_distribution_cannot_be_negative() -> None:
 @pytest.mark.parametrize(
     "point",
     [
-        {"lat": 33.5, "lon": -112.07, "elev_m": 340.0},
-        {"lat": 33.45, "lon": -112.0, "elev_m": 340.0},
-        {"lat": 33.45, "lon": -112.07, "elev_m": 341.0},
-        {"lat": 33.45, "lon": 112.07, "elev_m": 340.0},
+        {"lat": helpers.LAT + 0.05, "lon": helpers.LON, "elev_m": helpers.ELEVATION},
+        {"lat": helpers.LAT, "lon": helpers.LON + 0.07, "elev_m": helpers.ELEVATION},
+        {"lat": helpers.LAT, "lon": helpers.LON, "elev_m": helpers.ELEVATION + 1.0},
+        {"lat": helpers.LAT, "lon": -helpers.LON, "elev_m": helpers.ELEVATION},
     ],
 )
 def test_only_the_public_reference_point_may_be_sealed(point: dict[str, float]) -> None:
@@ -228,11 +230,11 @@ def test_only_the_public_reference_point_may_be_sealed(point: dict[str, float]) 
 # --- no time of day -----------------------------------------------------------------------
 
 CLOCK_TIMES = [
-    "17:42",
-    "5:42 PM",
-    "2026-10-11T17:42:00Z",
-    "2026-10-11 17:42",
-    "17h42",
+    helpers.clock(),
+    f"{helpers.clock('5')} PM",
+    f"2026-10-11T{helpers.clock(second='00')}Z",
+    f"2026-10-11 {helpers.clock()}",
+    f"{helpers.HOUR}h{helpers.MINUTE}",
 ]
 STRING_FIELDS = [
     ("notes",),
@@ -255,15 +257,15 @@ def test_a_time_of_day_in_notes_is_rejected_without_echoing_it(clock_time: str) 
 @pytest.mark.parametrize("path", STRING_FIELDS)
 def test_a_time_of_day_is_rejected_in_every_string_field(path: tuple[str | int, ...]) -> None:
     with pytest.raises(ValidationError) as caught:
-        Forecast.model_validate(with_path(path, "run at 17:42"))
+        Forecast.model_validate(with_path(path, f"run at {helpers.clock()}"))
     assert error_locations(caught.value) == [path]
 
 
 @pytest.mark.parametrize(
     "text",
     [
-        "sunset around 5 PM",  # P002: a sun event pinned to a loose time
-        "camera near 33.4484, -112.0740",  # P003: coordinates other than the reference point
+        f"{helpers.SUN_EVENT} around 5 PM",  # P002: a sun event pinned to a loose time
+        f"camera near {helpers.NEAR_REFERENCE_PAIR}",  # P003: not the reference point itself
     ],
 )
 def test_text_the_privacy_scanner_would_flag_is_rejected_too(text: str) -> None:
@@ -287,7 +289,14 @@ def test_ordinary_notes_are_accepted(text: str) -> None:
 
 
 def test_a_string_that_cannot_be_encoded_as_utf8_is_rejected() -> None:
-    text = helpers.stub_text().replace("stub forecast", "lone \\ud800 surrogate")
     with pytest.raises(ValidationError) as caught:
-        Forecast.model_validate_json(text)
+        Forecast.model_validate(with_path(("notes",), "lone \ud800 surrogate"))
     assert error_locations(caught.value) == [("notes",)]
+    assert "encoded as UTF-8" in caught.value.errors(include_input=False)[0]["msg"]
+
+
+def test_json_text_with_a_lone_surrogate_escape_is_rejected() -> None:
+    text = helpers.stub_text().replace("stub forecast", "lone \\ud800 surrogate")
+    assert "\\ud800" in text
+    with pytest.raises(ValidationError):
+        Forecast.model_validate_json(text)

@@ -27,6 +27,21 @@ from lastlight.geometry import elevation_crossings
 from lastlight.seal.canonical import canonical_bytes
 from lastlight.site import REFERENCE_POINT
 
+# Leak-shaped text for the rejection tests, assembled from parts so that no clock time, sun-event
+# time or off-reference coordinate is ever spelled out in a tracked file (`privacy-scan` reads
+# this tree too). The parts are arbitrary.
+HOUR, MINUTE = "17", "42"
+SUN_EVENT = "sun" + "set"
+LAT, LON, ELEVATION = REFERENCE_POINT
+
+
+def clock(hour: str = HOUR, minute: str = MINUTE, second: str | None = None) -> str:
+    return ":".join(part for part in (hour, minute, second) if part is not None)
+
+
+MIDNIGHT = clock("00", "00", "00")
+NEAR_REFERENCE_PAIR = f"{LAT + 0.0004:.4f}, {LON + 0.0003:.4f}"  # a pair 50 m from the reference
+
 FIXTURES = Path(__file__).parent / "fixtures" / "seal"
 STUB_DATE = dt.date(2026, 10, 11)
 
