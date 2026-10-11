@@ -29,6 +29,8 @@ from lastlight.camgeom.orientation import Orientation
 from lastlight.geometry import solar_position
 from lastlight.observe import evening as evening_module
 from lastlight.observe.evening import (
+    DEFAULT_MAX_SUN_ELEV,
+    DEFAULT_MIN_SUN_ELEV,
     DROP_REASONS,
     SCHEMA_VERSION,
     SUN_ELEVATION_BASIS,
@@ -65,6 +67,16 @@ def test_the_default_window_keeps_sun_plus_6_to_minus_6_and_counts_the_rest_by_r
     assert result.frames_found == 6
     assert [round(f.sun_elevation_deg) for f in result.frames] == [5, 0, -2, -5]
     assert reasons(result) == {"sun_above_window": 1, "sun_below_window": 1}
+
+
+def test_the_design_documents_curve_row_states_the_default_window_tier_a_scores() -> None:
+    design = Path(__file__).resolve().parent.parent / "docs" / "design.md"
+    row = next(
+        line for line in design.read_text(encoding="utf-8").splitlines() if "| **Curve** |" in line
+    )
+    assert (DEFAULT_MAX_SUN_ELEV, DEFAULT_MIN_SUN_ELEV) == (6.0, -6.0)
+    assert "+6 to -6 degrees" in row  # tier A's default observed window
+    assert "-8" in row  # the forecast's own range, and the widened window, are still stated
 
 
 def test_min_and_max_sun_elevation_override_the_window(archive: Path) -> None:
