@@ -77,6 +77,12 @@ def fill_archive(
     paths = {}
     for index, elevation in enumerate(sun_elevations):
         stem = frame_stem(instant_at_sun(elevation))
-        gain = (1.0, 1.0, 1.0) if gains is None else gains[index % len(gains)]
+        # Frames must differ (a SHA-256 identifies each), so by default each has its own tiny gain;
+        # a gain per channel is exactly what exposure and white balance do, and contrasts ignore it.
+        gain = (
+            (1.0 + 0.02 * index, 1.0, 1.0 - 0.01 * index)
+            if gains is None
+            else gains[index % len(gains)]
+        )
         paths[elevation] = write_jpeg(folder / f"{stem}.jpg", gradient_frame_for_whtm1(gain))
     return paths
