@@ -94,6 +94,13 @@ def test_the_search_refines_around_the_best_coarse_position() -> None:
     assert len(trials) > 25, "the coarse grid is followed by a finer one"
 
 
+def test_the_fine_grid_never_leaves_the_stated_box() -> None:
+    calls: list[tuple[float, float]] = []
+    best, trials = search_position(surface((20.0, 0.0), calls), box_km=8.0, step_km=4.0)
+    assert all(abs(east) <= 8.0 and abs(north) <= 8.0 for east, north in calls)
+    assert (best.east_km, best.north_km) == (8.0, 0.0), "the floor is beyond the box: take its edge"
+
+
 def test_a_position_where_the_fit_is_impossible_is_skipped() -> None:
     def fit_at(east: float, north: float):
         return None if east > 0 else trial(east, north, 2.0 + abs(east))
@@ -135,8 +142,16 @@ def test_the_summary_records_the_chosen_offset_and_how_flat_the_valley_is() -> N
     assert summary["near_best_azimuth_deg_range"] == [283.0, 285.0]
     assert summary["near_best_hfov_deg_range"] == [20.0, 22.0]
     assert summary["positions_at_hfov_bound"] == 1
+    assert summary["best_on_box_edge"] is False
     assert summary["adopted"] is True
     assert "flat" in summary["reason"]
+
+
+def test_the_summary_says_when_the_best_position_is_on_the_edge_of_the_box() -> None:
+    edge = trial(8.0, 2.0, 1.6)
+    summary = summarize_search([trial(0.0, 0.0, 3.0), edge], edge, 8.0, 4.0, 3.0)
+    assert summary["best_on_box_edge"] is True
+    assert "box" in summary["reason"]
 
 
 def test_the_summary_holds_statistics_and_offsets_never_a_position() -> None:
@@ -154,6 +169,7 @@ def test_the_summary_holds_statistics_and_offsets_never_a_position() -> None:
         "near_best_azimuth_deg_range",
         "near_best_hfov_deg_range",
         "positions_at_hfov_bound",
+        "best_on_box_edge",
         "adopted",
         "reason",
     }
