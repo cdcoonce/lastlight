@@ -192,13 +192,13 @@ def test_a_repeated_200_with_the_same_last_modified_is_not_saved_twice(tmp_path:
 @pytest.mark.parametrize(
     ("reason", "bad_response"),
     [
-        ("Last-Modified", lambda call: Response(200, {}, jpeg("x"))),
+        ("no Last-Modified header", lambda call: Response(200, {}, jpeg("x"))),
         (
-            "Last-Modified",
+            "unreadable Last-Modified",
             lambda call: Response(200, {"Last-Modified": "not a date"}, jpeg("x")),
         ),
-        ("JPEG", lambda call: ok(b"<html>busy</html>", call.at)),
-        ("empty", lambda call: ok(b"", call.at)),
+        ("not a JPEG", lambda call: ok(b"<html>busy</html>", call.at)),
+        ("empty body", lambda call: ok(b"", call.at)),
     ],
 )
 def test_a_200_that_cannot_be_trusted_is_an_error_and_saves_nothing(
