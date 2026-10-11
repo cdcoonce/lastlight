@@ -218,10 +218,12 @@ def test_the_valid_fixture_has_every_key_the_unknown_key_tests_rely_on() -> None
         ({"bands_rows": "[[8, 28], [20, 40]]"}, "overlap"),
         ({"bands_rows": "[[28, 48], [8, 28]]"}, "ascending"),
         ({"bands_rows": "[[4, 28]]"}, "margin"),  # the lowest band starts inside the margin
+        ({"bands_rows": "[[7, 28]]"}, "margin"),  # ... by a single row (margin 8: 8 is the first)
         ({"reference_rows": "[78]"}, "reference_rows"),
         ({"reference_rows": "[98, 78]"}, "reference_rows"),
         ({"reference_rows": "[20, 40]"}, "overlap"),  # on top of a band
         ({"reference_rows": "[4, 20]"}, "margin"),
+        ({"reference_rows": "[7, 27]"}, "margin"),  # one row inside the margin
         ({"light_dome_columns": "[500, 800]"}, "light_dome_columns"),
         ({"light_dome_columns": "[[800, 500]]"}, "light_dome_columns"),
         ({"light_dome_columns": "[[-1, 100]]"}, "light_dome_columns"),

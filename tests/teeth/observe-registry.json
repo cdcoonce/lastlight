@@ -70,6 +70,13 @@
       "replace": "if False:"
     },
     {
+      "label": "registry: reference one row inside the margin allowed",
+      "file": "../../src/lastlight/cameras/registry.py",
+      "oracle": "real",
+      "find": "if reference[0] < margin:",
+      "replace": "if reference[0] < margin - 1:"
+    },
+    {
       "label": "registry: reference overlap with a band allowed",
       "file": "../../src/lastlight/cameras/registry.py",
       "oracle": "real",
