@@ -105,6 +105,17 @@ def test_the_report_counts_what_was_built(ledger_dir: Path, tmp_path: Path) -> N
     assert report.warnings == ()
 
 
+def test_the_report_counts_only_the_evenings_that_verify(
+    ledger_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    factory.seal_date(ledger_dir, NEWEST.replace(day=14), monkeypatch, late=True)
+    factory.overwrite_notes(ledger_dir, OLDEST, "edited after sealing")
+    report = build_site(ledger_dir, tmp_path / "site")
+    assert report.ok
+    assert (report.evenings, report.verified) == (4, 2)
+    assert report.pages == 7  # home, archive, scoreboard and one per date
+
+
 # --- strips carry no metadata -----------------------------------------------------------------
 
 PLANTED = {

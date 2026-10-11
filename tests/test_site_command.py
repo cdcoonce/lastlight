@@ -39,6 +39,15 @@ def test_building_a_site_exits_zero_and_says_what_it_made(
     assert "2026-10-13" in (out / "index.html").read_text(encoding="utf-8")
 
 
+def test_the_summary_counts_only_the_evenings_that_verify(
+    capsys: pytest.CaptureFixture[str], ledger_dir: Path, tmp_path: Path
+) -> None:
+    factory.overwrite_notes(ledger_dir, factory.DATES[0], "edited after sealing")
+    code, stdout, _stderr = build(capsys, ledger_dir, tmp_path / "site")
+    assert code == 0
+    assert "built 6 pages for 3 evenings (2 verified)" in stdout
+
+
 def test_a_privacy_finding_exits_one_prints_it_and_writes_no_site(
     capsys: pytest.CaptureFixture[str], ledger_dir: Path, tmp_path: Path
 ) -> None:
