@@ -28,11 +28,19 @@ DATES = (dt.date(2026, 10, 11), dt.date(2026, 10, 12), dt.date(2026, 10, 13))
 STRIP_SIZE = (29, 7)
 
 
-def forecast_for(date: dt.date, *, version: str = "0.0.1", notes: str | None = None) -> Forecast:
-    """The stub forecast moved to `date`, with its own model version (and notes, if given)."""
+def forecast_for(
+    date: dt.date,
+    *,
+    version: str = "0.0.1",
+    notes: str | None = None,
+    model_name: str | None = None,
+) -> Forecast:
+    """The stub forecast moved to `date`, with its own model version (notes and name, if given)."""
     data = helpers.stub_dict()
     data["date"] = date.isoformat()
     data["model"]["version"] = version
+    if model_name is not None:
+        data["model"]["name"] = model_name
     if notes is not None:
         data["notes"] = notes
     return Forecast.model_validate(data)
@@ -45,10 +53,11 @@ def seal_date(
     *,
     version: str = "0.0.1",
     notes: str | None = None,
+    model_name: str | None = None,
     late: bool = False,
 ) -> SealResult:
     """Seal one date into `ledger`; `late` makes the timestamp arrive after sunset."""
-    forecast = forecast_for(date, version=version, notes=notes)
+    forecast = forecast_for(date, version=version, notes=notes, model_name=model_name)
     digest = helpers.digest_of(forecast)
     make_reply = helpers.tsr_after_sunset if late else helpers.tsr_before_sunset
     monkeypatch.setattr(tsa, "post_request", helpers.FakeTsa(make_reply(date, digest)))

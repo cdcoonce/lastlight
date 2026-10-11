@@ -18,6 +18,7 @@ from html_probe import Probe, read_page
 from lastlight.privacy import contains_clock_time
 from lastlight.publish import build_site
 from lastlight.seal import ledger_paths, tsa
+from lastlight.seal.ledger import VerifyResult
 
 OLDEST, MIDDLE, NEWEST = factory.DATES
 REPO_URL = "https://github.com/cdcoonce/lastlight"
@@ -216,6 +217,58 @@ def test_the_forecast_notes_are_escaped_not_interpreted(
     assert "<script" not in page and "<b>" not in page
     assert "&lt;script&gt;" in page
     assert markup in read_page(out, "2026-10-11.html").text
+
+
+HOSTILE = '<script>alert("x")</script> & <img src=x onerror=alert(1)>'
+HOSTILE_ESCAPED = (
+    "&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; &lt;img src=x onerror=alert(1)&gt;"
+)
+
+
+def assert_inert(out: Path, page: str, shown: str) -> None:
+    """`page` writes `shown` as text: escaped in the file, no element or attribute made of it."""
+    raw = (out / page).read_text(encoding="utf-8")
+    assert "<script" not in raw and "onerror=alert(1)>" not in raw, page
+    probe = read_page(out, page)
+    assert probe.find("script") == [], page
+    assert all("onerror" not in image.attrs for image in probe.find("img")), page
+    assert shown in probe.text, page
+
+
+def test_a_hostile_model_name_and_version_are_escaped_on_every_page_that_shows_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger = tmp_path / "ledger"
+    name, version = f"{HOSTILE} name", f'{HOSTILE} v"1.0"'
+    factory.seal_date(ledger, NEWEST, monkeypatch, version=version, model_name=name)
+    factory.write_strip(ledger, NEWEST)
+    out = tmp_path / "site"
+    assert build_site(ledger, out).findings == ()
+    escaped = f"{HOSTILE_ESCAPED} name {HOSTILE_ESCAPED} v&quot;1.0&quot;"
+    for page in ("index.html", "2026-10-13.html"):
+        assert escaped in (out / page).read_text(encoding="utf-8"), page
+        assert_inert(out, page, f"{name} {version}")
+
+
+def test_a_hostile_verification_reason_is_escaped_on_every_page_that_shows_it(
+    ledger_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reason = f'late seal "{HOSTILE}"'
+    monkeypatch.setattr(
+        "lastlight.publish.ledger.verify", lambda date, ledger: VerifyResult(False, reason)
+    )
+    out = tmp_path / "site"
+    assert build_site(ledger_dir, out).findings == ()
+    for page in html_pages(out):
+        raw = page.read_text(encoding="utf-8")
+        assert "<script" not in raw and "onerror=alert(1)>" not in raw, page.name
+        assert read_page(out, page.name).find("script") == [], page.name
+    for date in factory.DATES:
+        page = f"{date}.html"
+        assert f"late seal &quot;{HOSTILE_ESCAPED}&quot;" in (out / page).read_text(
+            encoding="utf-8"
+        )
+        assert_inert(out, page, reason)
 
 
 # --- accessibility --------------------------------------------------------------------------
