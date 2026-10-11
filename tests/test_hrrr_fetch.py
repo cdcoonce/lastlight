@@ -388,3 +388,31 @@ def test_fetch_fields_refuses_two_fields_with_the_same_name(tmp_path: Path) -> N
 
 def test_byte_range_dataclass_is_hashable_for_use_as_a_cache_key() -> None:
     assert len({ByteRange(1, 2), ByteRange(1, 2), ByteRange(3, None)}) == 2
+
+
+# --- digests of what was read (issue #8) ----------------------------------------------------------
+
+
+def test_each_decoded_field_carries_the_sha256_of_its_raw_message(tmp_path: Path) -> None:
+    import hashlib
+
+    fields = fetch_fields(
+        support.CYCLE_DATE, support.CYCLE_HOUR, 0, DEFAULT_FIELDS, tmp_path,
+        transport=support.crop_transport(),
+    )  # fmt: skip
+    assert list(fields.digests) == [spec.name for spec in DEFAULT_FIELDS]
+    for spec in DEFAULT_FIELDS:
+        expected = hashlib.sha256(support.crop_message(spec.name)).hexdigest()
+        assert fields.digests[spec.name] == expected
+
+
+def test_the_digests_do_not_change_when_the_bytes_come_from_the_cache(tmp_path: Path) -> None:
+    first = fetch_fields(
+        support.CYCLE_DATE, support.CYCLE_HOUR, 0, DEFAULT_FIELDS, tmp_path,
+        transport=support.crop_transport(),
+    )  # fmt: skip
+    second = fetch_fields(
+        support.CYCLE_DATE, support.CYCLE_HOUR, 0, DEFAULT_FIELDS, tmp_path,
+        transport=support.crop_transport(),
+    )  # fmt: skip
+    assert first.digests == second.digests

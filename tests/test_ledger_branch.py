@@ -342,30 +342,25 @@ def test_a_failed_push_does_not_echo_the_token(
 # --- the command --------------------------------------------------------------------------
 
 
-def test_the_command_opens_and_publishes_and_reports_through_github_output(
+def test_the_command_opens_and_publishes(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
     checkout: Path,
     remote: Path,
     worktree: Path,
 ) -> None:
-    output_file = tmp_path / "github-output"
-    monkeypatch.setenv("GITHUB_OUTPUT", str(output_file))
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
 
     code = main(["ledger-branch", "open", "--worktree", str(worktree), "--repo", str(checkout)])
-    assert code == 0 and "created" in capsys.readouterr().out
+    assert code == 0 and "new orphan" in capsys.readouterr().out
 
     assert main(["ledger-branch", "publish", "--worktree", str(worktree)]) == 0
     assert "nothing to publish" in capsys.readouterr().out
-    assert output_file.read_text() == "pushed=false\n"
 
     write_seal(worktree)
     assert main(["ledger-branch", "publish", "--worktree", str(worktree)]) == 0
     out = capsys.readouterr().out
     assert f"seal: 2026-10-10 {DIGEST[:12]}" in out
-    assert output_file.read_text() == "pushed=false\npushed=true\n"
     assert git(remote, "log", "-1", "--format=%s", "ledger") == f"seal: 2026-10-10 {DIGEST[:12]}"
 
 

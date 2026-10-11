@@ -126,7 +126,21 @@ def test_the_strip_is_the_curve_painted_as_a_png(painting: Painting) -> None:
     with Image.open(io.BytesIO(painting.strip_png)) as image:
         assert image.format == "PNG" and image.mode == "RGB"
         assert image.size == expected.size == (464, 168)
-        assert list(image.getdata()) == list(expected.getdata())
+        assert image.tobytes() == expected.tobytes()
+
+
+def test_without_a_strip_the_forecast_names_none_and_no_png_is_made(tmp_path: Path) -> None:
+    bare = paint(
+        support.EVENING,
+        transport=support.transport(),
+        now_utc=support.before_sunset(),
+        cache_dir=tmp_path,
+        cycle_hour=support.CYCLE_HOUR,
+        forecast_hour=support.FORECAST_HOUR,
+        code_sha=support.CODE_SHA,
+        with_strip=False,
+    )
+    assert bare.strip_png is None and bare.forecast.strip_sha256 is None
 
 
 def test_the_strip_carries_no_metadata_at_all(painting: Painting) -> None:
