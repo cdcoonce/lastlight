@@ -15,6 +15,11 @@ A low cloud deck hides the lit horizon (the first observed evening, 2026-10-10, 
 overcast and a dull one); moderate aerosol reddens the twilight, and the term saturates at an
 optical depth of 0.4. Both weights are guesses, not fits. The sd is 0.25, so any evening's
 outcome lies well inside two sd of any mean and the rule is scored as the weak prior it is.
+
+The mean ranges over 0.15 (overcast, clean air) to 0.70 (clear, aerosol at the cap) and so is on
+the zero-to-one scale by construction; there is no clamp, because with these weights it could
+never act. `tests/test_vividness.py` pins both ends, so a change of weights that left the scale
+fails there instead of being quietly clipped.
 """
 
 from __future__ import annotations
@@ -54,4 +59,4 @@ def vividness_v0(low_cloud_pct: float, aod_550: float) -> Vividness:
         - _CLOUD_WEIGHT * (low_cloud_pct / 100.0)
         + _AEROSOL_WEIGHT * min(aod_550 / _AEROSOL_CAP_AOD, 1.0)
     )
-    return Vividness(mean=min(max(mean, 0.0), 1.0), sd=VIVIDNESS_SD)
+    return Vividness(mean=mean, sd=VIVIDNESS_SD)

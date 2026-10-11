@@ -52,6 +52,21 @@ def test_the_mean_stays_on_the_zero_to_one_scale(low_cloud_pct: float, aod_550: 
     assert 0.0 <= vividness_v0(low_cloud_pct, aod_550).mean <= 1.0
 
 
+def test_the_weights_keep_the_mean_between_015_and_070_so_no_clamp_is_needed() -> None:
+    # The formula is monotone in both inputs and the aerosol term is capped, so its extremes
+    # are the overcast clean corner and the clear, saturated-aerosol corner. Both are inside the
+    # scale, which is why the rule has no clamp: a weight change that left the scale would make
+    # these two numbers (and the test above) fail rather than be hidden.
+    assert vividness_v0(100.0, 0.0).mean == pytest.approx(0.15)
+    assert vividness_v0(0.0, 0.4).mean == pytest.approx(0.70)
+    grid = [
+        vividness_v0(cloud, aod).mean
+        for cloud in range(0, 101, 5)
+        for aod in (0.0, 0.01, 0.06, 0.2, 0.39, 0.4, 1.0, 10.0)
+    ]
+    assert min(grid) == pytest.approx(0.15) and max(grid) == pytest.approx(0.70)
+
+
 @pytest.mark.parametrize("low_cloud_pct", [-0.1, 100.1, float("nan"), float("inf")])
 def test_cloud_cover_must_be_a_percentage(low_cloud_pct: float) -> None:
     with pytest.raises(ValueError, match="low_cloud_pct"):
