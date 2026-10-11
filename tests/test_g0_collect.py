@@ -193,7 +193,9 @@ def test_a_hrrr_message_from_another_run_is_a_dropped_date(tmp_path) -> None:
 def test_an_aerosol_message_from_another_run_is_a_dropped_date(tmp_path) -> None:
     transport = combined_transport()
     plan = gefs.aerosol_run(EVENING, LAT, LON)
-    transport.files[gefs.chem_url(plan.cycle_date, plan.cycle_hour, 0)] = gefs_support.CROP_GRIB
+    transport.files[gefs.chem_url(plan.cycle_date, plan.cycle_hour, 0)] = gefs_support.redated_crop(
+        dt.date(2025, 9, 29), 0
+    )
     record = collector(tmp_path, transport).collect(EVENING)
     assert record.drop_reason == "aerosol_unreadable"
 

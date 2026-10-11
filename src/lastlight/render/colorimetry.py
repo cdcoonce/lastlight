@@ -97,3 +97,8 @@ def lab_to_srgb(lightness: float, a: float, b: float) -> tuple[float, float, flo
     _, _, white_point = _tables()
     xyz = _colour().Lab_to_XYZ(np.array([lightness, a, b]), illuminant=white_point)
     return _xyz_to_srgb(xyz)
+
+
+def delta_e_2000(lab_a: np.ndarray, lab_b: np.ndarray) -> np.ndarray:
+    """CIE 2000 colour difference between CIELAB colours (last axis of size 3), elementwise."""
+    return np.asarray(_colour().delta_E(lab_a, lab_b, method="CIE 2000"))
