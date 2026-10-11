@@ -5,7 +5,6 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import io
-import json
 import urllib.error
 import urllib.request
 from typing import Any
@@ -83,12 +82,12 @@ def test_the_raw_recorded_response_is_the_timestamp_of_the_pre_strip_canonical_f
 
 
 def test_the_canonicaliser_still_makes_those_bytes_apart_from_the_new_null_member() -> None:
-    document = json.loads(canonical_bytes(helpers.stub_forecast()))
-    assert document.pop("strip_sha256") is None
-    rebuilt = json.dumps(
-        document, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    ).encode()
-    assert rebuilt == PRE_STRIP_CANONICAL
+    # The member sits between `schema_version` and `vividness` (keys are sorted), so taking it
+    # out leaves exactly the bytes that were stamped; any other difference in the canonical form
+    # (key order, spacing, rounding, escaping) would show here against the recorded response.
+    made = canonical_bytes(helpers.stub_forecast())
+    assert made.count(b'"strip_sha256":null,') == 1
+    assert made.replace(b'"strip_sha256":null,', b"") == PRE_STRIP_CANONICAL
     assert helpers.STUB_CANONICAL.replace(b'"strip_sha256":null,', b"") == PRE_STRIP_CANONICAL
 
 
