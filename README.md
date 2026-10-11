@@ -22,6 +22,7 @@ Expect honest nulls: a year of evenings can detect a moderate edge, not a tiny o
 ```sh
 uv sync
 uv run lastlight --version
+uv run lastlight hrrr-transect --date 2026-10-10   # HRRR cloud, aerosol and vapour along the sightline
 uv run ruff check && uv run ruff format --check && uv run pytest
 uv run lastlight privacy-scan
 ```

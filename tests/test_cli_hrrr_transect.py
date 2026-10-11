@@ -42,7 +42,7 @@ def _rows(out: str) -> list[list[str]]:
     return [line.split() for line in out.splitlines() if re.match(r"\s*\d+\s", line)]
 
 
-# --- registration --------------------------------------------------------------------------------------------
+# --- registration ---------------------------------------------------------------------------------
 
 
 def test_the_command_is_discovered_by_name() -> None:
@@ -66,11 +66,13 @@ def test_starting_the_cli_does_not_import_the_grib_library() -> None:
         "import sys; from lastlight.cli import main; main(['--version']); "
         "sys.exit(1 if 'eccodes' in sys.modules else 0)"
     )
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=60
+    )
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-# --- the table -------------------------------------------------------------------------------------------------
+# --- the table ------------------------------------------------------------------------------------
 
 
 def test_prints_one_row_per_25_km_out_to_400_km(
@@ -152,7 +154,7 @@ def test_a_second_run_reads_the_cache(capsys: pytest.CaptureFixture[str], tmp_pa
     assert again.ranged_gets() == []
 
 
-# --- formatting values -------------------------------------------------------------------------------------------
+# --- formatting values ----------------------------------------------------------------------------
 
 
 def _sample(field: str, value: float | None, index: int = 0) -> TransectSample:
@@ -197,7 +199,7 @@ def test_format_refuses_samples_that_do_not_match_the_distances() -> None:
         )
 
 
-# --- failures ----------------------------------------------------------------------------------------------------
+# --- failures -------------------------------------------------------------------------------------
 
 
 def test_a_missing_run_is_exit_1_with_the_reason_on_stderr_and_nothing_on_stdout(
