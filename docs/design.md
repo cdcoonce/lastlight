@@ -12,7 +12,7 @@ Two quantities are forecast and scored:
 
 | Target | What it is | Score |
 | --- | --- | --- |
-| **Curve** | Colour of the sky at fixed view elevations in each camera's view direction, as a function of sun elevation from +6 degrees to -8 degrees | Tier A: error in the within-frame log-chromaticity contrast profile, per elevation band. Tier B: delta-E 2000 in camera-native space |
+| **Curve** | Colour of the sky at fixed view elevations in each camera's view direction, as a function of sun elevation from +6 degrees to -8 degrees (the forecast renders that whole range; tier A scores the part its observed window keeps, by default +6 to -6 degrees, and `lastlight observe --min-sun-elev -8` extends it to -8) | Tier A: error in the within-frame log-chromaticity contrast profile, per elevation band. Tier B: delta-E 2000 in camera-native space |
 | **Vividness** | One pre-registered scalar per evening summarising how much saturated warm colour the western sky shows during twilight (definition frozen in `docs/gates/vividness.md` before the first scored evening) | CRPS of the forecast distribution |
 
 Both are scored against two baselines: **climatology** (smoothed day-of-year mean of observed history, built only from evenings before the scored one) and **persistence** (yesterday's observation). Results are split by **regime**: clear, dust, smoke, cloud. The regime label comes from data the forecast did not see (GOES clear-sky mask along the sightline, camera cloud fraction, surface PM).
