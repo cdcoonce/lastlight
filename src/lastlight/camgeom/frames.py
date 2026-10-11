@@ -54,14 +54,32 @@ def discover_frames(root: Path) -> list[FrameFile]:
     return sorted(found, key=lambda frame: (frame.when_utc or _NEVER, frame.path.name))
 
 
+class FrameError(ValueError):
+    """A frame cannot be read. The message names the file (not its folder) and the reason."""
+
+
+def _reason(error: BaseException) -> str:
+    return " ".join(str(error).split())[:120] or type(error).__name__
+
+
 def load_rgb(path: Path) -> np.ndarray:
-    """A frame as rows by columns by three uint8 values."""
-    with Image.open(path) as image:
-        return np.array(image.convert("RGB"))
+    """A frame as rows by columns by three uint8 values.
+
+    A frame is untrusted input: it may be truncated, empty or not an image at all. Every way
+    of failing to decode it is a `FrameError` with a one-line reason, never a traceback.
+    """
+    try:
+        with Image.open(path) as image:
+            return np.array(image.convert("RGB"))
+    except (OSError, SyntaxError, ValueError, Image.DecompressionBombError) as error:
+        raise FrameError(f"{path.name} is not a readable JPEG ({_reason(error)})") from error
 
 
 def frame_sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as error:
+        raise FrameError(f"{path.name} cannot be read ({_reason(error)})") from error
 
 
 def evening_of(when_utc: dt.datetime, lon: float) -> dt.date:

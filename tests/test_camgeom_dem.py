@@ -23,7 +23,9 @@ from camgeom_synthetic import (
 )
 
 from lastlight.camgeom.dem import (
+    MIN_TILE_BYTES,
     Dem,
+    DemError,
     fetch_tiles,
     horizon_profile,
     read_dem,
@@ -266,28 +268,92 @@ def test_a_box_that_ends_exactly_on_a_tile_edge_does_not_pull_in_the_next_tile()
     assert edges == [tile_name(TILE_LAT, TILE_LON)]
 
 
+def fake_tile(size: int = MIN_TILE_BYTES + 100) -> bytes:
+    """Bytes that pass for a tile: they start like a TIFF and are not a stub."""
+    return b"II*\x00" + b"\x01" * (size - 4)
+
+
 def test_fetch_tiles_downloads_once_and_reuses_the_cache(tmp_path: Path) -> None:
     calls: list[str] = []
 
     def fake_fetch(url: str) -> bytes:
         calls.append(url)
-        return b"tile-bytes"
+        return fake_tile()
 
     names = [tile_name(33, -113)]
     first = fetch_tiles(names, tmp_path, fetch=fake_fetch)
     second = fetch_tiles(names, tmp_path, fetch=fake_fetch)
     assert calls == [tile_url(names[0])]
     assert first == second == [tmp_path / f"{names[0]}.tif"]
-    assert first[0].read_bytes() == b"tile-bytes"
+    assert first[0].read_bytes() == fake_tile()
 
 
 def test_a_failed_download_leaves_no_partial_file_behind(tmp_path: Path) -> None:
     def broken(url: str) -> bytes:
         raise OSError("connection reset")
 
-    with pytest.raises(OSError, match="connection reset"):
+    with pytest.raises(DemError, match="connection reset"):
         fetch_tiles([tile_name(33, -113)], tmp_path, fetch=broken)
     assert list(tmp_path.iterdir()) == []
+
+
+BAD_TILES = {
+    "wrong_magic": b"<?xml version='1.0'?>" + b" " * MIN_TILE_BYTES,
+    "html_error_page": b"<html><body>Access Denied</body></html>",
+    "tiff_header_only": b"II*\x00" + b"\x00" * 12,
+    "empty": b"",
+}
+
+
+@pytest.mark.parametrize("bad", BAD_TILES.values(), ids=BAD_TILES.keys())
+def test_a_cached_tile_that_cannot_be_a_tile_is_discarded_and_fetched_again(
+    tmp_path: Path, bad: bytes
+) -> None:
+    name = tile_name(TILE_LAT, TILE_LON)
+    (tmp_path / f"{name}.tif").write_bytes(bad)
+    calls: list[str] = []
+
+    def fetch(url: str) -> bytes:
+        calls.append(url)
+        return fake_tile()
+
+    (path,) = fetch_tiles([name], tmp_path, fetch=fetch)
+    assert calls == [tile_url(name)]
+    assert path.read_bytes() == fake_tile()
+
+
+@pytest.mark.parametrize("bad", BAD_TILES.values(), ids=BAD_TILES.keys())
+def test_a_download_that_is_not_a_tile_is_refused_and_never_cached(
+    tmp_path: Path, bad: bytes
+) -> None:
+    # S3 answers a missing or forbidden object with a small XML or HTML page and an HTTP error,
+    # but a proxy can hand back such a page with a success status; it must not become the tile.
+    with pytest.raises(DemError, match="not a usable tile"):
+        fetch_tiles([tile_name(TILE_LAT, TILE_LON)], tmp_path, fetch=lambda url: bad)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_good_cached_tile_is_used_without_a_fetch(tmp_path: Path) -> None:
+    name = tile_name(TILE_LAT, TILE_LON)
+    (tmp_path / f"{name}.tif").write_bytes(fake_tile())
+
+    def never(url: str) -> bytes:
+        raise AssertionError("a good tile in the cache must not be downloaded again")
+
+    assert fetch_tiles([name], tmp_path, fetch=never) == [tmp_path / f"{name}.tif"]
+
+
+def test_a_tile_that_is_not_a_readable_raster_is_a_dem_error_naming_it(tmp_path: Path) -> None:
+    broken = tmp_path / "broken.tif"
+    broken.write_bytes(fake_tile(5000))  # starts like a TIFF, holds nothing
+    with pytest.raises(DemError, match="broken.tif"):
+        read_dem([broken], bounds=(LEFT, TOP - 1, LEFT + 1, TOP))
+    garbage = tmp_path / "garbage.tif"
+    garbage.write_bytes(b"not a raster at all" * 100)
+    with pytest.raises(DemError, match="garbage.tif"):
+        read_dem([garbage], bounds=(LEFT, TOP - 1, LEFT + 1, TOP))
+    with pytest.raises(DemError, match="missing.tif"):
+        read_dem([tmp_path / "missing.tif"], bounds=(LEFT, TOP - 1, LEFT + 1, TOP))
 
 
 def test_an_interrupted_write_leaves_neither_the_tile_nor_a_partial_file(
@@ -301,13 +367,13 @@ def test_an_interrupted_write_leaves_neither_the_tile_nor_a_partial_file(
 
     monkeypatch.setattr(Path, "write_bytes", half_then_fail)
     name = tile_name(TILE_LAT, TILE_LON)
-    with pytest.raises(OSError, match="disk full"):
-        fetch_tiles([name], tmp_path, fetch=lambda url: b"x" * 100)
+    with pytest.raises(DemError, match="disk full"):
+        fetch_tiles([name], tmp_path, fetch=lambda url: fake_tile())
     assert list(tmp_path.iterdir()) == [], "a truncated tile would be trusted by the next run"
 
     monkeypatch.undo()
-    (path,) = fetch_tiles([name], tmp_path, fetch=lambda url: b"x" * 100)
-    assert path.read_bytes() == b"x" * 100
+    (path,) = fetch_tiles([name], tmp_path, fetch=lambda url: fake_tile())
+    assert path.read_bytes() == fake_tile()
 
 
 @pytest.mark.network

@@ -12,6 +12,7 @@ from camgeom_synthetic import REF_LAT, REF_LON
 from PIL import Image
 
 from lastlight.camgeom.frames import (
+    FrameError,
     discover_frames,
     evening_of,
     frame_sha256,
@@ -79,6 +80,38 @@ def test_a_frame_decodes_to_rgb_rows_by_columns_by_three(tmp_path: Path) -> None
     assert abs(int(image.mean()) - 100) <= 2
 
 
+def noisy_jpeg(path: Path) -> Path:
+    noise = np.random.default_rng(0).integers(0, 256, (120, 160, 3), dtype=np.uint8)
+    Image.fromarray(noise).save(path, quality=95)
+    return path
+
+
+def test_a_truncated_jpeg_is_a_frame_error_with_a_one_line_reason(tmp_path: Path) -> None:
+    whole = noisy_jpeg(tmp_path / "whole.jpg").read_bytes()
+    cut = tmp_path / "cut.jpg"
+    cut.write_bytes(whole[: len(whole) // 3])
+    with pytest.raises(FrameError, match="cut.jpg") as error:
+        load_rgb(cut)
+    assert "\n" not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [b"", b"this is a text file named like a picture", b"\xff\xd8\xff" + b"\x00" * 20],
+    ids=["zero_bytes", "not_an_image", "bare_jpeg_signature"],
+)
+def test_a_file_that_is_not_a_picture_is_a_frame_error(tmp_path: Path, content: bytes) -> None:
+    bad = tmp_path / "bad.jpg"
+    bad.write_bytes(content)
+    with pytest.raises(FrameError, match="bad.jpg"):
+        load_rgb(bad)
+
+
+def test_a_frame_that_cannot_be_read_for_its_hash_is_a_frame_error(tmp_path: Path) -> None:
+    with pytest.raises(FrameError, match="gone.jpg"):
+        frame_sha256(tmp_path / "gone.jpg")
+
+
 def test_a_frame_is_identified_by_the_sha256_of_its_bytes(tmp_path: Path) -> None:
     path = save_jpeg(tmp_path / "f.jpg")
     assert frame_sha256(path) == hashlib.sha256(path.read_bytes()).hexdigest()
@@ -124,6 +157,8 @@ def test_the_mount_height_defaults_to_ten_metres(tmp_path: Path) -> None:
         ("[OTHER]\nlat = 1.0\nlon = 2.0\nview_azimuth_deg = 3.0\n", "SYN1"),
         ("[SYN1]\nlon = 2.0\nview_azimuth_deg = 3.0\n", "lat"),
         ("[SYN1]\nlat = 1.0\nlon = 2.0\n", "view_azimuth_deg"),
+        ("[SYN1]\nlat = 1.0\nlon = 2.0\nview_azimuth_deg = 400.0\n", "view_azimuth_deg"),
+        ("[SYN1]\nlat = 1.0\nlon = 2.0\nview_azimuth_deg = -5.0\n", "view_azimuth_deg"),
         ("[SYN1]\nlat = 91.0\nlon = 2.0\nview_azimuth_deg = 3.0\n", "lat"),
         ("[SYN1]\nlat = 1.0\nlon = 200.0\nview_azimuth_deg = 3.0\n", "lon"),
         ("[SYN1]\nlat = 1.0\nlon = 2.0\nview_azimuth_deg = 3.0\nmount_height_m = -5\n", "mount"),

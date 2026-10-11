@@ -11,8 +11,13 @@ afterwards: a point at ground distance s and height H is seen at
 
     atan2((R + H) cos(s / R) - (R + h), (R + H) sin(s / R))
 
-above the horizontal at an observer of height h. Atmospheric refraction is not modelled: over
-50 km it moves a ridge by under 0.02 degrees, below the other errors of the fit.
+above the horizontal at an observer of height h. Atmospheric refraction is not modelled: with
+the usual coefficient of 0.13 it lifts a ridge 50 km away by about 0.03 degrees (k s / 2R) and
+a nearer one by less, which is below the other errors of the fit.
+
+The tiles are the Copernicus DEM GLO-30, (c) DLR e.V. 2010-2014 and (c) Airbus Defence and
+Space GmbH 2014-2018, provided under COPERNICUS by the European Union and ESA; the README
+carries the credit the licence asks for.
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ from pathlib import Path
 
 import numpy as np
 import rasterio
+from rasterio.errors import RasterioError
 from rasterio.merge import merge
 
 from lastlight import __version__
@@ -36,7 +42,16 @@ USER_AGENT = f"lastlight/{__version__} (+https://github.com/cdcoonce/lastlight)"
 DEFAULT_CACHE_DIR = Path("~/.cache/lastlight/dem").expanduser()
 CACHE_ENV = "LASTLIGHT_DEM_CACHE"
 
+# A cached tile is trusted only if it starts like a TIFF and is not a stub: a real tile is
+# tens of megabytes, while an error page served with a success status is a few hundred bytes.
+MIN_TILE_BYTES = 1024
+_TIFF_SIGNATURES = (b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+")
+
 Fetch = Callable[[str], bytes]
+
+
+class DemError(ValueError):
+    """A terrain tile cannot be fetched, trusted or read. The message says which and why."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,34 +215,79 @@ def default_cache_dir() -> Path:
     return Path(override).expanduser() if override else DEFAULT_CACHE_DIR
 
 
+def _tile_problem(head: bytes, size: int) -> str | None:
+    """Why a file of this size starting with these bytes cannot be a tile, or None."""
+    if size < MIN_TILE_BYTES:
+        return f"only {size} bytes, a tile is far larger"
+    if head[:4] not in _TIFF_SIGNATURES:
+        return "it does not start like a TIFF"
+    return None
+
+
+def _file_problem(path: Path) -> str | None:
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(4)
+        return _tile_problem(head, path.stat().st_size)
+    except OSError as error:
+        return f"unreadable ({error})"
+
+
 def fetch_tiles(names: Iterable[str], cache_dir: Path, *, fetch: Fetch = _http_get) -> list[Path]:
     """Local paths of the named tiles, downloading any that the cache does not hold yet.
 
-    A download is written to a temporary name and renamed when complete, so an interrupted
-    transfer never leaves a truncated tile that a later run would trust.
+    A download is checked (it must start like a TIFF and not be a stub), written to a temporary
+    name and renamed when complete, so an interrupted transfer or an error page never leaves a
+    tile that a later run would trust. A tile already in the cache is checked the same way
+    before it is used, and a bad one is discarded and fetched again. A failed fetch is a
+    `DemError`.
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
     paths = []
     for name in names:
         path = cache_dir / f"{name}.tif"
-        if not path.exists():
-            partial = path.with_suffix(".tif.part")
-            try:
-                partial.write_bytes(fetch(tile_url(name)))
-                partial.replace(path)
-            finally:
-                partial.unlink(missing_ok=True)
+        if path.exists():
+            if _file_problem(path) is None:
+                paths.append(path)
+                continue
+            path.unlink()  # a tile that cannot be one is not worth keeping
+        partial = path.with_suffix(".tif.part")
+        try:
+            data = fetch(tile_url(name))
+            problem = _tile_problem(data[:4], len(data))
+            if problem is not None:
+                raise DemError(f"the download of tile {name} is not a usable tile: {problem}")
+            partial.write_bytes(data)
+            partial.replace(path)
+        except OSError as error:
+            raise DemError(f"could not fetch tile {name}: {error}") from error
+        finally:
+            partial.unlink(missing_ok=True)
         paths.append(path)
     return paths
 
 
 def read_dem(paths: Sequence[Path], bounds: tuple[float, float, float, float]) -> Dem:
-    """Mosaic the tiles that cover `bounds` (west, south, east, north), NaN where none does."""
-    datasets = [rasterio.open(path) for path in paths]
+    """Mosaic the tiles that cover `bounds` (west, south, east, north), NaN where none does.
+
+    A tile that cannot be opened or decoded is a `DemError` naming it.
+    """
+    datasets = []
     try:
-        mosaic, transform = merge(
-            datasets, bounds=bounds, nodata=np.nan, dtype="float32", method="first"
-        )
+        for path in paths:
+            try:
+                datasets.append(rasterio.open(path))
+            except (RasterioError, OSError) as error:
+                raise DemError(f"tile {path.name} cannot be read ({_reason(error)})") from error
+        try:
+            mosaic, transform = merge(
+                datasets, bounds=bounds, nodata=np.nan, dtype="float32", method="first"
+            )
+        except (RasterioError, OSError) as error:
+            names = ", ".join(path.name for path in paths)
+            raise DemError(
+                f"the terrain tiles ({names}) cannot be decoded ({_reason(error)})"
+            ) from error
     finally:
         for dataset in datasets:
             dataset.close()
@@ -239,3 +299,7 @@ def read_dem(paths: Sequence[Path], bounds: tuple[float, float, float, float]) -
         step_lat_deg=step_lat,
         step_lon_deg=step_lon,
     )
+
+
+def _reason(error: BaseException) -> str:
+    return " ".join(str(error).split())[:120] or type(error).__name__
