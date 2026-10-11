@@ -205,6 +205,22 @@ def _decimals(ticks: Sequence[float]) -> int:
     return 4
 
 
+def axis_limit(values: np.ndarray, *, percentile: float = 99.0, floor: float = 0.0) -> float:
+    """An axis limit that one extreme value cannot set: a high percentile, with 5 percent room."""
+    return max(float(np.percentile(values, percentile)) * 1.05, floor)
+
+
+def clipped_histogram(
+    values: np.ndarray, *, limit: float, bins: int
+) -> tuple[np.ndarray, np.ndarray, int]:
+    """Histogram of `values` on [0, limit] in `bins` bars, losing none: values past the limit
+    are counted in the last bar. Returns the edges, the counts and how many were past the limit."""
+    edges = np.linspace(0.0, limit, bins + 1)
+    clipped = int((values > limit).sum())
+    counts, _ = np.histogram(np.minimum(values, limit), bins=edges)
+    return edges, counts, clipped
+
+
 def _legend(canvas: Canvas, x: int, y: int, entries: Sequence[tuple[str, Colour]]) -> None:
     for index, (label, colour) in enumerate(entries):
         top = y + index * 22
@@ -216,18 +232,22 @@ def _legend(canvas: Canvas, x: int, y: int, entries: Sequence[tuple[str, Colour]
 
 
 def distribution_figure(study: Study) -> bytes:
-    """One histogram of D(d, s) per band, with the threshold and the share at or above it."""
+    """One histogram of D(d, s) per band, with the threshold and the share at or above it.
+
+    The axis stops at a high percentile of all the D values so that a single dust storm does not
+    squeeze the other dates into one bar; the dates past it are in the last bar and counted in
+    the note.
+    """
     outcome = study.outcomes["nominal"]
     canvas = Canvas(1200, 820)
     canvas.text(
         (600, 14), "Distribution of D(d, s) over the dates used", font=canvas.large, anchor="ma"
     )
-    limit = float(max(outcome.distances.max(), stats.THRESHOLD * 2)) * 1.05
-    edges = np.linspace(0.0, limit, 25)
+    limit = axis_limit(outcome.distances, percentile=98.0, floor=stats.THRESHOLD * 2)
     boxes = [(90, 80, 560, 340), (680, 80, 1150, 340), (90, 450, 560, 710), (680, 450, 1150, 710)]
     for index, (name, box) in enumerate(zip(study.bands, boxes, strict=True)):
         values = outcome.distances[:, index]
-        counts, _ = np.histogram(values, bins=edges)
+        edges, counts, clipped = clipped_histogram(values, limit=limit, bins=25)
         axes = Axes(canvas, box, (0.0, limit), (0.0, float(max(counts.max(), 1)) * 1.1))
         xticks = nice_ticks(0.0, limit, 6)
         yticks = nice_ticks(0.0, float(counts.max()) * 1.1, 4)
@@ -247,6 +267,13 @@ def distribution_figure(study: Study) -> bytes:
             f"{100 * share:.0f}% of dates at or above {stats.THRESHOLD}",
             anchor="ra",
         )
+        if clipped:
+            canvas.text(
+                (box[2] - 8, box[1] + 28),
+                f"{clipped} {'date' if clipped == 1 else 'dates'} above {limit:.2f} "
+                "in the last bar",
+                anchor="ra",
+            )
     return canvas.png()
 
 
@@ -270,23 +297,36 @@ def _date_ticks(days: Sequence[dt.date]) -> list[tuple[float, str]]:
 
 
 def by_date_figure(study: Study) -> bytes:
-    """D(d, s) for the counted bands against the date, and the dates that meet the rule."""
+    """D(d, s) for the counted bands against the date, and the dates that meet the rule.
+
+    The axis stops at a high percentile so that one dust storm does not flatten the rest; a value
+    past it is drawn on the top edge and counted in the note.
+    """
     outcome = study.outcomes["nominal"]
     days = list(study.used_dates)
     ordinals = [float(day.toordinal()) for day in days]
     canvas = Canvas(1200, 640)
     canvas.text((600, 14), "D(d, s) by date, counted bands", font=canvas.large, anchor="ma")
-    top = float(outcome.distances[:, :3].max())
-    ylim = (0.0, max(top, stats.THRESHOLD * 2) * 1.1)
+    counted = outcome.distances[:, :3]
+    top = axis_limit(counted, percentile=99.0, floor=stats.THRESHOLD * 2)
     span = (ordinals[0] - 1.0, max(ordinals[-1], ordinals[0] + 1.0) + 1.0)
-    axes = Axes(canvas, (100, 70, 1150, 470), span, ylim)
-    yticks = nice_ticks(*ylim, 5)
+    axes = Axes(canvas, (100, 70, 1150, 470), span, (0.0, top))
+    yticks = nice_ticks(0.0, top, 5)
     axes.frame(_date_ticks(days), _labels(yticks, _decimals(yticks)), ylabel="D(d, s)")
     axes.hline(stats.THRESHOLD, INK, width=2)
     for index, name in enumerate(study.counted_bands):
-        axes.line(ordinals, outcome.distances[:, index], BAND_COLOURS[name], width=2)
-        for x, y in zip(ordinals, outcome.distances[:, index], strict=True):
+        shown = np.minimum(outcome.distances[:, index], top)
+        axes.line(ordinals, shown, BAND_COLOURS[name], width=2)
+        for x, y in zip(ordinals, shown, strict=True):
             axes.marker(x, y, BAND_COLOURS[name], radius=2)
+    clipped = int((counted > top).sum())
+    if clipped:
+        canvas.text(
+            (axes.left + 8, axes.top + 8),
+            f"{clipped} values above {top:.2f} are drawn on the top edge "
+            f"(largest {counted.max():.2f})",
+            anchor="la",
+        )
     strip = Axes(canvas, (100, 520, 1150, 560), span, (0.0, 1.0))
     canvas.draw.rectangle([strip.left, strip.top, strip.right, strip.bottom], outline=INK, width=1)
     for x, meets in zip(ordinals, outcome.meets, strict=True):
@@ -299,7 +339,8 @@ def by_date_figure(study: Study) -> bytes:
         (strip.left, strip.bottom + 8),
         "a mark is a date on which D reaches 0.05 in at least 2 of the 3 counted bands",
     )
-    _legend(canvas, 880, 80, [(name, BAND_COLOURS[name]) for name in study.counted_bands])
+    for position, name in enumerate(study.counted_bands):
+        _legend(canvas, 820 + 110 * position, 44, [(name, BAND_COLOURS[name])])
     return canvas.png()
 
 
@@ -329,7 +370,7 @@ def profile_figure(study: Study) -> bytes:
         which = "lowest" if row == 0 else "highest"
         values = contrast[:, :, band, column]  # (n, 29)
         low, median, high = np.percentile(values, [10, 50, 90], axis=0)
-        ymin, ymax = float(values.min()), float(values.max())
+        ymin, ymax = (float(v) for v in np.percentile(values, [1, 99]))
         pad = max((ymax - ymin) * 0.08, 0.01)
         axes = Axes(
             canvas, box, (ELEVATION_SWEEP[-1], ELEVATION_SWEEP[0]), (ymin - pad, ymax + pad)
