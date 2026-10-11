@@ -99,8 +99,16 @@ def test_a_seal_that_failed_does_not_deploy(job: dict[str, Any]) -> None:
     assert "workflow_run" in condition and "conclusion == 'success'" in condition
 
 
-def test_runs_are_serialised_and_superseded_ones_cancelled(workflow: dict[Any, Any]) -> None:
-    assert workflow["concurrency"]["cancel-in-progress"] is True
+def test_runs_are_serialised_and_a_running_deploy_is_never_cancelled(
+    workflow: dict[Any, Any],
+) -> None:
+    """Concurrency is decided before the job's `if`, so a skipped run still takes the group.
+
+    With cancel-in-progress on, a `workflow_run` for a failed seal (skipped by the job
+    condition) would cancel a deploy that is already running. Queueing is enough: Pages keeps
+    only the newest waiting run.
+    """
+    assert workflow["concurrency"]["cancel-in-progress"] is False
     assert workflow["concurrency"]["group"]
 
 

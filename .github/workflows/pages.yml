@@ -29,9 +29,12 @@ on:
     types: [completed]
   workflow_dispatch:
 
+# Never cancel a running deploy. Concurrency is decided before the job's `if`, so a skipped run
+# (a failed seal) still takes the group and would cancel a deploy that is already under way.
+# Queued runs wait their turn, and a newer waiting run replaces an older one.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
