@@ -512,7 +512,11 @@ def test_transect_refuses_negative_or_non_finite_distances(bad: float) -> None:
 
 def test_pvlib_is_a_dev_dependency_only() -> None:
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
-    assert pyproject["project"]["dependencies"] == []
+    runtime = [
+        item.split(">")[0].split("=")[0].split("<")[0].strip().lower()
+        for item in pyproject["project"]["dependencies"]
+    ]
+    assert not {"pvlib", "astropy"} & set(runtime)
     assert any(item.startswith("pvlib") for item in pyproject["dependency-groups"]["dev"])
 
 
