@@ -12,8 +12,9 @@ matter what the original carried. The scan then checks the result for metadata (
 
 The site also says so when an evening has no seal (`lastlight.publish.missed`). It reports on
 every evening up to `through`: the one given, or else the newest evening whose deadline has
-passed at the build's clock (`now_utc`, or the real one). That is the only place the build reads
-the clock; pass `through` for a build that must not depend on the day it runs.
+passed at the build's clock (`now_utc`, or the real one). The build reads the clock once, for
+that and for one more thing: a `through` later than that evening is refused, because the site
+would call an evening that has not happened missed.
 """
 
 from __future__ import annotations
@@ -61,7 +62,7 @@ class BuildReport:
 
 
 def utc_now() -> dt.datetime:
-    """The build's clock, used only to choose the default `through`."""
+    """The build's clock, used only to choose the default `through` and to bound an explicit one."""
     return dt.datetime.now(dt.UTC)
 
 
@@ -76,16 +77,24 @@ def build_site(
 
     `through` is the newest evening the site reports on; an evening between the first sealed one
     and `through` with no row in the index is shown as missed. By default it is the newest
-    evening whose deadline had passed at `now_utc` (the real clock if not given).
+    evening whose deadline had passed at `now_utc` (the real clock if not given), and it cannot
+    be later: a `BuildError` is raised, before anything is written, for an evening that has not
+    ended.
     """
     if ledger_dir.exists() and not ledger_dir.is_dir():
         raise BuildError(f"the ledger {ledger_dir} is not a directory")
+    newest_closed = default_through(now_utc if now_utc is not None else utc_now())
+    if through is not None and through > newest_closed:
+        raise BuildError(
+            f"--through {through.isoformat()} is an evening that has not ended; the newest "
+            f"evening that has is {newest_closed.isoformat()}"
+        )
     target = Path(os.path.abspath(out_dir))
     _check_output(target)
 
     ledger = read_ledger(ledger_dir)
     if through is None:
-        through = default_through(now_utc if now_utc is not None else utc_now())
+        through = newest_closed
     missed = missed_evenings((evening.date for evening in ledger.evenings), through)
     ledger = dataclasses.replace(ledger, missed=missed)
     warnings = _ledger_warnings(ledger, ledger_dir)

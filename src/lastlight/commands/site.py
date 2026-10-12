@@ -3,10 +3,11 @@
 Thin by design: it parses arguments and prints; the work is `lastlight.publish.build_site`.
 The build runs the privacy scanner over its own output before it finishes. `--through` is the
 newest evening the site reports on: an evening between the first sealed one and it that has no
-seal is listed as missed (default: the newest evening whose deadline has passed). Exit codes:
-0 built, 1 the scan found something (findings are printed and nothing is written), 2 the site
-could not be built (an unreadable ledger, or an output directory that must not be replaced) or
-a usage error.
+seal is listed as missed. The default, and the latest allowed, is the newest evening whose
+deadline has passed: a later `--through` is refused because that evening has not ended. Exit
+codes: 0 built, 1 the scan found something (findings are printed and nothing is written), 2 the
+site could not be built (an unreadable ledger, an output directory that must not be replaced, or
+a `--through` that has not ended) or a usage error.
 """
 
 from __future__ import annotations
@@ -46,7 +47,8 @@ def _configure(parser: argparse.ArgumentParser) -> None:
         type=iso_date,
         metavar="YYYY-MM-DD",
         help="the newest evening the site reports on; an evening up to it with no seal is "
-        "listed as missed (default: the newest evening whose sunset has passed)",
+        "listed as missed (default, and latest allowed: the newest evening whose sunset has "
+        "passed)",
     )
     build.set_defaults(run_action=_build)
 
