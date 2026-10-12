@@ -270,6 +270,20 @@
       "oracle": "real",
       "find": "return f'<li class=\"missed\">{_e(missed_statement(date))}</li>'",
       "replace": "return f'<li class=\"missed\"><a href=\"{page_name(date)}\">{_e(missed_statement(date))}</a></li>'"
+    },
+    {
+      "label": "X24 the missed lead calls the shown evening the newest sealed one even when the newest sealed evening did not verify",
+      "file": "../../src/lastlight/publish/pages.py",
+      "oracle": "real",
+      "find": "if shows_a_painting and ledger.evenings[0].verified:",
+      "replace": "if shows_a_painting:"
+    },
+    {
+      "label": "X25 the missed lead says the newest sealed evening did not verify when it did",
+      "file": "../../src/lastlight/publish/pages.py",
+      "oracle": "real",
+      "find": "if shows_a_painting and ledger.evenings[0].verified:",
+      "replace": "if False:"
     }
   ]
 }
