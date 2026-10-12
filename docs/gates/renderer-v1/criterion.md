@@ -42,4 +42,6 @@ The webcam's tone curve is assumed to be sRGB when frames are linearised. A came
 
 ## Amendments
 
-None yet.
+### 2026-10-12: which v1 is under test (definition 8)
+
+Recorded when v1 landed (PR #39, merge `3373137`), before the check exists (#35) and before any v1 contrast has been compared with an observed evening. The renderer under test is engine `v1` with the table `src/lastlight/render/data/bruneton_ms_xyz.bin`, 1,873,606 bytes, SHA-256 `c59ef9240ad6843ebc0136de64fbd90c4d5eef0aa9ac3b5e0ec05e03ad3fc368` (also pinned as `lastlight.render.v1.TABLE_SHA256`). The rule, the definitions and the bounds above are unchanged.
