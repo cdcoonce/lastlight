@@ -24,6 +24,8 @@ from lastlight.forecast import Forecast
 from lastlight.privacy.rules import text_hits
 from lastlight.seal import ledger_paths
 
+pytestmark = pytest.mark.usefixtures("trust_test_tsa")
+
 COMMON = ["--cycle", "22", "--fhour", "0"]
 
 

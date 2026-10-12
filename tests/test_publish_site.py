@@ -20,6 +20,8 @@ from lastlight.publish import build_site
 from lastlight.seal import ledger_paths, tsa
 from lastlight.seal.ledger import VerifyResult
 
+pytestmark = pytest.mark.usefixtures("trust_test_tsa")
+
 OLDEST, MIDDLE, NEWEST = factory.DATES
 REPO_URL = "https://github.com/cdcoonce/lastlight"
 NO_PAINTING_SEALED = "No painting was sealed for this date"

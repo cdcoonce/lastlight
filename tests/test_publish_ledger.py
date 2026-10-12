@@ -12,6 +12,8 @@ import seal_helpers as helpers
 from lastlight.publish import Evening, read_ledger
 from lastlight.seal import ledger_paths
 
+pytestmark = pytest.mark.usefixtures("trust_test_tsa")
+
 NEWEST = factory.DATES[-1]
 OLDEST = factory.DATES[0]
 

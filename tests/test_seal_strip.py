@@ -29,6 +29,8 @@ from lastlight.seal.ledger import (
 )
 from lastlight.seal.tsa import TsaError
 
+pytestmark = pytest.mark.usefixtures("trust_test_tsa")
+
 DATE = helpers.STUB_DATE
 TSA_URL = "https://tsa.example/tsr"
 
