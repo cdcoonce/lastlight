@@ -227,6 +227,44 @@ def test_a_frame_that_shows_no_ridge_does_not_stop_the_majority_refusing() -> No
     assert guard.outcome == "refit"
 
 
+START = Orientation(280.0, 1.0, 0.0, 30.0)  # any three distinct orientations will do
+FITTED = Orientation(281.0, 2.0, 1.0, 32.0)
+REFIT = Orientation(280.5, 1.5, 0.5, 30.5)
+
+
+@pytest.mark.parametrize(
+    ("fitted_votes", "refit_votes", "outcome"),
+    [
+        (3, 0, "refit"),
+        (3, 1, "refit"),
+        (2, 1, "refit"),
+        (3, 2, "kept_climb"),
+        (2, 2, "kept_climb"),
+        (3, 3, "kept_climb"),
+        (1, 0, "accepted"),
+    ],
+)
+def test_the_refit_is_judged_by_the_same_majority_as_stage_3(
+    monkeypatch: pytest.MonkeyPatch, fitted_votes: int, refit_votes: int, outcome: str
+) -> None:
+    # No scene of the suite has the refit lose in a minority of the frames or in a bare majority
+    # (it loses in none, or in all three when the drop distance is made huge), so the vote on the
+    # refit is stubbed here: three frames, and for the fitted skyline and then for the refit the
+    # number of frames that score it lower than the climb. Two of three refuse; one does not.
+    votes = iter([fitted_votes, refit_votes])
+    monkeypatch.setattr(orientation_module, "_frames_lowered", lambda *a, **k: next(votes))
+    runs = iter([(FITTED, np.zeros(8), 0), (REFIT, np.zeros(8), 5)])
+    monkeypatch.setattr(orientation_module, "_trace_and_fit", lambda *a, **k: next(runs))
+    monkeypatch.setattr(orientation_module, "_recorded_energy", lambda *a, **k: 1.0)
+    monkeypatch.setattr(orientation_module, "_CAPTURE_MARGIN", 0.37)
+    result, _, guard = orientation_module._stage_3(
+        START, [np.zeros((4, 4))] * 3, np.zeros((4, 4)), None, None
+    )
+    assert guard.outcome == outcome
+    assert guard.margin == 0.37, "the record carries the margin the vote used"
+    assert result is {"accepted": FITTED, "refit": REFIT, "kept_climb": START}[outcome]
+
+
 def test_a_cloud_edge_in_one_frame_is_outvoted_even_when_the_mean_map_says_the_fit_lost() -> None:
     # In haze (30 percent of the contrast) a cloud's dark underside in one frame is nine times
     # stronger than the ridge. The climb on the mean of the edge maps is drawn to it, and the
