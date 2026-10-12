@@ -249,6 +249,27 @@
       "oracle": "real",
       "find": "    return elevation_crossings(evening, lat, lon)[0.0]",
       "replace": "    return elevation_crossings(evening, lat, lon)[0.0] + dt.timedelta(minutes=1)"
+    },
+    {
+      "label": "X21 the missed lead replaces the newest sealed painting instead of leading it",
+      "file": "../../src/lastlight/publish/pages.py",
+      "oracle": "real",
+      "find": "    lead = _missed_lead(ledger, shows_a_painting=featured is not None)\n",
+      "replace": "    lead = _missed_lead(ledger, shows_a_painting=featured is not None)\n    featured = None if lead else featured\n"
+    },
+    {
+      "label": "X22 an explicit --through is ignored in favour of the clock",
+      "file": "../../src/lastlight/publish/build.py",
+      "oracle": "real",
+      "find": "    if through is None:\n",
+      "replace": "    if True:\n"
+    },
+    {
+      "label": "X23 a missed evening in the archive links to a page",
+      "file": "../../src/lastlight/publish/pages.py",
+      "oracle": "real",
+      "find": "return f'<li class=\"missed\">{_e(missed_statement(date))}</li>'",
+      "replace": "return f'<li class=\"missed\"><a href=\"{page_name(date)}\">{_e(missed_statement(date))}</a></li>'"
     }
   ]
 }
