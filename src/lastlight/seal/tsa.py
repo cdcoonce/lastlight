@@ -39,7 +39,6 @@ from cryptography import x509
 from rfc3161_client import (
     HashAlgorithm,
     TimestampRequestBuilder,
-    VerificationError,
     VerifierBuilder,
     decode_timestamp_response,
 )
@@ -143,7 +142,7 @@ def _signer_is_pinned(response: TimeStampResponse, trust: Trust) -> None:
     (signer,) = signers
     try:
         carried = [x509.load_der_x509_certificate(raw) for raw in signed.certificates]
-    except ValueError as error:
+    except Exception as error:  # InvalidVersion is not a ValueError: any unreadable one is refused
         raise TokenRejected("chain", "a certificate carried in the token cannot be read") from error
     if not carried:  # no certificates in the token: the pinned one is the only candidate
         return
@@ -172,11 +171,14 @@ def _valid_at(when: dt.datetime, trust: Trust) -> None:
                 f"the token's time is before the pinned {name} certificate was valid "
                 f"(not yet valid until {began})",
             )
-        if when > certificate.not_valid_after_utc:
+        # The end instant itself counts as expired, as it does in the library's own (OpenSSL)
+        # check that runs next; saying so here keeps the reason naming the validity.
+        if when >= certificate.not_valid_after_utc:
             ended = certificate.not_valid_after_utc.date().isoformat()
             raise TokenRejected(
                 "validity",
-                f"the token's time is after the pinned {name} certificate expired ({ended})",
+                f"the token's time is at or after the end of the pinned {name} certificate, "
+                f"which expired ({ended})",
             )
 
 
@@ -237,7 +239,7 @@ def authenticate(der: bytes, *, trust: Trust | None = None) -> Timestamp:
     verifier = VerifierBuilder().add_root_certificate(anchors.root).tsa_certificate(anchors.tsa)
     try:
         verifier.build().verify(response, stamp.imprint)
-    except (VerificationError, ValueError) as error:
+    except Exception as error:  # a hostile file can raise more than VerificationError: fail closed
         raise _library_rejection(error) from error
     return stamp
 

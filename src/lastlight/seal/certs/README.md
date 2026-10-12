@@ -29,7 +29,7 @@ Then the caller compares the imprint with the bytes it sealed.
 
 ## Validity and expiry
 
-The certificates are judged at the time the token names, not today. That is RFC 3161's rule: a timestamp issued while the certificate was valid stays valid after the certificate expires. So the TSA certificate's end date above is when FreeTSA's tokens stop being accepted for new seals; seals made before it still verify afterwards. A token whose time lies outside a certificate's validity fails, and the reason says so.
+The certificates are judged at the time the token names, not today. That is RFC 3161's rule: a timestamp issued while the certificate was valid stays valid after the certificate expires. So the TSA certificate's end date above is when FreeTSA's tokens stop being accepted for new seals; seals made before it still verify afterwards. A token whose time lies outside a certificate's validity fails, and the reason says so; the end instant itself counts as expired, as it does in the library's own check.
 
 ## If FreeTSA changes its certificate
 

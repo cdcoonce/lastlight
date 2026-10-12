@@ -86,6 +86,13 @@ def test_a_token_without_embedded_certificates_is_checked_against_the_pinned_one
     assert verdict(ledger, before_sunset(include_certificates=False)) is None
 
 
+def test_a_token_without_certificates_and_with_a_foreign_signature_fails_naming_the_signature(
+    ledger: Path,
+) -> None:
+    reason = verdict(ledger, before_sunset(include_certificates=False, signing_key=UNKNOWN_KEY))
+    assert reason is not None and "signature" in reason
+
+
 def test_the_fixture_swaps_the_default_only_for_its_own_test(trust_test_tsa: Trust) -> None:
     assert trust.DEFAULT_TRUST is trust_test_tsa
     assert trust_test_tsa.tsa == tsa_factory.authority().tsa_certificate
@@ -174,6 +181,37 @@ def test_a_forged_token_for_other_bytes_is_named_for_its_chain_not_its_digest(le
     assert reason is not None and "chain" in reason and "digest mismatch" not in reason
 
 
+def test_a_certificate_that_copies_the_pinned_names_and_serial_is_refused_naming_the_chain(
+    ledger: Path,
+) -> None:
+    # Same issuer name, subject name and serial number as the pinned TSA certificate, different
+    # keys: the signer fields of the token point at "the pinned certificate", and only comparing
+    # the certificate itself (not its name and serial) tells them apart.
+    pinned = tsa_factory.authority().tsa_certificate
+    impostor = tsa_factory.build_authority(tsa_serial=pinned.serial_number)
+    assert impostor.tsa_certificate.issuer == pinned.issuer
+    assert impostor.tsa_certificate.serial_number == pinned.serial_number
+    assert impostor.tsa_certificate != pinned
+    reason = verdict(ledger, before_sunset(signer=impostor))
+    assert reason is not None and "chain" in reason and "pinned" in reason
+    assert "signature" not in reason
+
+
+def test_a_token_carrying_both_the_pinned_certificate_and_an_impostor_is_still_refused(
+    ledger: Path,
+) -> None:
+    # The impostor has the pinned certificate's names and serial, so the signer fields fit both
+    # certificates; the token is signed by the impostor's key and carries both. Whichever the
+    # parser lists first, the signature cannot verify against the pinned key.
+    pinned = tsa_factory.authority()
+    impostor = tsa_factory.build_authority(tsa_serial=pinned.tsa_certificate.serial_number)
+    token = before_sunset(
+        signer=impostor, carried=(pinned.tsa_certificate, impostor.tsa_certificate)
+    )
+    reason = verdict(ledger, token)
+    assert reason is not None and ("chain" in reason or "signature" in reason)
+
+
 # --- the extended key usage ----------------------------------------------------------------
 
 
@@ -241,11 +279,24 @@ def test_a_token_issued_before_the_certificate_began_fails_naming_the_validity()
     assert "validity" in str(caught.value) and "not yet" in str(caught.value)
 
 
-@pytest.mark.parametrize(("offset_seconds", "passes"), [(-1, True), (1, False)])
-def test_the_validity_boundary_is_the_certificates_last_instant(
+@pytest.mark.parametrize(("offset_seconds", "passes"), [(-1, True), (0, False), (1, False)])
+def test_a_token_stamped_at_the_instant_the_certificate_ends_is_refused(
     offset_seconds: int, passes: bool
 ) -> None:
+    # The last second before the end passes. The end instant itself is refused, as the library's
+    # own check does, and the reason still names the validity.
     edge = EXPIRED.tsa_certificate.not_valid_after_utc.replace(microsecond=0)
+    token = issued(edge + dt.timedelta(seconds=offset_seconds))
+    if passes:
+        tsa.authenticate(token, trust=trust_of(EXPIRED))
+    else:
+        with pytest.raises(TokenRejected, match="validity"):
+            tsa.authenticate(token, trust=trust_of(EXPIRED))
+
+
+@pytest.mark.parametrize(("offset_seconds", "passes"), [(-1, False), (0, True), (1, True)])
+def test_the_certificate_is_valid_from_its_first_second(offset_seconds: int, passes: bool) -> None:
+    edge = EXPIRED.tsa_certificate.not_valid_before_utc.replace(microsecond=0)
     token = issued(edge + dt.timedelta(seconds=offset_seconds))
     if passes:
         tsa.authenticate(token, trust=trust_of(EXPIRED))

@@ -146,8 +146,14 @@ def build_authority(
     tsa_valid: tuple[dt.datetime, dt.datetime] = TSA_VALID,
     key_purposes: tuple[x509.ObjectIdentifier, ...] = (ExtendedKeyUsageOID.TIME_STAMPING,),
     key_purposes_critical: bool = True,
+    tsa_serial: int | None = None,
 ) -> Authority:
-    """A fresh root and TSA certificate; the arguments make the certificate wrong in one way."""
+    """A fresh root and TSA certificate; the arguments make the certificate wrong in one way.
+
+    The same `name` gives the same subject and issuer names, and `tsa_serial` fixes the TSA
+    certificate's serial number, so an authority can impersonate another one's names while its
+    keys, and so its certificates, are different.
+    """
     root_key = ec.generate_private_key(ec.SECP256R1())
     tsa_key = ec.generate_private_key(ec.SECP256R1())
     root_name, tsa_name = _name(f"{name} root"), _name(f"{name} tsa")
@@ -182,7 +188,7 @@ def build_authority(
         .subject_name(tsa_name)
         .issuer_name(root_name)
         .public_key(tsa_key.public_key())
-        .serial_number(x509.random_serial_number())
+        .serial_number(tsa_serial or x509.random_serial_number())
         .not_valid_before(tsa_valid[0])
         .not_valid_after(tsa_valid[1])
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=False)
@@ -255,6 +261,7 @@ def sign_response(
     signer: Authority | None = None,
     signing_key: ec.EllipticCurvePrivateKey | None = None,
     include_certificates: bool = True,
+    carried: tuple[x509.Certificate, ...] | None = None,
     status: int = 0,
     serial: int = 1,
     hash_oid: str = SHA256_OID,
@@ -262,7 +269,9 @@ def sign_response(
     """A DER `TimeStampResp` for `imprint`, issued at `gen_time` by `signer`.
 
     `signing_key` signs in place of the authority's TSA key, which makes a token with a valid
-    structure and certificates whose signature belongs to someone else. `status` other than 0
+    structure and certificates whose signature belongs to someone else. `carried` replaces the
+    certificates the token carries (the signer's TSA certificate and root by default), and
+    `include_certificates=False` carries none. `status` other than 0
     and 1 gives a refusal with no token; 1 gives a token the authority "granted with
     modifications".
     """
@@ -276,10 +285,9 @@ def sign_response(
     # written `.tsr` with the reply it came from.
     scheme = ec.ECDSA(hashes.SHA256(), deterministic_signing=True)
     signature = (signing_key or signer.tsa_key).sign(signed_set, scheme)
+    carried = carried or (signer.tsa_certificate, signer.root_certificate)
     certificates = b"".join(  # a SET OF: DER orders the members by their encoding
-        sorted(
-            c.public_bytes(Encoding.DER) for c in (signer.tsa_certificate, signer.root_certificate)
-        )
+        sorted(c.public_bytes(Encoding.DER) for c in carried)
     )
     signer_info = sequence(
         integer(1),

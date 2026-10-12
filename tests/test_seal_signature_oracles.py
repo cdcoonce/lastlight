@@ -28,7 +28,7 @@ from cryptography.hazmat.primitives.serialization import Encoding
 
 from lastlight.cli import discover
 from lastlight.seal import ledger as ledger_module
-from lastlight.seal import ledger_paths, seal, tsa, verify
+from lastlight.seal import ledger_paths, seal, trust, tsa, verify
 from lastlight.seal.tsa import TsaError
 
 DATE = helpers.STUB_DATE
@@ -110,6 +110,38 @@ def test_a_genuine_response_for_other_bytes_is_still_genuine() -> None:
     # about what is covered, and the imprint is compared separately (digest mismatch).
     stamp = tsa.authenticate(helpers.recorded_response())
     assert stamp.imprint.hex() != helpers.STUB_DIGEST
+
+
+@pytest.mark.filterwarnings("ignore::UserWarning")  # cryptography notes the garbled names
+def test_no_bit_flip_in_the_genuine_response_is_accepted_or_escapes_as_another_error() -> None:
+    # A hostile `.tsr` is just bytes. Flip one bit at every third position of the genuine
+    # response: each result must be a TsaError (never another exception, never an acceptance),
+    # except in the places the check does not read and that cannot change what it proves: the
+    # root certificate the response carries (the pinned root is used, never the carried one),
+    # the two version numbers, and the signature algorithm's OID (OpenSSL takes the algorithm
+    # from the key and the digest).
+    raw = helpers.recorded_response()
+    carried_root = trust.DEFAULT_TRUST.root.public_bytes(Encoding.DER)
+    root_at = raw.index(carried_root)
+    ecdsa_sha512 = bytes.fromhex("2a8648ce3d040304")
+    algorithm_at = raw.rindex(ecdsa_sha512)
+    ignored = (
+        set(range(root_at, root_at + len(carried_root)))
+        | set(range(algorithm_at, algorithm_at + len(ecdsa_sha512)))
+        | {raw.index(bytes.fromhex("020103")) + 2}  # SignedData version
+        | {raw.index(bytes.fromhex("0201013081a3")) + 2}  # SignerInfo version
+    )
+    accepted: list[int] = []
+    for position in range(0, len(raw), 3):
+        flipped = bytearray(raw)
+        flipped[position] ^= 0x01
+        try:
+            tsa.authenticate(bytes(flipped))
+        except TsaError:
+            continue
+        accepted.append(position)
+    assert accepted, "the ignored regions are large enough that some flips are accepted"
+    assert set(accepted) <= ignored, sorted(set(accepted) - ignored)[:10]
 
 
 # --- oracle 3: a token from a test authority, under the default anchors -------------------
