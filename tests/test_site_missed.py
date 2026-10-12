@@ -4,7 +4,9 @@ A scorer must never treat an absent seal as a forecast, and a visitor must not m
 sealed painting for tonight's. `build_site(..., through=D)` reports on every evening up to D: an
 evening between the first sealed one and D that has no row in `index.jsonl` was missed, and the
 site says "No forecast was sealed for D." Without `through`, D is the newest evening whose
-deadline (the sun at the horizon at the reference point) has passed at the build's `now_utc`.
+deadline (the sun at the horizon at the reference point) has passed at the build's `now_utc`;
+a `through` later than that is refused, because it would call an evening that has not happened
+missed.
 
 Every state is built from small sealed ledgers (`ledger_factory`, offline) and asserted through
 `html_probe`. Dates only: nothing here spells a time of day.
@@ -23,7 +25,7 @@ from html_probe import read_page
 from lastlight.cli import main
 from lastlight.daily import default_evening, evening_deadline
 from lastlight.privacy import contains_clock_time
-from lastlight.publish import BuildReport, build_site, pages
+from lastlight.publish import BuildError, BuildReport, build_site, pages
 from lastlight.publish.missed import default_through, missed_evenings
 from lastlight.site import REFERENCE_POINT
 
@@ -31,6 +33,14 @@ OLDEST, MIDDLE, NEWEST = factory.DATES  # 2026-10-11, 2026-10-12, 2026-10-13
 DAY = dt.timedelta(days=1)
 SECOND = dt.timedelta(seconds=1)
 LON = REFERENCE_POINT[1]
+FIXTURE_NOW = evening_deadline(dt.date(2026, 11, 30))
+"""The build's clock in these tests: after every date they build through, so an explicit
+`through` is never later than the newest evening that has closed."""
+
+
+@pytest.fixture(autouse=True)
+def _build_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("lastlight.publish.build.utc_now", lambda: FIXTURE_NOW)
 
 
 def sentence(date: dt.date) -> str:
@@ -438,6 +448,67 @@ def test_without_now_utc_the_build_reads_the_clock_once_through_utc_now(
     assert report.through == dt.date(2026, 10, 14)
 
 
+# --- a through that has not ended is refused ------------------------------------------------
+
+
+def tree_bytes(root: Path) -> dict[str, bytes | None]:
+    """Every path under `root` (a directory maps to None) with its bytes, to compare two states."""
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes() if path.is_file() else None
+        for path in root.rglob("*")
+    }
+
+
+@pytest.mark.parametrize("days_ahead", [1, 80], ids=["one day past", "eighty days past"])
+@pytest.mark.parametrize("earlier_site", [False, True], ids=["no site yet", "an earlier site"])
+def test_a_through_past_the_default_is_refused_and_writes_nothing(
+    ledger_dir: Path, tmp_path: Path, days_ahead: int, earlier_site: bool
+) -> None:
+    newest_closed = dt.date(2026, 10, 14)
+    now = evening_deadline(newest_closed)
+    out = tmp_path / "site"
+    if earlier_site:
+        build(ledger_dir, tmp_path, through=NEWEST)
+    before = tree_bytes(tmp_path)
+
+    with pytest.raises(BuildError, match="has not ended"):
+        build_site(ledger_dir, out, through=newest_closed + DAY * days_ahead, now_utc=now)
+
+    assert tree_bytes(tmp_path) == before, "nothing written: no site, no staging directory"
+
+
+def test_a_through_equal_to_the_default_is_accepted(ledger_dir: Path, tmp_path: Path) -> None:
+    newest_closed = dt.date(2026, 10, 14)
+    report, out = build(
+        ledger_dir, tmp_path, through=newest_closed, now_utc=evening_deadline(newest_closed)
+    )
+    assert report.through == newest_closed and report.missed == (newest_closed,)
+    assert read_page(out, "index.html").texts("p", "missed") == [sentence(newest_closed)]
+
+
+def test_an_evening_can_be_asked_for_only_from_the_instant_its_deadline_passes(
+    ledger_dir: Path, tmp_path: Path
+) -> None:
+    evening = dt.date(2026, 10, 14)
+    deadline = evening_deadline(evening)
+    with pytest.raises(BuildError, match="has not ended"):
+        build_site(ledger_dir, tmp_path / "early", through=evening, now_utc=deadline - SECOND)
+    assert not (tmp_path / "early").exists()
+    report, _out = build(ledger_dir, tmp_path / "on", through=evening, now_utc=deadline)
+    assert report.through == evening
+
+
+def test_the_refusal_names_the_evening_and_the_newest_one_that_has_ended(
+    ledger_dir: Path, tmp_path: Path
+) -> None:
+    now = evening_deadline(dt.date(2026, 10, 14))
+    with pytest.raises(BuildError) as refused:
+        build_site(ledger_dir, tmp_path / "site", through=dt.date(2026, 10, 15), now_utc=now)
+    message = str(refused.value)
+    assert "2026-10-15" in message and "2026-10-14" in message
+    assert not contains_clock_time(message)
+
+
 # --- the pages stay private, valid and stable -----------------------------------------------
 
 
@@ -534,6 +605,40 @@ def test_a_site_built_through_the_newest_seal_reports_no_missed_evening(
         "--through", "2026-10-13",
     )  # fmt: skip
     assert code == 0 and "missed" not in stdout
+
+
+def test_the_site_command_refuses_a_through_that_has_not_ended(
+    capsys: pytest.CaptureFixture[str],
+    ledger_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pinned = evening_deadline(dt.date(2026, 10, 14))
+    monkeypatch.setattr("lastlight.publish.build.utc_now", lambda: pinned)
+    out = tmp_path / "site"
+    code, stdout, stderr = run(
+        capsys, "site", "build", "--ledger-dir", ledger_dir, "--out", out, "--through", "2026-10-15"
+    )
+    assert code == 2 and stdout == ""
+    assert "--through" in stderr and "has not ended" in stderr
+    assert "2026-10-15" in stderr and "2026-10-14" in stderr
+    assert not out.exists()
+
+
+def test_the_site_command_accepts_the_newest_evening_that_has_ended(
+    capsys: pytest.CaptureFixture[str],
+    ledger_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pinned = evening_deadline(dt.date(2026, 10, 14))
+    monkeypatch.setattr("lastlight.publish.build.utc_now", lambda: pinned)
+    code, stdout, stderr = run(
+        capsys,
+        "site", "build", "--ledger-dir", ledger_dir, "--out", tmp_path / "site",
+        "--through", "2026-10-14",
+    )  # fmt: skip
+    assert code == 0 and stderr == "" and "1 missed evening listed" in stdout
 
 
 @pytest.mark.parametrize("bad", ["2026-13-01", "20261015", "tomorrow", ""])
