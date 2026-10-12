@@ -6,7 +6,8 @@
    range, recording the SHA-256 of every raw message read;
 2. sample them along the sightline toward the sunset azimuth from the public reference point;
 3. reduce the samples to the renderer's v0 parameters (`lastlight.atmosphere`);
-4. render the curve and the strip (`lastlight.render`);
+4. render the curve and the strip (`lastlight.render`, with renderer v0 unless `engine` says
+   "v1");
 5. put it all in a `Forecast`: every input's source, run and digest, the curve, the v0
    vividness, notes saying what was and was not used, and the SHA-256 of the strip PNG.
 
@@ -37,7 +38,10 @@ from lastlight.site import REFERENCE_POINT
 from lastlight.vividness import RULE_SUMMARY, vividness_v0
 
 MODEL_NAME = "lastlight-v0"
-"""The renderer generation: v0 is single scattering; v1 (Bruneton) will be a new model name."""
+"""The model name of the default engine: v0, single scattering."""
+
+MODEL_NAMES = {"v0": MODEL_NAME, "v1": "lastlight-v1"}
+"""The model name of each renderer engine; `model.version` stays the package version."""
 
 _SHA = re.compile(r"[0-9a-f]{40}")
 _OVERRIDE_VARIABLE = "LASTLIGHT_CODE_SHA"
@@ -90,15 +94,20 @@ def paint(
     forecast_hour: int | None = None,
     code_sha: str | None = None,
     with_strip: bool = True,
+    engine: str = "v0",
 ) -> Painting:
     """Paint the evening of `evening` at the public reference point.
 
     `cycle_hour` and `forecast_hour` pin the HRRR run (see `hrrr.plan_run`); by default the
     newest complete run that reaches the evening is used. With `with_strip=False` the forecast
-    names no painting (`strip_sha256` null) and no PNG is made. Raises whatever the HRRR ingest
-    raises (`HrrrError`, `FetchError`) and `ReductionError` for samples that cannot be reduced;
-    it never paints from missing data.
+    names no painting (`strip_sha256` null) and no PNG is made. `engine` picks the renderer,
+    "v0" (the default, what the daily seal paints) or "v1", and the model name follows it
+    (`MODEL_NAMES`); any other value is a `ValueError` before anything is fetched. Raises
+    whatever the HRRR ingest raises (`HrrrError`, `FetchError`) and `ReductionError` for samples
+    that cannot be reduced; it never paints from missing data.
     """
+    if engine not in MODEL_NAMES:
+        raise ValueError(f"engine must be one of {tuple(MODEL_NAMES)}, got {engine!r}")
     lat, lon, elevation = REFERENCE_POINT
     plan = hrrr.plan_run(
         evening,
@@ -121,7 +130,7 @@ def paint(
     samples = hrrr.sample_transect(fields, geometry.transect(evening, lat, lon, distances))
     reduction = reduce_transect(samples, evening)
 
-    curve = tuple(CurvePoint(**row) for row in render_curve(reduction.atmosphere))
+    curve = tuple(CurvePoint(**row) for row in render_curve(reduction.atmosphere, engine=engine))
     strip_png = (
         strip_png_bytes(render_strip([point.model_dump() for point in curve]))
         if with_strip
@@ -132,7 +141,7 @@ def paint(
         schema_version=1,
         date=evening,
         model=Model(
-            name=MODEL_NAME,
+            name=MODEL_NAMES[engine],
             version=__version__,
             code_sha=current_code_sha() if code_sha is None else code_sha,
         ),
