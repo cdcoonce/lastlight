@@ -1,0 +1,270 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_render_v1_engine.py",
+    "tests/test_render_v1_generator.py",
+    "tests/test_render_v1_order1.py",
+    "tests/test_render_v1_painting.py",
+    "tests/test_render_v1_port.py",
+    "tests/test_render_v1_table.py",
+    "tests/test_render_curve.py",
+    "tests/test_render_view_azimuth.py",
+    "tests/test_painting.py",
+    "tests/test_forecast.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "tests/test_render_v1_engine.py",
+    "tests/test_render_v1_generator.py",
+    "tests/test_render_v1_order1.py",
+    "tests/test_render_v1_painting.py",
+    "tests/test_render_v1_port.py",
+    "tests/test_render_v1_table.py",
+    "tests/test_render_curve.py",
+    "tests/test_render_view_azimuth.py",
+    "tests/test_painting.py",
+    "tests/test_forecast.py"
+  ],
+  "mutants": [
+    {
+      "label": "#1 v1 drops the multiple-scattering term (multiplied by 0)",
+      "file": "../../src/lastlight/render/curve.py",
+      "oracle": "real",
+      "find": "xyz = xyz + v1.multiple_scattering_xyz(atm, sun_elevation, view_elevations, rel_azimuth_deg)",
+      "replace": "xyz = xyz + 0.0 * v1.multiple_scattering_xyz(atm, sun_elevation, view_elevations, rel_azimuth_deg)"
+    },
+    {
+      "label": "#2 table lookup ignores the relative azimuth (always 0)",
+      "file": "../../src/lastlight/render/v1.py",
+      "oracle": "real",
+      "find": "iz, wz = _bracket(self.axes[\"rel_azimuth_deg\"], rel_azimuth_deg)",
+      "replace": "iz, wz = _bracket(self.axes[\"rel_azimuth_deg\"], 0.0)"
+    },
+    {
+      "label": "#3 loader compares the digest with itself (never refuses)",
+      "file": "../../src/lastlight/render/v1.py",
+      "oracle": "real",
+      "find": "if digest != expected_sha256:",
+      "replace": "if digest != digest:"
+    },
+    {
+      "label": "#4 baked-field guard skipped",
+      "file": "../../src/lastlight/render/v1.py",
+      "oracle": "real",
+      "find": "if value != baked[name]:",
+      "replace": "if False:"
+    },
+    {
+      "label": "#5a out-of-domain point clamped to the edge node (direct call)",
+      "file": "../../src/lastlight/render/v1.py",
+      "oracle": "real",
+      "find": "    check_domain(atm, sun_elevation, view_elevations)\n    azimuth = fold_azimuth(float(rel_azimuth_deg))\n",
+      "replace": "    atm = __import__(\"dataclasses\").replace(\n        atm,\n        aod_550=min(max(atm.aod_550, 0.0), 1.0),\n        ozone_du=min(max(atm.ozone_du, 250.0), 330.0),\n    )\n    sun_elevation = min(max(sun_elevation, -12.0), 12.0)\n    view_elevations = [min(max(v, 0.0), 90.0) for v in view_elevations]\n    check_domain(atm, sun_elevation, view_elevations)\n    azimuth = fold_azimuth(float(rel_azimuth_deg))\n"
+    },
+    {
+      "label": "#5b domain bounds not enforced (only finiteness is)",
+      "file": "../../src/lastlight/render/v1.py",
+      "oracle": "real",
+      "find": "if not (math.isfinite(value) and low <= value <= high):",
+      "replace": "if not math.isfinite(value):"
+    },
+    {
+      "label": "#6 port's single scattering ignores Earth's shadow",
+      "file": "../../src/lastlight/render/bruneton.py",
+      "oracle": "real",
+      "find": "shadow_start, shadow_stop = _shadow_interval(ray, mu_s, nu)",
+      "replace": "shadow_start = shadow_stop = np.full_like(mu_s, ray.length)"
+    },
+    {
+      "label": "#7 ground albedo forced to 0 in the precomputation",
+      "file": "../../src/lastlight/render/bruneton.py",
+      "oracle": "real",
+      "find": "albedo = ground_albedo / math.pi",
+      "replace": "albedo = 0.0 * ground_albedo / math.pi"
+    },
+    {
+      "label": "#8 paint() defaults to engine v1",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "engine: str = \"v0\",\n) -> Painting:",
+      "replace": "engine: str = \"v1\",\n) -> Painting:"
+    },
+    {
+      "label": "#9a container writes a timestamp-like varying field",
+      "file": "../../src/lastlight/render/v1.py",
+      "oracle": "real",
+      "find": "header = dict(metadata)",
+      "replace": "header = dict(metadata, built=__import__(\"time\").time_ns())"
+    },
+    {
+      "label": "#9b assemble stacks nodes in the order they were computed",
+      "file": "../../tools/make_bruneton_table.py",
+      "oracle": "real",
+      "find": "for index in range(node_count(grid_name)):",
+      "replace": "for index in sorted(\n        range(node_count(grid_name)),\n        key=lambda i: _node_paths(grid_name, cache, i)[0].stat().st_mtime_ns,\n    ):"
+    },
+    {
+      "label": "#10a unknown engine falls back to v0 in the renderer",
+      "file": "../../src/lastlight/render/curve.py",
+      "oracle": "real",
+      "find": "if engine not in ENGINES:",
+      "replace": "if False:"
+    },
+    {
+      "label": "#10b paint() does not refuse an unknown engine",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "if engine not in MODEL_NAMES:",
+      "replace": "if False:"
+    },
+    {
+      "label": "#11 [control] one word of the table metadata's quantity string",
+      "file": "../../tools/make_bruneton_table.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "The string is the `quantity` description in the header of a table the generator writes. Tests read the header's resolution, orders, ground_albedo, baked_atmosphere and axes, never `quantity`, and the suite never regenerates the full table whose committed digest this wording would change. Inert over everything the suite reaches; it would matter only to someone regenerating the table, who must then re-pin the digest.",
+      "find": "\"CIE 1931 XYZ of the light reaching a ground observer after two or more bounces \"",
+      "replace": "\"CIE 1931 XYZ of the light arriving at a ground observer after two or more bounces \""
+    },
+    {
+      "label": "X1 paint() renders the default-engine curve whatever the engine",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "render_curve(reduction.atmosphere, engine=engine)",
+      "replace": "render_curve(reduction.atmosphere)"
+    },
+    {
+      "label": "X2 the model name does not follow the engine",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "name=MODEL_NAMES[engine],",
+      "replace": "name=MODEL_NAME,"
+    },
+    {
+      "label": "X3a table lookup: aod interpolation weight dropped (lower node only)",
+      "file": "../../src/lastlight/render/v1.py",
+      "oracle": "real",
+      "find": "(ia, wa), (io, wo), (isun, ws) = weights",
+      "replace": "(ia, wa), (io, wo), (isun, ws) = weights\n        wa = np.array([1.0, 0.0])"
+    },
+    {
+      "label": "X3b table lookup: ozone interpolation weight dropped (lower node only)",
+      "file": "../../src/lastlight/render/v1.py",
+      "oracle": "real",
+      "find": "(ia, wa), (io, wo), (isun, ws) = weights",
+      "replace": "(ia, wa), (io, wo), (isun, ws) = weights\n        wo = np.array([1.0, 0.0])"
+    },
+    {
+      "label": "X3c table lookup: sun interpolation weight dropped (lower node only)",
+      "file": "../../src/lastlight/render/v1.py",
+      "oracle": "real",
+      "find": "(ia, wa), (io, wo), (isun, ws) = weights",
+      "replace": "(ia, wa), (io, wo), (isun, ws) = weights\n        ws = np.array([1.0, 0.0])"
+    },
+    {
+      "label": "X3d table lookup: view interpolation weight dropped (lower node only)",
+      "file": "../../src/lastlight/render/v1.py",
+      "oracle": "real",
+      "find": "frac = (views - nodes[lower]) / (nodes[lower + 1] - nodes[lower])",
+      "replace": "frac = 0.0 * views"
+    },
+    {
+      "label": "X4 fold_azimuth loses its mirror (no abs)",
+      "file": "../../src/lastlight/render/v1.py",
+      "oracle": "real",
+      "find": "return abs((rel_azimuth_deg + 180.0) % 360.0 - 180.0)",
+      "replace": "return (rel_azimuth_deg + 180.0) % 360.0 - 180.0"
+    },
+    {
+      "label": "X5 domain upper bounds exclusive",
+      "file": "../../src/lastlight/render/v1.py",
+      "oracle": "real",
+      "find": "if not (math.isfinite(value) and low <= value <= high):",
+      "replace": "if not (math.isfinite(value) and low <= value < high):"
+    },
+    {
+      "label": "X6 [control] default_table() reloads and re-validates on every call",
+      "file": "../../src/lastlight/render/v1.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "The @cache only saves the load. A cold default_table() (read, SHA-256, decode, log of 468k values) measured about 3 ms on the review machine, so every call that now reloads stays far under the speed tests' 50 ms and 10 s limits, and every functional assertion is unchanged. Inert over the suite; it would matter only if the load cost grew past those limits or a caller relied on the object being shared (no test asserts identity).",
+      "find": "@cache\ndef default_table() -> MultipleScatteringTable:",
+      "replace": "def default_table() -> MultipleScatteringTable:"
+    },
+    {
+      "label": "X7 container also writes the process id",
+      "file": "../../src/lastlight/render/v1.py",
+      "oracle": "real",
+      "find": "header = dict(metadata)",
+      "replace": "header = dict(metadata, pid=__import__(\"os\").getpid())"
+    },
+    {
+      "label": "X8 generator maps node index to (aod, ozone) the wrong way round",
+      "file": "../../tools/make_bruneton_table.py",
+      "oracle": "real",
+      "find": "aod = grid.aod[index // len(grid.ozone)]\n    ozone = grid.ozone[index % len(grid.ozone)]",
+      "replace": "aod = grid.aod[index % len(grid.aod)]\n    ozone = grid.ozone[index // len(grid.aod)]"
+    },
+    {
+      "label": "X9 loader no longer requires positive values",
+      "file": "../../src/lastlight/render/v1.py",
+      "oracle": "real",
+      "find": "if not (values > 0.0).all():",
+      "replace": "if False:"
+    },
+    {
+      "label": "X10 loader no longer checks the baked atmosphere",
+      "file": "../../src/lastlight/render/v1.py",
+      "oracle": "real",
+      "find": "if header.get(\"baked_atmosphere\") != _defaults():",
+      "replace": "if False:"
+    },
+    {
+      "label": "X11 port: ground light of orders 3 and up dropped",
+      "file": "../../src/lastlight/render/bruneton.py",
+      "oracle": "real",
+      "find": "incident = radiance[i] + _ground_light_table(\n                grid, level, i, optics, irradiance_before, albedo\n            )",
+      "replace": "incident = radiance[i]"
+    },
+    {
+      "label": "X12 port: sunlit ground reflection in order 2 dropped",
+      "file": "../../src/lastlight/render/bruneton.py",
+      "oracle": "real",
+      "find": "light = light + _ground_light(ray, mu_s, nu, optics, transmittance, albedo, None)",
+      "replace": "light = light"
+    },
+    {
+      "label": "X13 port: Rayleigh scattering coefficient missing from the gather",
+      "file": "../../src/lastlight/render/bruneton.py",
+      "oracle": "real",
+      "find": "rayleigh = profile[0][:, None] * weighted * optics.scattering[0]",
+      "replace": "rayleigh = profile[0][:, None] * weighted"
+    },
+    {
+      "label": "X14 sky_xyz does not hand the relative azimuth to the table",
+      "file": "../../src/lastlight/render/curve.py",
+      "oracle": "real",
+      "find": "xyz = xyz + v1.multiple_scattering_xyz(atm, sun_elevation, view_elevations, rel_azimuth_deg)",
+      "replace": "xyz = xyz + v1.multiple_scattering_xyz(atm, sun_elevation, view_elevations)"
+    },
+    {
+      "label": "X15 render_row does not hand the engine to sky_xyz",
+      "file": "../../src/lastlight/render/curve.py",
+      "oracle": "real",
+      "find": "xyz = sky_xyz(atm, sun_elevation, VIEW_ELEVATIONS, rel_azimuth_deg, engine=engine)",
+      "replace": "xyz = sky_xyz(atm, sun_elevation, VIEW_ELEVATIONS, rel_azimuth_deg)"
+    }
+  ]
+}
