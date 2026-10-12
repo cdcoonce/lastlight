@@ -16,7 +16,8 @@
     "tests/test_seal_cli.py",
     "tests/test_seal_strip.py",
     "tests/test_ledger_docs.py",
-    "tests/test_daily.py"
+    "tests/test_daily.py",
+    "tests/test_repo_scaffold.py"
   ],
   "collect_command": [
     "uv",
@@ -35,7 +36,8 @@
     "tests/test_seal_cli.py",
     "tests/test_seal_strip.py",
     "tests/test_ledger_docs.py",
-    "tests/test_daily.py"
+    "tests/test_daily.py",
+    "tests/test_repo_scaffold.py"
   ],
   "mutants": [
     {
@@ -219,6 +221,13 @@
       "oracle": "real",
       "find": "if when < certificate.not_valid_before_utc:",
       "replace": "if True:"
+    },
+    {
+      "label": "M16 cryptography is no longer declared in pyproject.toml (it arrives only through rfc3161-client)",
+      "file": "../../pyproject.toml",
+      "oracle": "real",
+      "find": "    \"cryptography>=50.0.2\",\n",
+      "replace": ""
     },
     {
       "label": "M9 [control] one word of the certs README's expiry sentence",
