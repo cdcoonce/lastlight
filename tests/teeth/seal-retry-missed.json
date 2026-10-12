@@ -284,6 +284,20 @@
       "oracle": "real",
       "find": "if shows_a_painting and ledger.evenings[0].verified:",
       "replace": "if False:"
+    },
+    {
+      "label": "X26 the bound on --through is removed: an evening that has not ended is accepted and reported missed",
+      "file": "../../src/lastlight/publish/build.py",
+      "oracle": "real",
+      "find": "if through is not None and through > newest_closed:",
+      "replace": "if False:"
+    },
+    {
+      "label": "X27 the bound on --through refuses the newest evening that has ended too (> becomes >=)",
+      "file": "../../src/lastlight/publish/build.py",
+      "oracle": "real",
+      "find": "if through is not None and through > newest_closed:",
+      "replace": "if through is not None and through >= newest_closed:"
     }
   ]
 }
