@@ -540,25 +540,42 @@ def test_verify_still_prints_pass_for_a_signed_token(
 OPENSSL = shutil.which("openssl")
 
 
-def openssl_verifies(tmp_path: Path, token: bytes, digest: str) -> bool:
-    authority = tsa_factory.authority()
+def openssl_command(directory: Path, digest: str, issued_at: dt.datetime) -> list[str]:
+    """`openssl ts -verify` over the files `openssl_verifies` writes into `directory`.
+
+    `-attime` is the token's own time, as epoch seconds: OpenSSL otherwise judges the chain at
+    the moment the test runs, so the test would start failing on every host the day the test
+    authority's certificate expires, whatever the token says.
+    """
+    return [
+        OPENSSL or "openssl",
+        "ts",
+        "-verify",
+        "-in",
+        str(directory / "token.tsr"),
+        "-digest",
+        digest,
+        "-CAfile",
+        str(directory / "root.pem"),
+        "-untrusted",
+        str(directory / "tsa.pem"),
+        "-attime",
+        str(int(issued_at.timestamp())),
+    ]
+
+
+def openssl_verifies(
+    tmp_path: Path,
+    token: bytes,
+    digest: str,
+    authority: tsa_factory.Authority | None = None,
+) -> bool:
+    authority = authority or tsa_factory.authority()
     (tmp_path / "root.pem").write_bytes(authority.root_certificate.public_bytes(Encoding.PEM))
     (tmp_path / "tsa.pem").write_bytes(authority.tsa_certificate.public_bytes(Encoding.PEM))
     (tmp_path / "token.tsr").write_bytes(token)
     done = subprocess.run(
-        [
-            OPENSSL or "openssl",
-            "ts",
-            "-verify",
-            "-in",
-            str(tmp_path / "token.tsr"),
-            "-digest",
-            digest,
-            "-CAfile",
-            str(tmp_path / "root.pem"),
-            "-untrusted",
-            str(tmp_path / "tsa.pem"),
-        ],
+        openssl_command(tmp_path, digest, tsa.parse_response(token).gen_time),
         capture_output=True,
         text=True,
         check=False,
@@ -567,17 +584,41 @@ def openssl_verifies(tmp_path: Path, token: bytes, digest: str) -> bool:
     return done.returncode == 0 and "Verification: OK" in done.stdout + done.stderr
 
 
+def skip_unless_openssl_can_verify_timestamps() -> None:
+    """Skip where the command is missing or has no `ts -verify` (or no `-attime`)."""
+    probe = subprocess.run(
+        [OPENSSL or "openssl", "ts", "-help"], capture_output=True, text=True, check=False
+    )
+    help_text = probe.stdout + probe.stderr
+    if probe.returncode not in (0, 1) or "-verify" not in help_text or "-attime" not in help_text:
+        pytest.skip("this openssl has no `ts -verify` with `-attime`")
+
+
 @pytest.mark.skipif(OPENSSL is None, reason="needs the openssl command")
 def test_an_independent_verifier_accepts_the_fixtures_and_refuses_a_forgery(tmp_path: Path) -> None:
     # The fixtures only mean something if they are real tokens: `openssl ts -verify` checks the
     # signature, the chain and the imprint of what `tsa_factory` writes, and refuses it once the
     # imprint is edited. Skipped where the command is missing or has no `ts` support.
-    probe = subprocess.run(
-        [OPENSSL or "openssl", "ts", "-help"], capture_output=True, text=True, check=False
-    )
-    if probe.returncode not in (0, 1) or "-verify" not in probe.stdout + probe.stderr:
-        pytest.skip("this openssl has no `ts -verify`")
+    skip_unless_openssl_can_verify_timestamps()
     token = before_sunset()
     assert openssl_verifies(tmp_path, token, DIGEST)
     forged = before_sunset("ee" * 32).replace(bytes.fromhex("ee" * 32), bytes.fromhex(DIGEST))
     assert not openssl_verifies(tmp_path, forged, DIGEST)
+
+
+def test_the_independent_verifier_is_asked_at_the_tokens_own_time(tmp_path: Path) -> None:
+    when = helpers.sunset(DATE) - dt.timedelta(minutes=30)
+    command = openssl_command(tmp_path, DIGEST, when)
+    assert command[command.index("-attime") + 1] == str(int(when.timestamp()))
+
+
+@pytest.mark.skipif(OPENSSL is None, reason="needs the openssl command")
+def test_the_independent_verifier_accepts_a_token_issued_before_its_certificate_expired(
+    tmp_path: Path,
+) -> None:
+    # The certificate has expired by the time the test runs, as the test authority's will in 2030.
+    # Judged at "now" OpenSSL refuses the token; judged at the token's own time it is genuine.
+    skip_unless_openssl_can_verify_timestamps()
+    inside = dt.datetime(2026, 3, 1, tzinfo=dt.UTC)
+    assert EXPIRED.tsa_certificate.not_valid_after_utc < dt.datetime.now(dt.UTC)
+    assert openssl_verifies(tmp_path, issued(inside), DIGEST, authority=EXPIRED)
