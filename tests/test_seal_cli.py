@@ -12,6 +12,8 @@ from lastlight.cli import discover, main
 from lastlight.seal import tsa
 from lastlight.seal.tsa import TsaError
 
+pytestmark = pytest.mark.usefixtures("trust_test_tsa")
+
 DATE = "2026-10-11"
 
 

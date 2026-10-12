@@ -40,16 +40,31 @@ def test_the_guide_says_what_the_timestamp_does_not_prove(text: str) -> None:
     assert "does not prove" in text and "signature" in text
 
 
-def test_the_guide_keeps_its_signature_chain_caveat_until_verify_checks_the_signature(
-    text: str,
-) -> None:
-    # `lastlight verify` does not validate the timestamp authority's signature (issue #25 adds
-    # it). Until then the guide must say so in these words; the caveat goes when the check lands.
-    assert (
-        "`lastlight verify` checks the imprint and the time but does not yet validate the "
-        "authority's signature chain (issue #25 will add signature verification), so until then "
-        "it trusts the response as delivered."
-    ) in text
+def test_the_guide_no_longer_says_the_signature_is_unchecked(text: str) -> None:
+    # Until issue #25 the guide said `lastlight verify` trusted the response as delivered, in
+    # words a test pinned. The check has landed, so the caveat is gone and must not come back.
+    assert "does not yet validate" not in text
+    assert "issue #25 will add" not in text
+    assert "trusts the response as delivered" not in text
+
+
+@pytest.mark.parametrize(
+    "needle",
+    [
+        "src/lastlight/seal/certs",
+        "FreeTSA",
+        "pinned",
+        "signature",
+        "certificate chain",
+        "extended key usage",
+        "validity",
+        "names which check failed",
+        "the time the token names",
+        "openssl ts -verify",
+    ],
+)
+def test_the_guide_says_what_verify_now_checks_about_the_signature(text: str, needle: str) -> None:
+    assert needle in text
 
 
 def test_the_guide_spells_no_clock_time_or_position(text: str) -> None:

@@ -161,6 +161,18 @@ def test_project_metadata(pyproject: dict[str, Any]) -> None:
     assert project["scripts"] == {"lastlight": "lastlight.cli:main"}
 
 
+def test_cryptography_is_a_declared_dependency(pyproject: dict[str, Any]) -> None:
+    # `lastlight.seal.trust` and `lastlight.seal.tsa` import `cryptography` directly (the pinned
+    # certificates, the validity and key usage checks). It must not arrive only through
+    # `rfc3161-client`: if that library changed its own requirements, verification would break
+    # at import with no change here.
+    declared = {
+        re.split(r"[\s<>=!~;\[(]", item, maxsplit=1)[0].lower().replace("_", "-")
+        for item in pyproject["project"]["dependencies"]
+    }
+    assert "cryptography" in declared
+
+
 def test_dev_group_has_the_test_runner_and_linter(pyproject: dict[str, Any]) -> None:
     dev = " ".join(pyproject["dependency-groups"]["dev"])
     assert "pytest" in dev

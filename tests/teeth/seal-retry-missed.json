@@ -1,0 +1,303 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_seal_retry.py",
+    "tests/test_site_missed.py",
+    "tests/test_ledger_docs_missed.py",
+    "tests/test_daily.py",
+    "tests/test_cli_daily.py",
+    "tests/test_publish_site.py",
+    "tests/test_publish_build.py",
+    "tests/test_site_command.py",
+    "tests/test_seal_workflow.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_seal_retry.py",
+    "tests/test_site_missed.py",
+    "tests/test_ledger_docs_missed.py",
+    "tests/test_daily.py",
+    "tests/test_cli_daily.py",
+    "tests/test_publish_site.py",
+    "tests/test_publish_build.py",
+    "tests/test_site_command.py",
+    "tests/test_seal_workflow.py"
+  ],
+  "mutants": [
+    {
+      "label": "1 one retry on a transient failure: the attempts loop gives up after the first failure",
+      "file": "../../src/lastlight/daily.py",
+      "oracle": "real",
+      "find": "if number == attempts:",
+      "replace": "if number >= 1:"
+    },
+    {
+      "label": "2 no retry when now + pause reaches the deadline: the deadline check before the pause is removed",
+      "file": "../../src/lastlight/daily.py",
+      "oracle": "real",
+      "find": "if _utc(clock()) + dt.timedelta(seconds=pause_seconds) >= evening_deadline(evening):",
+      "replace": "if False:"
+    },
+    {
+      "label": "3 only transient classes are retried: every Exception is retried",
+      "file": "../../src/lastlight/daily.py",
+      "oracle": "real",
+      "find": "if not isinstance(error, TRANSIENT_ERRORS):",
+      "replace": "if not isinstance(error, Exception):"
+    },
+    {
+      "label": "4 the pause is the configured seconds: the loop sleeps 0 seconds",
+      "file": "../../src/lastlight/daily.py",
+      "oracle": "real",
+      "find": "sleep(pause_seconds)",
+      "replace": "sleep(0.0)"
+    },
+    {
+      "label": "5 the second attempt past sunset is refused: the retry reuses the first attempt's now",
+      "file": "../../src/lastlight/daily.py",
+      "oracle": "real",
+      "find": "now = _utc(clock())",
+      "replace": "now = now"
+    },
+    {
+      "label": "6 the home page leads with the missed statement when through is missed and newest: condition inverted",
+      "file": "../../src/lastlight/publish/pages.py",
+      "oracle": "real",
+      "find": "if newest <= ledger.evenings[0].date:",
+      "replace": "if newest > ledger.evenings[0].date:"
+    },
+    {
+      "label": "7 the missed range includes through: the range starts one day below through",
+      "file": "../../src/lastlight/publish/missed.py",
+      "oracle": "real",
+      "find": "range(days + 1)",
+      "replace": "range(1, days + 1)"
+    },
+    {
+      "label": "8 default through is the day before when the deadline has not passed: always the local date",
+      "file": "../../src/lastlight/publish/missed.py",
+      "oracle": "real",
+      "find": "return today if now >= _deadline(today) else today - ONE_DAY",
+      "replace": "return today"
+    },
+    {
+      "label": "9 the workflow passes --attempts 2: the line says 1",
+      "file": "../../.github/workflows/seal.yml",
+      "oracle": "real",
+      "find": "--attempts 2",
+      "replace": "--attempts 1"
+    },
+    {
+      "label": "10 [control] the human-readable pause notice says 'sleeping' where it said 'pausing'",
+      "file": "../../src/lastlight/daily.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "Only the verb in the pause notice changes; no test asserts the verb (the tests assert the duration, the attempt count and the declined-retry wording), the note never reaches control flow or an exit code, and it holds only while the notice stays free of clock times and the verb stays outside the failure-named line that tests do read.",
+      "find": "f\"pausing {pause_seconds:g} seconds before attempt {number + 1} of {attempts}\"",
+      "replace": "f\"sleeping {pause_seconds:g} seconds before attempt {number + 1} of {attempts}\""
+    },
+    {
+      "label": "X1 the CLI passes the default pause instead of --retry-pause to the loop",
+      "file": "../../src/lastlight/commands/seal_daily.py",
+      "oracle": "real",
+      "find": "pause_seconds=args.retry_pause,",
+      "replace": "pause_seconds=DEFAULT_RETRY_PAUSE_S,"
+    },
+    {
+      "label": "X2 the deadline check lets a pause that ends exactly at the deadline through (>= becomes >)",
+      "file": "../../src/lastlight/daily.py",
+      "oracle": "real",
+      "find": "dt.timedelta(seconds=pause_seconds) >= evening_deadline(evening):",
+      "replace": "dt.timedelta(seconds=pause_seconds) > evening_deadline(evening):"
+    },
+    {
+      "label": "X3 the deadline is judged from the first attempt's start, not the clock after the failure",
+      "file": "../../src/lastlight/daily.py",
+      "oracle": "real",
+      "find": "if _utc(clock()) + dt.timedelta(seconds=pause_seconds)",
+      "replace": "if now + dt.timedelta(seconds=pause_seconds)"
+    },
+    {
+      "label": "X4 the home page names the oldest missed evening, not the newest",
+      "file": "../../src/lastlight/publish/pages.py",
+      "oracle": "real",
+      "find": "newest = ledger.missed[0]",
+      "replace": "newest = ledger.missed[-1]"
+    },
+    {
+      "label": "X5 docs: what counts as activity for the bot's pushes is called settled, not unverified",
+      "file": "../../docs/ledger.md",
+      "oracle": "real",
+      "find": "count is therefore unverified, and so is",
+      "replace": "count is therefore settled, and so is"
+    },
+    {
+      "label": "X6 the first attempt reads the clock instead of using the now it was given",
+      "file": "../../src/lastlight/daily.py",
+      "oracle": "real",
+      "find": "now = _utc(now_utc)\n    for number in range(1, attempts + 1):",
+      "replace": "now = _utc(clock())\n    for number in range(1, attempts + 1):"
+    },
+    {
+      "label": "X7 a single attempt is reported with the attempt prefix, not exactly as before",
+      "file": "../../src/lastlight/daily.py",
+      "oracle": "real",
+      "find": "return reason if attempts == 1 else f\"attempt {number} of {attempts} failed: {reason}\"",
+      "replace": "return f\"attempt {number} of {attempts} failed: {reason}\""
+    },
+    {
+      "label": "X8 --attempts defaults to 2",
+      "file": "../../src/lastlight/commands/seal_daily.py",
+      "oracle": "real",
+      "find": "DEFAULT_ATTEMPTS = 1",
+      "replace": "DEFAULT_ATTEMPTS = 2"
+    },
+    {
+      "label": "X9 --retry-pause defaults to 60 seconds",
+      "file": "../../src/lastlight/commands/seal_daily.py",
+      "oracle": "real",
+      "find": "DEFAULT_RETRY_PAUSE_S = 300.0",
+      "replace": "DEFAULT_RETRY_PAUSE_S = 60.0"
+    },
+    {
+      "label": "X10 the workflow retries in YAML: the seal step tolerates failure",
+      "file": "../../.github/workflows/seal.yml",
+      "oracle": "real",
+      "find": "- name: Paint, seal and verify tonight",
+      "replace": "- name: Paint, seal and verify tonight\n        continue-on-error: true"
+    },
+    {
+      "label": "X11 default through: the instant the sun reaches the horizon is still the day before (>= becomes >)",
+      "file": "../../src/lastlight/publish/missed.py",
+      "oracle": "real",
+      "find": "now >= _deadline(today)",
+      "replace": "now > _deadline(today)"
+    },
+    {
+      "label": "X12 default through accepts a naive clock",
+      "file": "../../src/lastlight/publish/missed.py",
+      "oracle": "real",
+      "find": "if now_utc.tzinfo is None or now_utc.utcoffset() is None:",
+      "replace": "if False:"
+    },
+    {
+      "label": "X13 the archive lists oldest first",
+      "file": "../../src/lastlight/publish/pages.py",
+      "oracle": "real",
+      "find": "entries.sort(key=lambda entry: entry[0], reverse=True)",
+      "replace": "entries.sort(key=lambda entry: entry[0])"
+    },
+    {
+      "label": "X14 the archive explains missed evenings even when none is missed",
+      "file": "../../src/lastlight/publish/pages.py",
+      "oracle": "real",
+      "find": "if ledger.missed:\n        parts.append(",
+      "replace": "if True:\n        parts.append("
+    },
+    {
+      "label": "X15 an empty ledger no longer short-circuits the missed range",
+      "file": "../../src/lastlight/publish/missed.py",
+      "oracle": "real",
+      "find": "if not sealed_dates:",
+      "replace": "if False:"
+    },
+    {
+      "label": "X16 the site summary always counts missed evenings",
+      "file": "../../src/lastlight/commands/site.py",
+      "oracle": "real",
+      "find": "if report.missed:",
+      "replace": "if True:"
+    },
+    {
+      "label": "X17 docs: the 60-day rule links something other than GitHub's documentation",
+      "file": "../../docs/ledger.md",
+      "oracle": "real",
+      "find": "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule",
+      "replace": "https://github.example/schedule"
+    },
+    {
+      "label": "X18 docs: the re-enable command drops the repository flag",
+      "file": "../../docs/ledger.md",
+      "oracle": "real",
+      "find": "gh workflow enable seal.yml -R cdcoonce/lastlight",
+      "replace": "gh workflow enable seal.yml"
+    },
+    {
+      "label": "X19 docs: the build-board sentence drops the retried outcome",
+      "file": "../../docs/ledger.md",
+      "oracle": "real",
+      "find": "sealed, retried or missed",
+      "replace": "sealed or missed"
+    },
+    {
+      "label": "X20 the site's own deadline drifts a minute from daily's instant",
+      "file": "../../src/lastlight/publish/missed.py",
+      "oracle": "real",
+      "find": "    return elevation_crossings(evening, lat, lon)[0.0]",
+      "replace": "    return elevation_crossings(evening, lat, lon)[0.0] + dt.timedelta(minutes=1)"
+    },
+    {
+      "label": "X21 the missed lead replaces the newest sealed painting instead of leading it",
+      "file": "../../src/lastlight/publish/pages.py",
+      "oracle": "real",
+      "find": "    lead = _missed_lead(ledger, shows_a_painting=featured is not None)\n",
+      "replace": "    lead = _missed_lead(ledger, shows_a_painting=featured is not None)\n    featured = None if lead else featured\n"
+    },
+    {
+      "label": "X22 an explicit --through is ignored in favour of the clock",
+      "file": "../../src/lastlight/publish/build.py",
+      "oracle": "real",
+      "find": "    if through is None:\n",
+      "replace": "    if True:\n"
+    },
+    {
+      "label": "X23 a missed evening in the archive links to a page",
+      "file": "../../src/lastlight/publish/pages.py",
+      "oracle": "real",
+      "find": "return f'<li class=\"missed\">{_e(missed_statement(date))}</li>'",
+      "replace": "return f'<li class=\"missed\"><a href=\"{page_name(date)}\">{_e(missed_statement(date))}</a></li>'"
+    },
+    {
+      "label": "X24 the missed lead calls the shown evening the newest sealed one even when the newest sealed evening did not verify",
+      "file": "../../src/lastlight/publish/pages.py",
+      "oracle": "real",
+      "find": "if shows_a_painting and ledger.evenings[0].verified:",
+      "replace": "if shows_a_painting:"
+    },
+    {
+      "label": "X25 the missed lead says the newest sealed evening did not verify when it did",
+      "file": "../../src/lastlight/publish/pages.py",
+      "oracle": "real",
+      "find": "if shows_a_painting and ledger.evenings[0].verified:",
+      "replace": "if False:"
+    },
+    {
+      "label": "X26 the bound on --through is removed: an evening that has not ended is accepted and reported missed",
+      "file": "../../src/lastlight/publish/build.py",
+      "oracle": "real",
+      "find": "if through is not None and through > newest_closed:",
+      "replace": "if False:"
+    },
+    {
+      "label": "X27 the bound on --through refuses the newest evening that has ended too (> becomes >=)",
+      "file": "../../src/lastlight/publish/build.py",
+      "oracle": "real",
+      "find": "if through is not None and through > newest_closed:",
+      "replace": "if through is not None and through >= newest_closed:"
+    }
+  ]
+}

@@ -13,13 +13,17 @@ either unchanged or holds a complete seal. The strip is sealed through the forec
 forecast carries the SHA-256 of the PNG, so the one timestamp covers the numbers and the
 picture, and `seal` refuses a strip that is not the one the forecast names, is not a PNG, or
 carries metadata (the ledger is append-only and a sealed leak could not be taken back). `verify`
-re-derives everything from the files: the digest of the sealed bytes must equal the timestamp's
-imprint, the file must be a valid forecast for the requested date in canonical form, the
-timestamp must have been issued before geometric sunset at the reference point on that date
-(`lastlight.geometry`), and the strip beside the forecast must hash to `strip_sha256`.
+re-derives everything from the files: the timestamp must be genuine, the digest of the sealed
+bytes must equal its imprint, the file must be a valid forecast for the requested date in
+canonical form, the timestamp must have been issued before geometric sunset at the reference
+point on that date (`lastlight.geometry`), and the strip beside the forecast must hash to
+`strip_sha256`.
 
-`verify` does not validate the timestamp's signature chain against the TSA certificate; that
-is a follow-up. It reports durations, never clock times, in its reasons.
+`verify` proves the timestamp is genuine before it believes what it says: the signature must
+verify against the pinned FreeTSA certificates (`lastlight.seal.trust`) and the certificates
+must have been valid at the token's own time. `seal` makes the same check on the authority's reply
+before it writes anything, so a reply that does not verify never enters the ledger. A reason
+names the check that failed. It reports durations, never clock times, in its reasons.
 """
 
 from __future__ import annotations
@@ -36,7 +40,8 @@ from lastlight.geometry import elevation_crossings
 from lastlight.privacy.images import PNG_SIGNATURE, image_issues
 from lastlight.seal import tsa
 from lastlight.seal.canonical import canonical_bytes, digest_hex
-from lastlight.seal.tsa import DEFAULT_TSA_URL, TsaError
+from lastlight.seal.trust import Trust
+from lastlight.seal.tsa import DEFAULT_TSA_URL, TokenRejected, TsaError
 
 INDEX_NAME = "index.jsonl"
 
@@ -164,13 +169,16 @@ def seal(
     *,
     strip: bytes | None = None,
     tsa_url: str = DEFAULT_TSA_URL,
+    trust: Trust | None = None,
 ) -> SealResult:
     """Write the canonical forecast, its timestamp, its strip and an index line.
 
     A date with any trace of a seal is refused. `strip` must be given exactly when the forecast
     names one (`strip_sha256`) and must be that PNG, with no metadata. Raises
     `AlreadySealedError` or `StripError` before any network call, and `TsaError` (writing
-    nothing) if the timestamp authority fails or answers for other data.
+    nothing) if the timestamp authority fails, answers for other data, or sends a reply that does
+    not verify against the pinned authority (`trust` replaces the pinned pair; see
+    `lastlight.seal.tsa.authenticate`).
     """
     date = forecast.date
     paths = ledger_paths(ledger_dir, date)
@@ -179,7 +187,7 @@ def seal(
 
     data = canonical_bytes(forecast)
     digest = digest_hex(data)
-    reply = tsa.request_timestamp(data, tsa_url)
+    reply = tsa.request_timestamp(data, tsa_url, trust=trust)
     line = _index_line(date, digest, forecast)
 
     written: list[Path] = []
@@ -242,8 +250,12 @@ def _strip_failure(forecast: Forecast, paths: LedgerPaths, day: str) -> str | No
     return None
 
 
-def verify(date: dt.date, ledger_dir: Path) -> VerifyResult:
-    """Check the sealed forecast of `date`: digest, form, date, seal before sunset, and strip."""
+def verify(date: dt.date, ledger_dir: Path, *, trust: Trust | None = None) -> VerifyResult:
+    """Check the sealed forecast of `date`: timestamp, digest, form, date, sunset, and strip.
+
+    The timestamp must be genuine (`lastlight.seal.tsa.authenticate`, against the pinned
+    authority unless `trust` is given) before its imprint and time are looked at.
+    """
     day = date.isoformat()
     paths = ledger_paths(ledger_dir, date)
     if not paths.forecast.is_file():
@@ -253,7 +265,9 @@ def verify(date: dt.date, ledger_dir: Path) -> VerifyResult:
     data = paths.forecast.read_bytes()
 
     try:
-        stamp = tsa.parse_response(paths.timestamp.read_bytes())
+        stamp = tsa.authenticate(paths.timestamp.read_bytes(), trust=trust)
+    except TokenRejected as error:
+        return _fail(f"untrusted timestamp for {day}: {error}")
     except TsaError as error:
         return _fail(f"unusable timestamp for {day}: {error}")
     digest = digest_hex(data)

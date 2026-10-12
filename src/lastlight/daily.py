@@ -15,22 +15,40 @@ left to YAML live:
 The evening defaults to the local mean solar date at the reference point (the same convention
 as `lastlight.cameras.archive.evening_date`), so a run in the afternoon UTC seals the evening
 that is coming.
+
+`seal_with_retry` is the one retry the workflow asks for (issue #26). A failure of the outside
+world (the HRRR bucket, the timestamp authority, the disk) must not cost the evening, so a failed
+attempt is tried again after a pause, but only while the evening is still ahead: if the pause
+would reach the deadline (the sun at the horizon, this module's own instant) there is no retry,
+and the second attempt goes through `seal_daily` with a fresh clock reading, so the late refusal
+above applies to it as it does to any run. A failure that would only repeat (a refusal, a reduction
+that cannot work, a seal that does not verify) is never retried: a pause would only cost billed
+minutes. The loop takes its clock and its sleep as arguments, so no test ever waits.
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import hashlib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from lastlight.cameras.archive import evening_date
 from lastlight.geometry import elevation_crossings
-from lastlight.inputs.http import Transport
+from lastlight.inputs.hrrr import HrrrError
+from lastlight.inputs.http import FetchError, Transport
 from lastlight.painting import paint
-from lastlight.seal import DEFAULT_TSA_URL, is_sealed, ledger_paths, seal, verify
+from lastlight.seal import DEFAULT_TSA_URL, TsaError, is_sealed, ledger_paths, seal, verify
 from lastlight.site import REFERENCE_POINT
+
+TRANSIENT_ERRORS: tuple[type[Exception], ...] = (HrrrError, FetchError, TsaError, OSError)
+"""The failures a retry can cure: the weather service, the timestamp authority, the disk.
+
+Everything else (`TooLateError`, `ReductionError`, `StripError`, `AlreadySealedError`,
+`SealVerificationError`, `ValueError`) is deterministic or a refusal and is never retried.
+"""
 
 
 class TooLateError(Exception):
@@ -60,6 +78,16 @@ def _utc(when: dt.datetime) -> dt.datetime:
 def default_evening(now_utc: dt.datetime) -> dt.date:
     """The evening a run at `now_utc` seals: the local mean solar date at the reference point."""
     return evening_date(_utc(now_utc), REFERENCE_POINT[1])
+
+
+def evening_deadline(evening: dt.date) -> dt.datetime:
+    """The instant `evening` closes: the sun at the horizon at the reference point (UTC).
+
+    A seal made at or after it is late. INTERNAL USE ONLY, like `elevation_crossings`: the
+    instant is for deciding, never for printing.
+    """
+    lat, lon, _elevation = REFERENCE_POINT
+    return elevation_crossings(evening, lat, lon)[0.0]
 
 
 def seal_daily(
@@ -92,8 +120,7 @@ def seal_daily(
         data = ledger_paths(ledger_dir, evening).forecast.read_bytes()
         return DailyResult("already-sealed", evening, hashlib.sha256(data).hexdigest())
 
-    lat, lon, _elevation = REFERENCE_POINT
-    if now >= elevation_crossings(evening, lat, lon)[0.0]:
+    if now >= evening_deadline(evening):
         raise TooLateError(
             f"the sun has already reached the horizon at the reference point for the evening of "
             f"{evening.isoformat()}; sealing now would be late, and a late day is never "
@@ -117,3 +144,53 @@ def seal_daily(
             f"the seal just written for {evening.isoformat()} does not verify: {outcome.reason}"
         )
     return DailyResult("sealed", evening, result.digest)
+
+
+def _failure(number: int, attempts: int, error: Exception) -> str:
+    reason = str(error) or type(error).__name__
+    return reason if attempts == 1 else f"attempt {number} of {attempts} failed: {reason}"
+
+
+def seal_with_retry(
+    attempt: Callable[[dt.datetime], DailyResult],
+    evening: dt.date,
+    *,
+    now_utc: dt.datetime,
+    attempts: int,
+    pause_seconds: float,
+    clock: Callable[[], dt.datetime],
+    sleep: Callable[[float], None],
+    note: Callable[[str], None],
+) -> DailyResult:
+    """Run `attempt(now)` up to `attempts` times, pausing between tries, never past the deadline.
+
+    The first attempt gets `now_utc`; each retry gets a fresh `clock()` reading taken after the
+    pause. Only `TRANSIENT_ERRORS` are retried, and only if `clock()` plus the pause is still
+    before `evening_deadline(evening)`; otherwise the failure is raised at once. Whatever the
+    last attempt raised is what this raises, so the caller's exit code is the last attempt's.
+    Every failed attempt, and every decision not to retry, is told to `note` (dates and
+    durations only, never a clock time).
+    """
+    if attempts < 1:
+        raise ValueError(f"attempts must be at least 1, got {attempts}")
+    now = _utc(now_utc)
+    for number in range(1, attempts + 1):
+        try:
+            return attempt(now)
+        except Exception as error:
+            note(_failure(number, attempts, error))
+            if number == attempts:
+                raise
+            if not isinstance(error, TRANSIENT_ERRORS):
+                note("not retrying: that failure would only repeat, so a pause cannot help")
+                raise
+            if _utc(clock()) + dt.timedelta(seconds=pause_seconds) >= evening_deadline(evening):
+                note(
+                    f"not retrying: a pause of {pause_seconds:g} seconds would reach the sun at "
+                    "the horizon at the reference point, and a seal made then would be late"
+                )
+                raise
+            note(f"pausing {pause_seconds:g} seconds before attempt {number + 1} of {attempts}")
+            sleep(pause_seconds)
+            now = _utc(clock())
+    raise AssertionError("unreachable: the last attempt returns or raises")  # pragma: no cover

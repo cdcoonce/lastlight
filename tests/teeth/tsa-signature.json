@@ -1,0 +1,258 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_seal_signature.py",
+    "tests/test_seal_signature_oracles.py",
+    "tests/test_seal_signature_pins.py",
+    "tests/test_seal_tsa.py",
+    "tests/test_seal_ledger.py",
+    "tests/test_seal_cli.py",
+    "tests/test_seal_strip.py",
+    "tests/test_ledger_docs.py",
+    "tests/test_daily.py",
+    "tests/test_repo_scaffold.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_seal_signature.py",
+    "tests/test_seal_signature_oracles.py",
+    "tests/test_seal_signature_pins.py",
+    "tests/test_seal_tsa.py",
+    "tests/test_seal_ledger.py",
+    "tests/test_seal_cli.py",
+    "tests/test_seal_strip.py",
+    "tests/test_ledger_docs.py",
+    "tests/test_daily.py",
+    "tests/test_repo_scaffold.py"
+  ],
+  "mutants": [
+    {
+      "label": "M1 the signature verification call is skipped",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "verifier.build().verify(response, stamp.imprint)",
+      "replace": "None  # the signature check is skipped"
+    },
+    {
+      "label": "M1b a signature failure is swallowed (the except returns the stamp)",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "raise _library_rejection(error) from error",
+      "replace": "return stamp  # the failure is swallowed"
+    },
+    {
+      "label": "M1c verify reads the timestamp without authenticating it (the pre-slice behaviour)",
+      "file": "../../src/lastlight/seal/ledger.py",
+      "oracle": "real",
+      "find": "stamp = tsa.authenticate(paths.timestamp.read_bytes(), trust=trust)",
+      "replace": "stamp = tsa.parse_response(paths.timestamp.read_bytes())"
+    },
+    {
+      "label": "M2 anchors are built from the certificates embedded in the token (self-trust)",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "anchors = trust if trust is not None else trust_module.DEFAULT_TRUST",
+      "replace": "carried = [x509.load_der_x509_certificate(raw) for raw in decode_timestamp_response(der).signed_data.certificates]\n    anchors = Trust(root=next(c for c in carried if c.issuer == c.subject), tsa=next(c for c in carried if c.issuer != c.subject))"
+    },
+    {
+      "label": "M2c the pinned-signer comparison is skipped (only the library's chain remains)",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "_signer_is_pinned(response, anchors)",
+      "replace": "pass  # the pinned-signer comparison is skipped"
+    },
+    {
+      "label": "M2d the signer is matched on serial number alone, not on the whole certificate",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "if named[0] != trust.tsa:",
+      "replace": "if named[0].serial_number != trust.tsa.serial_number:"
+    },
+    {
+      "label": "M3 verify compares the token's imprint with itself, not with the sealed bytes",
+      "file": "../../src/lastlight/seal/ledger.py",
+      "oracle": "real",
+      "find": "if stamp.imprint.hex() != digest:",
+      "replace": "if stamp.imprint.hex() != stamp.imprint.hex():"
+    },
+    {
+      "label": "M3b seal compares the reply's imprint with itself, not with the sent bytes",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "stamp.imprint != hashlib.sha256(data).digest()",
+      "replace": "stamp.imprint != stamp.imprint"
+    },
+    {
+      "label": "M4 seal reads the reply without authenticating it",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "stamp = authenticate(reply, trust=trust)",
+      "replace": "stamp = parse_response(reply)  # verification skipped in the seal path"
+    },
+    {
+      "label": "M4b seal drops the trust it was given on its way to the verifier",
+      "file": "../../src/lastlight/seal/ledger.py",
+      "oracle": "real",
+      "find": "reply = tsa.request_timestamp(data, tsa_url, trust=trust)",
+      "replace": "reply = tsa.request_timestamp(data, tsa_url)"
+    },
+    {
+      "label": "M5 the granted set goes back to {0, 1}",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "if response.status != _GRANTED:",
+      "replace": "if response.status not in (0, 1):"
+    },
+    {
+      "label": "M6 the pinned fingerprint comparison is skipped at load",
+      "file": "../../src/lastlight/seal/trust.py",
+      "oracle": "real",
+      "find": "if actual != expected_sha256:",
+      "replace": "if actual != expected_sha256 and False:"
+    },
+    {
+      "label": "M6b the TSA certificate is no longer required to be issued by the root",
+      "file": "../../src/lastlight/seal/trust.py",
+      "oracle": "real",
+      "find": "self.tsa.verify_directly_issued_by(self.root)",
+      "replace": "pass  # not checked"
+    },
+    {
+      "label": "M7 validity is judged at today's date, not the token's gen_time",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "_valid_at(stamp.gen_time, anchors)",
+      "replace": "_valid_at(dt.datetime.now(dt.UTC), anchors)"
+    },
+    {
+      "label": "M7b the end instant of a certificate counts as still valid",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "if when >= certificate.not_valid_after_utc:",
+      "replace": "if when > certificate.not_valid_after_utc:"
+    },
+    {
+      "label": "M7c the start instant of a certificate counts as not yet valid",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "if when < certificate.not_valid_before_utc:",
+      "replace": "if when <= certificate.not_valid_before_utc:"
+    },
+    {
+      "label": "M7d only the TSA certificate's validity is judged, the root's is left to the library",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "for name, certificate in ((\"TSA\", trust.tsa), (\"root\", trust.root)):",
+      "replace": "for name, certificate in ((\"TSA\", trust.tsa),):"
+    },
+    {
+      "label": "M8 a signature failure carries a generic reason that does not name the check",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "super().__init__(f\"{_CHECK_NAMES[check]}: {detail}\")",
+      "replace": "super().__init__(\"verification failed\" if check == \"signature\" else f\"{_CHECK_NAMES[check]}: {detail}\")"
+    },
+    {
+      "label": "M10 a non-critical extended key usage is accepted",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "if not usage.critical:",
+      "replace": "if False:"
+    },
+    {
+      "label": "M10b the extended key usage check is skipped",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "_is_timestamping(anchors.tsa)",
+      "replace": "pass  # the key usage check is skipped"
+    },
+    {
+      "label": "M10c a TSA certificate with no extended key usage extension is accepted by lastlight's own check",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "raise TokenRejected(\n            \"eku\", \"the pinned TSA certificate has no extended key usage extension\"\n        ) from None",
+      "replace": "return"
+    },
+    {
+      "label": "M10d the extended key usage check goes back to membership (timestamping among other purposes is accepted)",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "if list(usage.value) != [x509.ExtendedKeyUsageOID.TIME_STAMPING]:",
+      "replace": "if x509.ExtendedKeyUsageOID.TIME_STAMPING not in usage.value:"
+    },
+    {
+      "label": "M11 a library exception other than the expected ones escapes authenticate",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "except Exception as error:  # a hostile file can raise more than VerificationError: fail closed",
+      "replace": "except ValueError as error:  # narrowed"
+    },
+    {
+      "label": "M11b an unreadable carried certificate escapes as its own exception type",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "except Exception as error:  # InvalidVersion is not a ValueError: any unreadable one is refused",
+      "replace": "except ValueError as error:  # narrowed"
+    },
+    {
+      "label": "M13 the pinned anchors are chosen by looking at an environment variable",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "anchors = trust if trust is not None else trust_module.DEFAULT_TRUST",
+      "replace": "anchors = trust if trust is not None else (trust_module.DEFAULT_TRUST if __import__(\"os\").environ.get(\"LASTLIGHT_TSA_CA\") is None else trust_module.DEFAULT_TRUST)"
+    },
+    {
+      "label": "M13b the pinned anchors are chosen by looking at an environment variable read through a renamed import",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "anchors = trust if trust is not None else trust_module.DEFAULT_TRUST",
+      "replace": "from os import getenv as _getenv\n    anchors = trust if trust is not None else (trust_module.DEFAULT_TRUST if _getenv(\"LASTLIGHT_TSA_CA\") is None else trust_module.DEFAULT_TRUST)"
+    },
+    {
+      "label": "M15 over-strict: every token is refused as issued before the certificate began",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "if when < certificate.not_valid_before_utc:",
+      "replace": "if True:"
+    },
+    {
+      "label": "M16 cryptography is no longer declared in pyproject.toml (it arrives only through rfc3161-client)",
+      "file": "../../pyproject.toml",
+      "oracle": "real",
+      "find": "    \"cryptography>=50.0.2\",\n",
+      "replace": ""
+    },
+    {
+      "label": "M9 [control] one word of the certs README's expiry sentence",
+      "file": "../../src/lastlight/seal/certs/README.md",
+      "oracle": "real",
+      "find": "stop being accepted for new seals",
+      "replace": "stop being accepted for fresh seals",
+      "expect": "survived",
+      "why": "No test reads that sentence: the README tests assert the URLs, fingerprints, dates and fetch date only."
+    },
+    {
+      "label": "M9b [control] one word of a docstring in tsa.py",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "Both pinned certificates must have been valid when the token says it was issued.",
+      "replace": "Both pinned certificates had to be valid when the token says it was issued.",
+      "expect": "survived",
+      "why": "A docstring sentence that no test or doc generator reads."
+    }
+  ]
+}
