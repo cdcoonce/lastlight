@@ -556,6 +556,9 @@ def _without(record: dict, key: str):
         (_with_record(REFIT_RECORD, refused=False), "refused"),
         (_with_record(ACCEPTED_RECORD, refused=True), "refused"),
         (_with_record(REFIT_RECORD, refused="yes"), "refused"),
+        # the vote agrees with the flag, the outcome does not
+        (_with_record(REFIT_RECORD, refused=False, frames_lowered=0), "refused"),
+        (_with_record(ACCEPTED_RECORD, outcome="kept_climb", refit_energy=3.0), "refused"),
         (_with_record(REFIT_RECORD, climbed_energy=math.nan), "climbed_energy"),
         (_with_record(REFIT_RECORD, climbed_energy="high"), "climbed_energy"),
         (_with_record(REFIT_RECORD, climbed_energy=-1.0), "climbed_energy"),

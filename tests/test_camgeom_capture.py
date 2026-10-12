@@ -22,6 +22,8 @@ from camgeom_synthetic import (
     REF_LON,
     TRUE_MODEL,
     WIDTH,
+    haze,
+    mismatched_ridge_elevation_deg,
     paint_cloud_base,
     render_frame,
     ridge_dem,
@@ -188,6 +190,55 @@ def test_the_guard_votes_by_frame_as_the_median_of_the_traces_does(
     found = fit(scene(held_in))
     assert_recovers(found.orientation, TRUTH)
     assert found.guard is not None and found.guard.outcome == outcome
+
+
+def test_a_frame_that_shows_no_ridge_does_not_stop_the_majority_refusing() -> None:
+    # The vote is a majority, not unanimity: two frames hold the cloud and the third is a flat
+    # grey (fog, or a frame the exposure lost). The fitted skyline scores lower in the two frames
+    # that hold an edge and cannot score lower in the one that holds none.
+    frames = scene(held_in=(0, 1))
+    frames[2] = np.full_like(frames[2], 140)
+    found = fit(frames)
+    assert_recovers(found.orientation, TRUTH)
+    guard = found.guard
+    assert guard is not None and guard.frames == 3 and guard.frames_lowered == 2
+    assert guard.outcome == "refit"
+
+
+def test_a_cloud_edge_in_one_frame_is_outvoted_even_when_the_mean_map_says_the_fit_lost() -> None:
+    # In haze (30 percent of the contrast) a cloud's dark underside in one frame is nine times
+    # stronger than the ridge. The climb on the mean of the edge maps is drawn to it, and the
+    # median of the traces puts the camera back on the ridge. On the mean map the fitted skyline
+    # then scores less than half of the climbed one (4.0 against 11.6), but that is the one
+    # frame with the cloud: in the other two the fitted skyline scores twenty times higher, and
+    # the guard, which votes by frame, accepts the least-squares result.
+    frames = [haze(frame, 0.7) for frame in scene(held_in=())]
+    frames[0] = paint_cloud_base(frames[0], SKYLINE, offset_start=10, offset_end=4, x0=100, x1=700)
+    found = fit(frames)
+    assert_recovers(found.orientation, TRUTH)
+    guard = found.guard
+    assert guard is not None and guard.outcome == "accepted"
+    assert guard.frames_lowered == 1 and guard.frames == 3
+    assert guard.fitted_energy < 0.5 * guard.climbed_energy
+
+
+def test_the_refit_keeps_the_columns_a_slightly_wrong_terrain_model_only_misplaces() -> None:
+    # The frames come from a ridge that differs from the horizon the fit is given by about
+    # 0.1 degree, so honest ridge columns lie a pixel or two from the climbed skyline. The refit
+    # drops the cloud's columns (about 200) and none of those, and ends where the fit ends
+    # without the cloud.
+    rows = true_skyline_y(MODEL, mismatched_ridge_elevation_deg)
+    plain, clouded = [], []
+    for seed in (11, 12, 13):
+        frame = render_frame(MODEL, mismatched_ridge_elevation_deg, seed=seed, stamp=OVERLAY[0])
+        plain.append(frame)
+        clouded.append(paint_cloud_base(frame, rows, **CLOUD))
+    without_cloud, with_cloud = fit(plain), fit(clouded)
+    assert without_cloud.guard is not None and without_cloud.guard.outcome == "accepted"
+    guard = with_cloud.guard
+    assert guard is not None and guard.outcome == "refit"
+    assert 180 <= guard.columns_dropped <= 260
+    assert_recovers(with_cloud.orientation, without_cloud.orientation)
 
 
 # --- the record reaches the fit file --------------------------------------------------------------
