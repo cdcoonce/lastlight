@@ -29,6 +29,10 @@ from lastlight.publish import BuildError, BuildReport, build_site, pages
 from lastlight.publish.missed import default_through, missed_evenings
 from lastlight.site import REFERENCE_POINT
 
+# Seals here are signed by the test authority (`tsa_factory`), which verifies only while
+# `trust_test_tsa` swaps it in for the pinned FreeTSA pair (issue #25).
+pytestmark = pytest.mark.usefixtures("trust_test_tsa")
+
 OLDEST, MIDDLE, NEWEST = factory.DATES  # 2026-10-11, 2026-10-12, 2026-10-13
 DAY = dt.timedelta(days=1)
 SECOND = dt.timedelta(seconds=1)

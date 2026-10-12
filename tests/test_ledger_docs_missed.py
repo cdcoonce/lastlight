@@ -102,11 +102,3 @@ def test_the_guide_explains_what_the_site_says_about_a_missed_evening(
 def test_the_guide_still_spells_no_clock_time_or_position(text: str) -> None:
     assert not contains_clock_time(text)
     assert text_hits(text) == []
-
-
-def test_the_signature_caveat_is_untouched(text: str) -> None:
-    assert (
-        "`lastlight verify` checks the imprint and the time but does not yet validate the "
-        "authority's signature chain (issue #25 will add signature verification), so until then "
-        "it trusts the response as delivered."
-    ) in text

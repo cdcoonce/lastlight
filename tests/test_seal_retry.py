@@ -35,6 +35,10 @@ from lastlight.inputs.http import FetchError
 from lastlight.privacy.rules import text_hits
 from lastlight.seal import AlreadySealedError, StripError, TsaError, ledger_paths, verify
 
+# Seals here are signed by the test authority (`tsa_factory`), which verifies only while
+# `trust_test_tsa` swaps it in for the pinned FreeTSA pair (issue #25).
+pytestmark = pytest.mark.usefixtures("trust_test_tsa")
+
 SECOND = dt.timedelta(seconds=1)
 PAUSE = 300.0
 RESULT = DailyResult("sealed", support.EVENING, "ab" * 32)
