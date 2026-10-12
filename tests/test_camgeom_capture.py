@@ -64,12 +64,27 @@ SKYLINE = true_skyline_y(MODEL)
 CLOUD = {"offset_start": 20, "offset_end": 20, "x0": 600, "x1": 800, "shade_below": 60.0}
 
 
-def scene(held_in: tuple[int, ...] = (0, 1, 2)) -> list[np.ndarray]:
+def scene(
+    held_in: tuple[int, ...] = (0, 1, 2), cloud: dict[str, float] = CLOUD
+) -> list[np.ndarray]:
     """Three frames of the camera; the cloud edge is painted into those listed in `held_in`."""
     frames = []
     for index, seed in enumerate((11, 12, 13)):
         frame = render_frame(MODEL, ridge_elevation_deg, seed=seed, stamp=OVERLAY[0])
-        frames.append(paint_cloud_base(frame, SKYLINE, **CLOUD) if index in held_in else frame)
+        frames.append(paint_cloud_base(frame, SKYLINE, **cloud) if index in held_in else frame)
+    return frames
+
+
+def mismatched_scene(cloud: dict[str, float] | None = None) -> list[np.ndarray]:
+    """Three frames from a ridge that differs from the horizon the fit is given by 0.1 degree.
+
+    With `cloud`, its edge is painted into every frame, along the mismatched ridge.
+    """
+    rows = true_skyline_y(MODEL, mismatched_ridge_elevation_deg)
+    frames = []
+    for seed in (11, 12, 13):
+        frame = render_frame(MODEL, mismatched_ridge_elevation_deg, seed=seed, stamp=OVERLAY[0])
+        frames.append(paint_cloud_base(frame, rows, **cloud) if cloud else frame)
     return frames
 
 
@@ -227,18 +242,78 @@ def test_the_refit_keeps_the_columns_a_slightly_wrong_terrain_model_only_misplac
     # 0.1 degree, so honest ridge columns lie a pixel or two from the climbed skyline. The refit
     # drops the cloud's columns (about 200) and none of those, and ends where the fit ends
     # without the cloud.
-    rows = true_skyline_y(MODEL, mismatched_ridge_elevation_deg)
-    plain, clouded = [], []
-    for seed in (11, 12, 13):
-        frame = render_frame(MODEL, mismatched_ridge_elevation_deg, seed=seed, stamp=OVERLAY[0])
-        plain.append(frame)
-        clouded.append(paint_cloud_base(frame, rows, **CLOUD))
-    without_cloud, with_cloud = fit(plain), fit(clouded)
+    without_cloud, with_cloud = fit(mismatched_scene()), fit(mismatched_scene(CLOUD))
     assert without_cloud.guard is not None and without_cloud.guard.outcome == "accepted"
     guard = with_cloud.guard
     assert guard is not None and guard.outcome == "refit"
     assert 180 <= guard.columns_dropped <= 260
     assert_recovers(with_cloud.orientation, without_cloud.orientation)
+
+
+# --- how far the margin sits from the scenes it separates -----------------------------------------
+#
+# A skyline "loses" in a frame by the share of the climbed score it falls short by, and the guard
+# refuses stage 3 when more than half the frames lose more than the margin. The losses of the
+# scenes below are measured numbers that a few percent of noise or a slightly different cloud can
+# move, so a margin that only just separates the scenes the suite has would give way to the first
+# scene that differs from them. These tests hold it a quarter of itself away from both sides.
+HEADROOM = 1.25
+
+# A capture by 150 columns of cloud at the right edge, 20 rows above a ridge the model has exactly.
+SHORT_CLOUD = {**CLOUD, "x0": 650}
+
+
+def fit_with_vote(
+    monkeypatch: pytest.MonkeyPatch, frames: list[np.ndarray]
+) -> tuple[SkylineFit, float]:
+    """Fit `frames`; also return the loss that decides stage 3's vote on them.
+
+    The loss of the fitted skyline in a frame is `1 - fitted / climbed` on that frame's edge map,
+    the quantity the vote compares with the margin. Stage 3 is refused when more than half the
+    frames lose more than the margin, which is when the middle one of the losses, sorted (the
+    lower middle one when the frames are even in number), exceeds it. That one is returned.
+    """
+    votes = []
+    vote = orientation_module._frames_lowered
+
+    def spy(*args):
+        votes.append(args)
+        return vote(*args)
+
+    monkeypatch.setattr(orientation_module, "_frames_lowered", spy)
+    found = fit(frames)
+    strengths, climbed, fitted, horizon, _margin = votes[0]  # the first vote is stage 3's
+    height, width = strengths[0].shape
+    kept = orientation_module.predict_skyline(climbed, horizon, width, height)
+    moved = orientation_module.predict_skyline(fitted, horizon, width, height)
+    losses = sorted(
+        1.0 - orientation_module._energy(s, moved) / orientation_module._energy(s, kept)
+        for s in strengths
+    )
+    return found, losses[(len(losses) - 1) // 2]
+
+
+@pytest.mark.parametrize(
+    "frames_of",
+    [
+        pytest.param(lambda: mismatched_scene(CLOUD), id="200 columns, terrain 0.1 degree off"),
+        pytest.param(lambda: scene(cloud=SHORT_CLOUD), id="150 columns, exact terrain"),
+    ],
+)
+def test_the_margin_has_headroom_below_the_loss_of_a_realistic_capture(
+    monkeypatch: pytest.MonkeyPatch, frames_of
+) -> None:
+    # Real terrain is never exact (the real camera's residual is 1.6 px), so a capture on real
+    # frames loses what these two lose, about 21 percent, and not the 33 to 44 percent of a
+    # capture on exact terrain (the persistent-edge scene). A margin near that loss is one
+    # evening's noise from letting a capture through.
+    found, decisive = fit_with_vote(monkeypatch, frames_of())
+    margin = orientation_module._CAPTURE_MARGIN
+    guard = found.guard
+    assert guard is not None and guard.outcome == "refit"
+    assert decisive >= HEADROOM * margin, f"loses {decisive:.3f} against a margin of {margin}"
+    mean_map_loss = 1.0 - guard.fitted_energy / guard.climbed_energy
+    assert mean_map_loss >= HEADROOM * margin, f"loses {mean_map_loss:.3f} on the mean map"
 
 
 # --- the record reaches the fit file --------------------------------------------------------------
