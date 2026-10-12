@@ -350,6 +350,17 @@ def test_an_evening_with_an_index_row_is_never_missed_even_if_it_does_not_verify
     assert "2026-10-13" in home.headings(), "the newest verified painting is still featured"
 
 
+def test_the_lead_does_not_point_at_a_painting_when_nothing_verified_to_show(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger = sealed_ledger(tmp_path, monkeypatch, OLDEST, late=(OLDEST,))
+    _report, out = build(ledger, tmp_path, through=NEWEST)
+    home = read_page(out, "index.html")
+    assert home.texts("p", "missed") == [sentence(NEWEST)]
+    assert "No sealed painting yet" in home.headings()
+    assert "shown below" not in home.text, "there is no sealed painting below to point at"
+
+
 # --- the default through, from an injected clock --------------------------------------------
 
 
