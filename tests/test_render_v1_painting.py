@@ -2,30 +2,41 @@
 
 `painting.paint` gains `engine="v0"`, and the model name follows the engine (`lastlight-v0` or
 `lastlight-v1`); `model.version` stays the package version. With the default engine the painting
-of the recorded HRRR crop must be byte for byte what it was before this slice: the two SHA-256
-digests below were computed from `paint` on the commit this slice branched from (d40b2b4), with
-the same fixture, clock and code SHA as `tests/test_painting.py`.
+of the recorded HRRR crop must be what it was before this slice. That is checked against
+`tests/fixtures/painting_v0_before_v1.json`, the forecast and strip that `paint` made on the
+commit this slice branched from, with the same crop, clock and code SHA as `tests/test_painting.py`.
+The comparison is by value and not by hash: a SHA-256 of v0's output moves with the last digits
+of a float, and those differ between macOS and Linux.
 """
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import io
+import json
+import math
 from pathlib import Path
+from typing import Any
 
 import daily_support as support
 import hrrr_support
+import numpy as np
 import pytest
+from PIL import Image
 
 from lastlight import geometry
 from lastlight.atmosphere import reduce_transect
 from lastlight.inputs import hrrr
 from lastlight.painting import Painting, paint
 from lastlight.render import Atmosphere, render_curve
-from lastlight.seal.canonical import canonical_bytes
 from lastlight.site import REFERENCE_POINT
 
-CANONICAL_SHA256_BEFORE = "f76d6917d2fd4e39c92d61731b946d47c9f2c79879b8101bbf29702b6abe6c62"
-STRIP_SHA256_BEFORE = "e7901571c72fa01862be84edc62106e5ce488871f6abe4c56cf1c713c3bfd5c7"
+BEFORE_THIS_SLICE = Path(__file__).parent / "fixtures" / "painting_v0_before_v1.json"
+RELATIVE_TOLERANCE = 1e-9
+ABSOLUTE_TOLERANCE = 1e-12  # for values at or near zero, where a relative bound means nothing
+STRIP_TOLERANCE = 1  # code values, on each of the three channels of every pixel
+NOT_PORTABLE = "forecast.strip_sha256"  # a SHA-256 of PNG bytes: the strip is compared by pixels
 
 
 def _paint(cache_dir: Path, **options) -> Painting:
@@ -55,6 +66,46 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def differences(expected: Any, got: Any, path: str = "forecast") -> list[str]:
+    """Where `got` departs from `expected`: same keys and lengths, strings and integers exact.
+
+    Floats must agree within `RELATIVE_TOLERANCE` (and `ABSOLUTE_TOLERANCE` near zero). The one
+    string left out is `NOT_PORTABLE`: PNG bytes can differ between zlib builds while the pixels
+    are the same, so the strip is compared by its pixels instead.
+    """
+    if isinstance(expected, dict):
+        if not isinstance(got, dict) or got.keys() != expected.keys():
+            return [f"{path}: keys {sorted(got) if isinstance(got, dict) else got!r}"]
+        return [
+            line
+            for key in expected
+            if f"{path}.{key}" != NOT_PORTABLE
+            for line in differences(expected[key], got[key], f"{path}.{key}")
+        ]
+    if isinstance(expected, list):
+        if not isinstance(got, list) or len(got) != len(expected):
+            return [f"{path}: length {len(got) if isinstance(got, list) else got!r}"]
+        return [
+            line
+            for index, (want, have) in enumerate(zip(expected, got, strict=True))
+            for line in differences(want, have, f"{path}[{index}]")
+        ]
+    if isinstance(expected, float):
+        close = isinstance(got, float) and math.isclose(
+            expected, got, rel_tol=RELATIVE_TOLERANCE, abs_tol=ABSOLUTE_TOLERANCE
+        )
+        return [] if close else [f"{path}: {got!r} is not {expected!r}"]
+    same = type(got) is type(expected) and got == expected
+    return [] if same else [f"{path}: {got!r} is not {expected!r}"]
+
+
+def pixels(png: bytes) -> np.ndarray:
+    """The decoded RGB values of a PNG, as signed integers so a difference cannot wrap."""
+    image = Image.open(io.BytesIO(png))
+    assert image.mode == "RGB"
+    return np.asarray(image, dtype=np.int16)
+
+
 def recorded_atmosphere(cache_dir: Path) -> Atmosphere:
     """The reduction of the recorded crop, done step by step here, not through `paint`."""
     lat, lon, _elevation = REFERENCE_POINT
@@ -72,13 +123,71 @@ def recorded_atmosphere(cache_dir: Path) -> Atmosphere:
     return reduce_transect(hrrr.sample_transect(fields, points), support.EVENING).atmosphere
 
 
-def test_the_default_engine_paints_the_same_bytes_as_before_this_slice(
+def test_the_default_engine_paints_the_same_painting_as_before_this_slice(
     default_painting: Painting,
 ) -> None:
-    assert sha256(canonical_bytes(default_painting.forecast)) == CANONICAL_SHA256_BEFORE
+    """The default painting equals the one `paint` made before engine v1 existed.
+
+    `tests/fixtures/painting_v0_before_v1.json` was made on 95f3ecd5ddef (the commit this slice
+    branched from, the head of main after #38) in a clean `git worktree` after `uv sync --frozen`,
+    with `tests/` on the path:
+
+        painting = paint(support.EVENING, transport=support.transport(),
+                         now_utc=support.before_sunset(), cache_dir=<an empty directory>,
+                         cycle_hour=support.CYCLE_HOUR, forecast_hour=support.FORECAST_HOUR,
+                         code_sha=support.CODE_SHA)
+        document = {"forecast": painting.forecast.model_dump(mode="json"),
+                    "strip_png_base64": base64.b64encode(painting.strip_png).decode("ascii")}
+        Path(...).write_text(json.dumps(document, indent=1) + "\\n")
+
+    On macOS arm64 that checkout's canonical forecast digest was f76d6917d2fd and its strip
+    digest e7901571c72f, the two SHA-256 pins this test replaced. They were dropped because a
+    byte hash is not portable: v0's floats differ in their last digits between macOS and Linux.
+
+    Every string, integer and key is compared exactly. Every float agrees within a relative
+    1e-9 (absolute 1e-12 near zero), written unrounded so the six-digit canonical rounding
+    cannot turn float noise into a difference. `strip_sha256` is the one string not compared
+    with the fixture: it hashes PNG bytes, so it is checked against this run's own strip, and
+    the strip is compared by decoded pixels, each channel within one code value.
+    """
+    fixture = json.loads(BEFORE_THIS_SLICE.read_text(encoding="utf-8"))
+    before_png = base64.b64decode(fixture["strip_png_base64"])
+    assert sha256(before_png) == fixture["forecast"]["strip_sha256"], "the fixture disagrees"
+
+    problems = differences(fixture["forecast"], default_painting.forecast.model_dump(mode="json"))
+    assert not problems, f"{len(problems)} differences, the first: " + "; ".join(problems[:5])
+
     assert default_painting.strip_png is not None
-    assert sha256(default_painting.strip_png) == STRIP_SHA256_BEFORE
-    assert default_painting.forecast.strip_sha256 == STRIP_SHA256_BEFORE
+    assert default_painting.forecast.strip_sha256 == sha256(default_painting.strip_png)
+    now, before = pixels(default_painting.strip_png), pixels(before_png)
+    assert now.shape == before.shape
+    assert int(np.abs(now - before).max()) <= STRIP_TOLERANCE
+
+
+def test_the_comparison_allows_float_noise_and_nothing_else() -> None:
+    expected = {
+        "name": "lastlight-v0",
+        "count": 17,
+        "curve": [{"L": 70.0, "a": 0.0, "b": 41.345883035285524}],
+    }
+
+    def with_curve(**changes: Any) -> dict[str, Any]:
+        return {**expected, "curve": [{**expected["curve"][0], **changes}]}
+
+    noisy = with_curve(L=70.0 * (1 + 1e-12), a=1e-15, b=41.345883035285524 * (1 - 1e-12))
+    assert differences(expected, noisy, "x") == []
+    for broken in (
+        with_curve(L=70.0 * (1 + 1e-6)),
+        with_curve(a=1e-6),
+        with_curve(L=70),
+        with_curve(extra=1.0),
+        {**expected, "name": "lastlight-v1"},
+        {**expected, "count": 17.0},
+        {**expected, "curve": expected["curve"] * 2},
+        {k: v for k, v in expected.items() if k != "count"},
+    ):
+        assert differences(expected, broken, "x") != []
+    assert differences({"strip_sha256": "a" * 64}, {"strip_sha256": "b" * 64}) == []
 
 
 def test_the_default_model_is_named_lastlight_v0(default_painting: Painting) -> None:
