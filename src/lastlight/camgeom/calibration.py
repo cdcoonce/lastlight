@@ -479,6 +479,7 @@ def calibrate_camera(
             if stated_azimuth_deg is None
             else azimuth_difference_deg(o.azimuth_deg, stated_azimuth_deg)
         ),
+        least_squares_guard=skyline.guard,
     )
     return Calibration(fit, skyline, radial, sun_check, len(chosen), too_dark, without_time)
 
