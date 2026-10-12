@@ -20,6 +20,8 @@ from lastlight.privacy.images import image_issues
 from lastlight.publish import BuildError, build_site
 from lastlight.seal.ledger import VerifyResult
 
+pytestmark = pytest.mark.usefixtures("trust_test_tsa")
+
 OLDEST, MIDDLE, NEWEST = factory.DATES
 LEAK = f"checked at {helpers.clock()}"
 

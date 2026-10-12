@@ -12,6 +12,7 @@ license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "colour-science>=0.4.7",
+    "cryptography>=50.0.2",
     "eccodes>=2.49.0",
     # ecCodes needs a native library. The eccodes wheel names it (eccodeslib) as a dependency
     # only off Windows, and uv's universal lock reads that metadata from the Windows wheel, so
