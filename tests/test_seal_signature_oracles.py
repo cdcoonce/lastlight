@@ -18,7 +18,10 @@ from __future__ import annotations
 
 import ast
 import datetime as dt
+import hashlib
 import inspect
+import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -26,7 +29,7 @@ import seal_helpers as helpers
 import tsa_factory
 from cryptography.hazmat.primitives.serialization import Encoding
 
-from lastlight.cli import discover
+from lastlight.cli import discover, main
 from lastlight.seal import ledger as ledger_module
 from lastlight.seal import ledger_paths, seal, trust, tsa, verify
 from lastlight.seal.tsa import TsaError
@@ -35,6 +38,8 @@ DATE = helpers.STUB_DATE
 RECORDED_IMPRINT_HEX = "9cd91e89d63ac7a4633400eaba9dc69ffefb1b898a67f2c230700d2fb2378de6"
 """The SHA-256 the recorded FreeTSA response covers (`test_seal_tsa` derives it from the bytes)."""
 SRC = Path(__file__).resolve().parents[1] / "src" / "lastlight"
+PUBLIC_LEDGER = Path(__file__).parent / "fixtures" / "ledger-2026-10-11"
+PUBLIC_DATE = dt.date(2026, 10, 11)
 
 
 @pytest.fixture(autouse=True)
@@ -142,6 +147,54 @@ def test_no_bit_flip_in_the_genuine_response_is_accepted_or_escapes_as_another_e
         accepted.append(position)
     assert accepted, "the ignored regions are large enough that some flips are accepted"
     assert set(accepted) <= ignored, sorted(set(accepted) - ignored)[:10]
+
+
+# --- the public ledger's sealed evening, offline ------------------------------------------
+#
+# A copy of what the public ledger branch holds for its first sealed evening: the forecast, the
+# FreeTSA response for it, the strip and the index row, fetched once and committed under
+# `tests/fixtures/ledger-2026-10-11/` (the ledger directory itself, so `verify` reads it as it
+# reads the real one). The seal on the live service is the thing this change must not break.
+
+
+def test_the_public_ledgers_sealed_evening_verifies_offline_under_the_pinned_trust() -> None:
+    # No fixture authority and no network (the conftest guard): the product's own pins.
+    assert trust.fingerprint(trust.DEFAULT_TRUST.tsa) == trust.FREETSA_TSA_SHA256
+    outcome = verify(PUBLIC_DATE, PUBLIC_LEDGER)
+    assert outcome.ok and outcome.reason is None
+    assert outcome.strip_verified is True
+
+
+def test_the_command_prints_pass_with_the_strip_verified_for_the_public_evening(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    code = main(["verify", PUBLIC_DATE.isoformat(), "--ledger-dir", str(PUBLIC_LEDGER)])
+    assert code == 0
+    assert capsys.readouterr().out == "PASS (strip verified)\n"
+
+
+def test_the_public_evenings_index_row_names_the_digest_the_timestamp_covers() -> None:
+    forecast = (PUBLIC_LEDGER / "2026" / "10" / "11.forecast.json").read_bytes()
+    rows = [json.loads(line) for line in (PUBLIC_LEDGER / "index.jsonl").read_text().splitlines()]
+    assert [row["date"] for row in rows] == [PUBLIC_DATE.isoformat()]
+    assert rows[0]["digest"] == hashlib.sha256(forecast).hexdigest()
+    stamp = tsa.authenticate((PUBLIC_LEDGER / "2026" / "10" / "11.forecast.tsr").read_bytes())
+    assert stamp.imprint.hex() == rows[0]["digest"]
+
+
+@pytest.mark.parametrize("from_the_end", [1, 60])
+def test_the_public_evening_with_its_timestamp_altered_fails_naming_the_signature(
+    tmp_path: Path, from_the_end: int
+) -> None:
+    ledger = tmp_path / "ledger"
+    shutil.copytree(PUBLIC_LEDGER, ledger)
+    token = ledger / "2026" / "10" / "11.forecast.tsr"
+    raw = bytearray(token.read_bytes())
+    raw[-from_the_end] ^= 0x01
+    token.write_bytes(bytes(raw))
+    outcome = verify(PUBLIC_DATE, ledger)
+    assert not outcome.ok and outcome.strip_verified is False
+    assert "signature" in (outcome.reason or "")
 
 
 # --- oracle 3: a token from a test authority, under the default anchors -------------------
