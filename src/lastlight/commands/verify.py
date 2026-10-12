@@ -3,8 +3,9 @@
 Thin by design: it parses the date and calls `lastlight.seal.ledger.verify`. It prints `PASS`
 (or `PASS (strip verified)` when the forecast names a strip and the PNG in the ledger hashes to
 it) or `FAIL: <reason>` on stdout. Exit codes: 0 pass, 1 fail, 2 the arguments were unusable.
-This checks the digest, the timestamp's imprint and its time against sunset, and the strip; it
-does not yet validate the timestamp's signature chain.
+It checks the timestamp is genuine (its signature, against FreeTSA's certificates pinned in the
+repository), then the digest, the timestamp's imprint and its time against sunset, and the strip.
+The reason names the check that failed. The command takes no option that adds trust.
 """
 
 from __future__ import annotations

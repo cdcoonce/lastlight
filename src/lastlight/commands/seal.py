@@ -4,9 +4,10 @@ Thin by design: it reads and validates the forecast, then calls `lastlight.seal.
 which writes the canonical forecast, gets it timestamped and indexes it. A forecast that names a
 strip (`strip_sha256`) is sealed together with that PNG: pass it with `--strip PNG`, and it is
 written beside the forecast in the ledger.
-Exit codes: 0 sealed, 1 sealing failed (the timestamp authority or the disk; nothing is left
-behind), 2 refused (the forecast is unreadable or invalid, the strip is missing, unreadable or not
-the one the forecast names, or the date is already sealed).
+Exit codes: 0 sealed, 1 sealing failed (the timestamp authority, a reply from it that does not
+verify against the pinned certificates, or the disk; nothing is left behind), 2 refused (the
+forecast is unreadable or invalid, the strip is missing, unreadable or not the one the forecast
+names, or the date is already sealed).
 """
 
 from __future__ import annotations
