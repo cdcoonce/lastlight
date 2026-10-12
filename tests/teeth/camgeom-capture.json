@@ -1,0 +1,172 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_camgeom_capture.py",
+    "tests/test_camgeom_orientation.py",
+    "tests/test_camgeom_fitfile.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_camgeom_capture.py",
+    "tests/test_camgeom_orientation.py",
+    "tests/test_camgeom_fitfile.py"
+  ],
+  "mutants": [
+    {
+      "label": "1 guard never fires: stage 3's least-squares result is always accepted",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "    if 2 * lowered > frames:",
+      "replace": "    if False:"
+    },
+    {
+      "label": "2 refit keeps every traced column: no column is dropped as far from the climbed skyline",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "near = np.abs(observed - reference) <= keep_within_px",
+      "replace": "near = np.abs(observed - reference) <= keep_within_px + 1.0e9"
+    },
+    {
+      "label": "3 refit always accepted: the check that it does not lose against the climb is removed",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "(start, \"kept_climb\") if 2 * refit_lowered > frames else (refit, \"refit\")",
+      "replace": "(refit, \"refit\")"
+    },
+    {
+      "label": "4 write_fit omits the least_squares_guard object",
+      "file": "../../src/lastlight/camgeom/fitfile.py",
+      "oracle": "real",
+      "find": "path.write_text(json.dumps(fit.to_json(), indent=2) + \"\\n\")",
+      "replace": "path.write_text(json.dumps({k: v for k, v in fit.to_json().items() if k != \"least_squares_guard\"}, indent=2) + \"\\n\")"
+    },
+    {
+      "label": "5 from_json requires the least_squares_guard object",
+      "file": "../../src/lastlight/camgeom/fitfile.py",
+      "oracle": "real",
+      "find": " if \"least_squares_guard\" in data else None",
+      "replace": " if True else None"
+    },
+    {
+      "label": "6 the guard object is not validated when present",
+      "file": "../../src/lastlight/camgeom/fitfile.py",
+      "oracle": "real",
+      "find": "_guard_from_json(data[\"least_squares_guard\"])",
+      "replace": "LeastSquaresGuard(**data[\"least_squares_guard\"])"
+    },
+    {
+      "label": "7 [control] the margin 0.15 becomes 0.16: inside the band where every graded scene is decided as at 0.15 and both headroom tests hold",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "Every graded scene's loss is at most 0.14 percent, 11.5 percent (the one-wide-pass bands scene) or at least 20.5 percent (the realistic captures: 20.57 in the deciding frame of the mismatched-terrain one). The headroom tests keep a quarter of the margin clear of both, so they accept a margin from 1.25 times 11.48 percent to 20.57 percent over 1.25, that is 0.144 to 0.164, and every other test decides the scenes the same way anywhere from 0.13 to 0.19. 0.16 is inside the band, so no test may tell it from 0.15; the claim ends at 0.164.",
+      "find": "_CAPTURE_MARGIN = 0.15",
+      "replace": "_CAPTURE_MARGIN = 0.16"
+    },
+    {
+      "label": "7b margin 0.15 becomes 0.22 (the blind control of the first draft, kept as a kill): a graded capture, mismatched terrain with the cloud held in every frame, loses 20.5 to 20.9 percent and slips under it; the headroom test must red it",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "_CAPTURE_MARGIN = 0.15",
+      "replace": "_CAPTURE_MARGIN = 0.22"
+    },
+    {
+      "label": "8 vote threshold 'more than half of the frames' becomes 'at least one frame'",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "    if 2 * lowered > frames:",
+      "replace": "    if lowered >= 1:"
+    },
+    {
+      "label": "9 vote threshold 'more than half of the frames' becomes 'every frame'",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "    if 2 * lowered > frames:",
+      "replace": "    if lowered == frames:"
+    },
+    {
+      "label": "10 refit vote: the refit is refused when at least one frame scores it lower, not most",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "if 2 * refit_lowered > frames else (refit, \"refit\")",
+      "replace": "if refit_lowered >= 1 else (refit, \"refit\")"
+    },
+    {
+      "label": "11 refit vote: the refit is refused only when every frame scores it lower, not most",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "if 2 * refit_lowered > frames else (refit, \"refit\")",
+      "replace": "if refit_lowered == frames else (refit, \"refit\")"
+    },
+    {
+      "label": "12 drop distance 8 px becomes 0.2 px: honest ridge columns a pixel off the climb are dropped too",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "_CAPTURE_DROP_PX = 4.0 * _ROBUST_SCALE_PX",
+      "replace": "_CAPTURE_DROP_PX = 0.1 * _ROBUST_SCALE_PX"
+    },
+    {
+      "label": "13 the refit starts from the least-squares result, not from the climb",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "            start, strengths, horizon, prior, keep_within_px=_CAPTURE_DROP_PX",
+      "replace": "            fitted, strengths, horizon, prior, keep_within_px=_CAPTURE_DROP_PX"
+    },
+    {
+      "label": "14 the record's fitted_energy is the climbed orientation's score",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "fitted_energy=_recorded_energy(mean_strength, fitted, horizon),",
+      "replace": "fitted_energy=_recorded_energy(mean_strength, start, horizon),"
+    },
+    {
+      "label": "15 the file validator's vote check reads 'at least one frame lowered' for 'most frames'",
+      "file": "../../src/lastlight/camgeom/fitfile.py",
+      "oracle": "real",
+      "find": "if refused != (2 * lowered > frames):",
+      "replace": "if refused != (lowered >= 1):"
+    },
+    {
+      "label": "16 the file validator's vote check reads 'every frame lowered' for 'most frames'",
+      "file": "../../src/lastlight/camgeom/fitfile.py",
+      "oracle": "real",
+      "find": "if refused != (2 * lowered > frames):",
+      "replace": "if refused != (lowered == frames):"
+    },
+    {
+      "label": "17 the record's margin is not the margin the vote used",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "margin=_CAPTURE_MARGIN,",
+      "replace": "margin=0.5,"
+    },
+    {
+      "label": "18 margin 0.15 becomes 0.17: a realistic capture loses 20.6 percent, under 1.25 times the margin (0.2125)",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "_CAPTURE_MARGIN = 0.15",
+      "replace": "_CAPTURE_MARGIN = 0.17"
+    },
+    {
+      "label": "19 margin 0.15 becomes 0.13: the one-wide-pass bands scene loses 11.5 percent, over margin / 1.25 (0.104)",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "_CAPTURE_MARGIN = 0.15",
+      "replace": "_CAPTURE_MARGIN = 0.13"
+    }
+  ]
+}

@@ -34,6 +34,8 @@ from lastlight.seal import ledger_paths, tsa, verify
 from lastlight.seal.ledger import VerifyResult
 from lastlight.site import REFERENCE_POINT
 
+pytestmark = pytest.mark.usefixtures("trust_test_tsa")
+
 
 @pytest.fixture
 def ledger(tmp_path: Path) -> Path:

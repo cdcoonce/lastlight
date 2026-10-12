@@ -47,7 +47,7 @@ jobs:
       - name: Attach the ledger branch (an empty orphan the first time)
         run: uv run lastlight ledger-branch open --worktree ledger-wt
       - name: Paint, seal and verify tonight
-        run: uv run lastlight seal-daily --ledger-dir ledger-wt/ledger
+        run: uv run lastlight seal-daily --ledger-dir ledger-wt/ledger --attempts 2
       - name: Scan the ledger for anything that could locate a camera
         run: uv run lastlight privacy-scan --root "$PWD/ledger-wt" "$PWD/ledger-wt/ledger"
       - name: Commit to the ledger branch and push

@@ -16,6 +16,8 @@ from lastlight.seal import tsa
 from lastlight.seal.canonical import canonical_bytes
 from lastlight.seal.tsa import DEFAULT_TSA_URL, Timestamp, TsaError
 
+pytestmark = pytest.mark.usefixtures("trust_test_tsa")
+
 NOT_GRANTED = bytes.fromhex("30053003020102")  # status 2 (rejection), no token
 NOW = dt.datetime(2026, 10, 10, tzinfo=dt.UTC)  # a date only; the copy carries no usable clock
 
@@ -92,7 +94,7 @@ def test_the_canonicaliser_still_makes_those_bytes_apart_from_the_new_null_membe
 
 
 def test_re_pointing_the_recorded_response_changes_its_imprint_bytes_and_nothing_else() -> None:
-    raw, pointed = helpers.recorded_response(), helpers.recorded_tsr()
+    raw, pointed = helpers.recorded_response(), helpers.repointed_recorded_response()
     imprint = hashlib.sha256(PRE_STRIP_CANONICAL).digest()
     start = raw.index(imprint)
     assert raw.count(imprint) == 1 and len(raw) == len(pointed)

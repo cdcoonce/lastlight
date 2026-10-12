@@ -4,14 +4,20 @@
 noise). `STUB_CANONICAL` is its canonical form written out by hand, so the golden bytes do not
 depend on the code under test. `stub-forecast.tsr` is a real RFC 3161 response from the public
 TSA, recorded once and issued a day ahead of the stub's date. It was recorded before the forecast
-gained its `strip_sha256` field, so it covers the canonical bytes of that earlier schema;
-`recorded_tsr()` re-points its fixed-width imprint at the current `STUB_DIGEST` (the same
-in-place patch `make_tsr` uses), and `recorded_response()` is the file exactly as the TSA sent it.
+gained its `strip_sha256` field, so it covers the canonical bytes of that earlier schema.
+`recorded_response()` is the file exactly as the TSA sent it: the oracle for the pinned
+certificates, and the only fixture here that the product's default trust accepts.
+
+Every other timestamp comes from `tsa_factory`, a throwaway authority that really signs: a
+response made by `make_tsr` or `recorded_tsr()` verifies, but only against the test authority,
+so a test that seals or verifies with one requests the `trust_test_tsa` fixture (`conftest.py`).
+`recorded_tsr()` is the stub's digest stamped at the recorded time; `repointed_recorded_response()`
+is the old shortcut, the genuine response with its imprint patched in place, which no longer
+verifies and is kept as a forgery to refuse.
 
 Tests never write a clock time. Where a scenario needs "before" or "after" sunset, it computes
-the geometric sunset at the reference point and offsets from it; `make_tsr` then re-dates a copy
-of the recorded response. The copy's signature no longer matches, which is fine: this slice
-checks the message imprint and the time, and the signature chain is a follow-up.
+the geometric sunset at the reference point and offsets from it, and `make_tsr` signs a response
+for that instant.
 """
 
 from __future__ import annotations
@@ -23,6 +29,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+import tsa_factory
 from rfc3161_client import decode_timestamp_response
 
 from lastlight.forecast import Forecast
@@ -98,12 +105,26 @@ def recorded_response() -> bytes:
     return (FIXTURES / "stub-forecast.tsr").read_bytes()
 
 
-def recorded_tsr() -> bytes:
-    """The recorded response with its imprint re-pointed at `STUB_DIGEST`; the time is unchanged."""
+def recorded_gen_time() -> dt.datetime:
+    """When the public TSA issued the recorded response."""
+    return decode_timestamp_response(recorded_response()).tst_info.gen_time
+
+
+def repointed_recorded_response() -> bytes:
+    """The genuine response with its imprint re-pointed at `STUB_DIGEST` in place.
+
+    The authority's signature covers the imprint, so this copy no longer verifies: it is a
+    forgery, useful to show that a forged imprint is refused.
+    """
     raw = recorded_response()
     recorded_imprint = decode_timestamp_response(raw).tst_info.message_imprint.message
     assert raw.count(recorded_imprint) == 1
     return raw.replace(recorded_imprint, bytes.fromhex(STUB_DIGEST))
+
+
+def recorded_tsr() -> bytes:
+    """`STUB_DIGEST` stamped at the time of the recorded response, signed by the test authority."""
+    return make_tsr(STUB_DIGEST, recorded_gen_time())
 
 
 def sunset(date: dt.date) -> dt.datetime:
@@ -112,19 +133,13 @@ def sunset(date: dt.date) -> dt.datetime:
     return elevation_crossings(date, lat, lon)[0.0]
 
 
-def make_tsr(digest_hex: str, gen_time: dt.datetime) -> bytes:
-    """A copy of the recorded response that covers `digest_hex` and was issued at `gen_time`.
+def make_tsr(digest_hex: str, gen_time: dt.datetime, **options: object) -> bytes:
+    """A response that covers `digest_hex`, was issued at `gen_time`, and is really signed.
 
-    Both fields have fixed width in DER, so they are patched in place; whole seconds only.
+    Signed by the test authority (see `tsa_factory`); whole seconds only. `options` go to
+    `tsa_factory.sign_response` to make the response wrong in one way.
     """
-    template = recorded_tsr()
-    old_time = decode_timestamp_response(template).tst_info.gen_time
-    old_stamp = old_time.strftime("%Y%m%d%H%M%SZ").encode()
-    new_stamp = gen_time.astimezone(dt.UTC).strftime("%Y%m%d%H%M%SZ").encode()
-    old_digest = bytes.fromhex(STUB_DIGEST)
-    new_digest = bytes.fromhex(digest_hex)
-    assert template.count(old_stamp) == 1 and template.count(old_digest) == 1
-    return template.replace(old_stamp, new_stamp).replace(old_digest, new_digest)
+    return tsa_factory.make_tsr(digest_hex, gen_time, **options)
 
 
 def tsr_before_sunset(date: dt.date, digest_hex: str, minutes: float = 30) -> bytes:

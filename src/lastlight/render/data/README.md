@@ -1,4 +1,9 @@
-# Bundled spectral tables
+# Bundled tables
+
+Two small spectral tables used by the v0 renderer (`lastlight.render.atmosphere`), and renderer
+v1's multiple-scattering table (`bruneton_ms_xyz.bin`, described at the end).
+
+## Spectral tables
 
 Two small tables used by the v0 renderer (`lastlight.render.atmosphere`). Both are the visible
 rows (380 to 780 nm, 34 wavelengths, the native grid of the source) of the coefficient table of
@@ -69,4 +74,94 @@ LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
 ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+## bruneton_ms_xyz.bin: renderer v1's multiple-scattering table
+
+Renderer v1 (`lastlight.render.v1`) adds this table's light to v0's single scattering. It holds
+the CIE 1931 XYZ of the light that reaches a ground observer after two or more bounces
+(scattering by air or aerosol, or reflection by the ground), on the same scale as v0's
+`sky_xyz`: a white card lit by the extraterrestrial sun has Y = 1. Its axes are `aod_550` (12
+nodes from 0 to 1.0, every 0.01 up to 0.05), `ozone_du` (250 and 330), sun elevation (-12 to +12
+degrees in 1-degree steps), view elevation (20 nodes from 0 to 90, densest near the horizon) and
+relative azimuth (13 nodes from 0 to 180, densest toward the sun). Every other `Atmosphere`
+field is baked at its default and the ground is Lambertian with albedo 0.2; both are recorded in
+the file's header, with the precomputation's resolution and the scattering orders (2 to 13).
+
+The file is generated, not hand-edited: `tools/make_bruneton_table.py` (one `--node` per
+atmosphere, then `--assemble`) runs the numpy port of Bruneton's precomputation in
+`lastlight.render.bruneton` on lastlight's own v0 atmosphere and data (the two tables above). The
+container is 8 bytes of magic, a little-endian uint32 header length, a UTF-8 JSON header and the
+float32 values in C order, with no timestamps, so the same inputs give the same bytes. Its
+SHA-256 is pinned in `lastlight.render.v1.TABLE_SHA256` and the loader refuses any other file.
+The convergence of the table is reported in `docs/renderer/bruneton-convergence.md`.
+
+### Licence of the method
+
+The precomputation is a port of Eric Bruneton's "Precomputed Atmospheric Scattering" reference
+implementation (2017; https://github.com/ebruneton/precomputed_atmospheric_scattering), whose
+source is distributed under the BSD 3-Clause licence (SPDX: BSD-3-Clause). Its `functions.glsl`
+also carries the notice of the 2008 original. Both notices are kept here and in the header of
+`src/lastlight/render/bruneton.py`, as the licence requires; they are compatible with this
+repository's MIT licence. The numbers in the table are lastlight's own (computed from the v0
+atmosphere above), and nothing is derived from the GPL `skylight` port or from libRadtran.
+
+```text
+Copyright (c) 2017 Eric Bruneton
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+this list of conditions and the following disclaimer in the documentation
+and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors
+may be used to endorse or promote products derived from this software without
+specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+```text
+Precomputed Atmospheric Scattering
+Copyright (c) 2008 INRIA
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+3. Neither the name of the copyright holders nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
+THE POSSIBILITY OF SUCH DAMAGE.
 ```

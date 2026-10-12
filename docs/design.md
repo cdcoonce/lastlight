@@ -66,14 +66,14 @@ Python 3.12, `uv`, `src/lastlight/`, pytest, ruff. Small modules with one job ea
 | `inputs.gefs` | GEFS-Aerosols (NOAA, public bucket, no account): total and dust aerosol optical depth at 550 nm of the latest analysis at or before the sun reaching the horizon, by `.idx` byte range, nearest cell; used by G0 because HRRR carries smoke only |
 | `inputs.goes` | GOES-18 ABI clear-sky mask along the transect at twilight (regime labels) |
 | `inputs.*` | Later: RRFS-SD dust and smoke, CAMS aerosol and ozone, AirNow PM |
-| `render` | Spectral atmosphere model → radiance per (sun elevation, view elevation) → CIE XYZ → camera RGB and sRGB; v0 single scattering, v1 Bruneton precomputed-scattering lookup table |
+| `render` | Spectral atmosphere model → radiance per (sun elevation, view elevation) → CIE XYZ → camera RGB and sRGB; v0 single scattering; v1 is v0 plus the light scattered two or more times (ground reflections included) as CIE XYZ from a committed lookup table built by a numpy port of Bruneton's precomputation (`engine="v1"`, sun -12 to +12, `aod_550` 0 to 1.0, `ozone_du` 250 to 330); the daily forecast keeps v0 until v1's adoption rule (issue #35) passes |
 | `forecast` | The sealed forecast schema (pydantic v2): strict fields, no time of day, only the public reference point, and the nullable `strip_sha256` that seals the painting |
 | `atmosphere` | v0 reduction of HRRR transect samples to the renderer's parameters: AOD = HRRR `AOTK` plus a fixed 0.06 background (or, for the G0 spread study, an optional `AerosolColumn` from an archive with total and dust, whose total replaces both), ozone from a bundled monthly climatology for 30 to 35 N (NASA SBUV), cloud summarised in the notes and not rendered |
 | `vividness` | The v0 vividness rule: a named placeholder with a deliberately wide sd, until the pre-registered definition and the M4 physics exist |
 | `painting` | The daily forecast end to end before sealing: HRRR run, transect, reduction, curve and strip, `Forecast` with every input's source, cycle and digest |
 | `daily` | The scheduled seal: paint, seal, verify; idempotent (a sealed evening is left alone) and never late (refuses once the sun is at the horizon) |
 | `ledger_branch` | The orphan `ledger` branch as a git worktree: open it, commit a seal to it, push it (never forced) |
-| `seal` | Canonical forecast JSON, SHA-256, RFC 3161 timestamp (`rfc3161-client`), ledger writer (forecast, timestamp, strip), `verify` (imprint, time, and the strip against `strip_sha256`; the TSA signature chain is a follow-up) |
+| `seal` | Canonical forecast JSON, SHA-256, RFC 3161 timestamp (`rfc3161-client`), ledger writer (forecast, timestamp, strip), `verify` (the TSA signature against the pinned FreeTSA certificates, imprint, time, and the strip against `strip_sha256`) |
 | `cameras` | Registry of tier A cameras (operator, image URL, position, view azimuth, attribution); polite collector (conditional GET, identifying User-Agent, timeouts and retries, stale-frame rejection by Last-Modified and burned-in stamp) writing a private archive on the capture host |
 | `camgeom` | Per-camera pixel-to-(azimuth, elevation) calibration by skyline matching against a public DEM horizon, checked against the sun; frozen fits in `cameras/geometry/`; sky mask |
 | `observe` | Frames → within-frame log-chromaticity contrast profile over pixel-row bands above the frozen skyline (bands defined per camera in the registry, checked against its frozen fit), the `observed.json` of an evening, and a v0 vividness placeholder (tier A); later absolute colour (tier B) |
@@ -97,7 +97,7 @@ Daily data never lives on `main`. It lives on an orphan branch named `ledger` (n
 
 ### Engines and licences
 
-- Bruneton 2017 precomputed atmospheric scattering (BSD-3-Clause): the twilight engine, valid to sun elevation -12 degrees; used to build a lookup table offline.
+- Bruneton 2017 precomputed atmospheric scattering (BSD-3-Clause): the twilight engine, valid to sun elevation -12 degrees; used to build a lookup table offline. It is ported to numpy on lastlight's own v0 atmosphere (`lastlight.render.bruneton`, notice kept), run node by node by `tools/make_bruneton_table.py`, and the table it makes (`src/lastlight/render/data/bruneton_ms_xyz.bin`, under 2 MB) is committed with its SHA-256 pinned in `lastlight.render.v1`; its convergence is in `docs/renderer/bruneton-convergence.md`.
 - Prague Sky Model (Apache-2.0): daytime and early-twilight positive control, valid to -4.2 degrees.
 - libRadtran (GPL): external offline validator only; never vendored or imported.
 - The GPL Python port `skylight` must never be vendored or imported.

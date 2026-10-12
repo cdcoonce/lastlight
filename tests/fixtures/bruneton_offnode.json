@@ -1,0 +1,35 @@
+{
+  "point": {
+    "aod_550": 0.035,
+    "ozone_du": 300.0,
+    "sun_elevation_deg": -3.25,
+    "view_elevation_deg": 1.7,
+    "rel_azimuth_deg": 27.0
+  },
+  "resolution": {
+    "altitudes": 16,
+    "views_sky": 24,
+    "views_ground": 12,
+    "sun_elevations": 55,
+    "azimuths": 16,
+    "single_samples": 32,
+    "march_samples": 24,
+    "sphere_sky": 24,
+    "sphere_ground": 12,
+    "sphere_azimuths": 24,
+    "transmittance_views": 256,
+    "transmittance_altitudes": 256,
+    "orders": 13
+  },
+  "orders": [
+    2,
+    13
+  ],
+  "ground_albedo": 0.2,
+  "xyz": [
+    0.001560618643057677,
+    0.0016398936201523088,
+    0.0019282519234484232
+  ],
+  "made_by": "tools/make_bruneton_table.py --reference"
+}

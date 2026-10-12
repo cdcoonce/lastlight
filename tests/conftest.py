@@ -42,11 +42,35 @@ def _block_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPat
 
 
 @pytest.fixture
-def ledger_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def trust_test_tsa(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Trust the throwaway test authority (`tsa_factory`) instead of the pinned public one.
+
+    The product verifies a timestamp against one pair of pinned certificates, FreeTSA's, and has
+    no way to add trust from outside (no environment variable, path or flag). The responses the
+    tests fake are really signed, but by a test authority, so a test that seals or verifies one
+    swaps the module default for the authority's pair. This is the only place that is done. It
+    is never autouse: a test that claims to check the real pins must not request it, and the
+    fixtures below that seal request it themselves. Returns the `Trust` in force.
+
+    Imported here, not at the top, for the same reason as in `ledger_dir`.
+    """
+    import tsa_factory
+
+    from lastlight.seal import trust
+
+    pair = tsa_factory.authority()
+    swapped = trust.Trust(root=pair.root_certificate, tsa=pair.tsa_certificate)
+    monkeypatch.setattr(trust, "DEFAULT_TRUST", swapped)
+    return swapped
+
+
+@pytest.fixture
+def ledger_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, trust_test_tsa: Any) -> Path:
     """A ledger of three sealed evenings (`ledger_factory.DATES`), each sealed with its painting.
 
     `ledger_factory` is imported here, not at the top, because the network-guard tests run this
-    file on its own in a throwaway project that does not have the other test helpers.
+    file on its own in a throwaway project that does not have the other test helpers. The test
+    authority stays trusted for the whole test, so the ledger still verifies.
     """
     import ledger_factory
 
@@ -56,7 +80,9 @@ def ledger_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture
-def shuffled_ledger_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def shuffled_ledger_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, trust_test_tsa: Any
+) -> Path:
     """The same three evenings and paintings as `ledger_dir`, sealed out of date order.
 
     The index lists 2026-10-13, then 2026-10-11, then 2026-10-12: neither ascending nor

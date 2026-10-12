@@ -15,6 +15,15 @@ like itself shifted by a peak spacing) and real frames hold edges that are not t
    frames' skylines are combined by their median, and a robust least-squares fit moves the four
    parameters onto it. Trace and fit repeat with a narrower band.
 
+Stage 3 can be captured. A cloud edge held in every frame, 15 to 25 rows above the ridge over a
+stretch near the edge of the frame, is traced as if it were the ridge, and least squares then
+drags a correct climb off the ridge. The edge maps still know: a skyline that follows the cloud
+scores worse on them. So after stage 3 the fit compares the climbed and the fitted skyline's
+edge strength frame by frame (`_frames_lowered`); where most frames lose, the least-squares
+result is refused, stage 3 is run again without the traced columns that lie far from the climb,
+and that refit is accepted only if it does not lose the same way. Otherwise the climb is kept.
+`LeastSquaresGuard` records which of the three happened.
+
 The residual is vertical, in pixels, one value per image column. It is reported as an RMS in
 pixels and in degrees, and the fit also measures whether a radial distortion term would
 explain the residual (`fit_radial_term`).
@@ -48,6 +57,37 @@ _MISSING_PENALTY_PX = 30.0  # residual charged to a column the predicted curve d
 RADIAL_K1_BOUND = 0.6  # the radial term is searched within plus or minus this
 DEFAULT_HFOV_RANGE_DEG = (10.0, 120.0)  # from a long telephoto to a wide angle: a physical lens
 HFOV_BOUND_TOLERANCE_DEG = 0.05  # a fit this close to a limit counts as pinned to it
+# The guard on stage 3 (`_frames_lowered`, `_stage_3`).
+#
+# A skyline "loses" in a frame when it scores lower than the climbed one on that frame's edge map
+# by more than _CAPTURE_MARGIN of the climbed score. What the margin must clear, measured on the
+# synthetic scenes of tests/test_camgeom_orientation.py and test_camgeom_capture.py:
+#   - the noise of the recovery scenes, where least squares is right and the fitted skyline still
+#     scores a little below the climb: 0.002 to 0.1 percent on a clean frame, 0.12 percent beside
+#     a ghost edge, 0.016 percent against a terrain model that is 0.1 degree off;
+#   - the loss of a fit that the narrowing bands exist to repair: one wide pass, followed by a
+#     cloud held in every frame, loses 11.5 percent in each frame, and the three-band fit loses
+#     nothing. The guard must leave that to the bands, or no scene would need them.
+# What it must catch: a cloud edge held in every frame at the frame's edge, which the bands cannot
+# drop because the first, wide pass moves the fit onto the cloud and the narrow ones then centre
+# on it. How much the captured fit loses depends on how well the terrain model fits:
+#   - terrain the model has exactly: 33 to 44 percent in each frame;
+#   - terrain it has only nearly, which is the real case (WHTM1's residual is 1.6 px): about 20
+#     percent, 20.5 to 21.0 in each frame, for a 200-column cloud over terrain 0.1 degree off and
+#     for a 150-column cloud 20 rows above the ridge. A margin of 0.22 accepts the first, and the
+#     fit ends 0.30 degrees off in azimuth, 1.95 in roll and 5.5 percent in field of view.
+# So the margin lies between 11.5 and 20.5 percent, and 15 is the geometric midpoint (15.4)
+# rounded down: 1.30 times the loss it must leave alone, 1.38 times under the loss it must catch.
+# Every margin from 0.13 to 0.19 gives the same outcome on every scene of the suite; the headroom
+# tests of test_camgeom_capture.py ask for a quarter of the margin clear of both losses, which
+# leaves about 0.144 to 0.164.
+_CAPTURE_MARGIN = 0.15
+# Columns whose traced skyline lies farther than this from the climbed skyline are left out of
+# the refit. Four robust scales is a distance at which the soft-L1 loss is already linear, so
+# the fit itself discounts such a column; a cloud base 15 to 25 rows above the ridge is two to
+# three times farther.
+_CAPTURE_DROP_PX = 4.0 * _ROBUST_SCALE_PX
+GUARD_OUTCOMES = ("accepted", "refit", "kept_climb")
 
 
 def hfov_is_pinned(hfov_deg: float, bounds: tuple[float, float] = DEFAULT_HFOV_RANGE_DEG) -> bool:
@@ -114,9 +154,39 @@ class HorizonProfile:
         return cls(np.asarray(azimuth_deg)[keep], np.asarray(elevation_deg)[keep])
 
 
+@dataclass(frozen=True, slots=True)
+class LeastSquaresGuard:
+    """How the guard judged stage 3, and what it did.
+
+    The energies are the mean edge strength along a skyline (the score of the coarse search and
+    the climb) on the mean of the frames' edge maps, to four decimals, 0 for a skyline that lies
+    mostly outside the frame. `fitted_energy` is the least-squares result's; `refit_energy` the
+    refit's, or None when the guard did not need one. `frames_lowered` of the `frames` scored
+    lower for the fitted skyline than for the climbed one by more than `margin` of the climbed
+    score; `refused` (stage 3's result was not kept) is true when that is most of them.
+    `columns_dropped` is the number of traced columns left out of the refit, and `outcome` is
+    `accepted` (stage 3 stands), `refit` (stage 3 was redone without those columns) or
+    `kept_climb` (the refit was refused too and the climbed orientation is the result).
+    """
+
+    climbed_energy: float
+    fitted_energy: float
+    refit_energy: float | None
+    margin: float
+    frames: int
+    frames_lowered: int
+    refused: bool
+    columns_dropped: int
+    outcome: str
+
+
 @dataclass(frozen=True)
 class SkylineFit:
-    """The fitted orientation and how well the predicted skyline matches the observed one."""
+    """The fitted orientation and how well the predicted skyline matches the observed one.
+
+    `guard` says how stage 3 was judged. `observed` has no value (NaN) in the columns a refit
+    left out, so the residual is the ridge's and `n_columns` counts the columns that voted.
+    """
 
     orientation: Orientation
     rms_px: float
@@ -125,6 +195,7 @@ class SkylineFit:
     n_columns: int
     observed: np.ndarray
     predicted: np.ndarray
+    guard: LeastSquaresGuard | None = None
 
 
 @dataclass(frozen=True)
@@ -286,6 +357,115 @@ def _bounds(prior: Prior) -> tuple[np.ndarray, np.ndarray]:
 # --- stage 3: trace and fit -------------------------------------------------------------------
 
 
+def _trace_and_fit(
+    start: Orientation,
+    strengths: Sequence[np.ndarray],
+    horizon: HorizonProfile,
+    prior: Prior,
+    *,
+    keep_within_px: float | None = None,
+) -> tuple[Orientation, np.ndarray, int]:
+    """Stage 3: trace each frame in a band, combine the traces by median, fit; per band, narrowing.
+
+    Returns the fitted orientation, the combined skyline the last pass fitted, and the number of
+    columns any pass left out. With `keep_within_px`, a traced column farther than that from the
+    skyline `start` predicts is left out of that pass (NaN in its skyline): it does not vote. A
+    cloud the wide band traced can be out of the narrow one, so the count is over all the passes.
+    """
+    height, width = strengths[0].shape
+    reference = predict_skyline(start, horizon, width, height)
+    orientation = start
+    observed = np.full(width, np.nan)
+    left_out = np.zeros(width, dtype=bool)
+    for half_width in _BANDS:
+        centre = predict_skyline(orientation, horizon, width, height)
+        traces = [trace_skyline(s, around=centre, half_width=half_width) for s in strengths]
+        observed = combine_skylines(traces)
+        if keep_within_px is not None:
+            with np.errstate(invalid="ignore"):
+                near = np.abs(observed - reference) <= keep_within_px
+            left_out |= np.isfinite(observed) & ~near
+            observed = np.where(near, observed, np.nan)
+        orientation = _fit_to_skyline(orientation, observed, horizon, width, height, prior)
+    return orientation, observed, int(np.count_nonzero(left_out))
+
+
+def _frames_lowered(
+    strengths: Sequence[np.ndarray],
+    before: Orientation,
+    after: Orientation,
+    horizon: HorizonProfile,
+    margin: float,
+) -> int:
+    """In how many frames `after` scores lower than `before` on the frame's own edge map.
+
+    "Lower" is by more than `margin` of `before`'s score in that frame. The vote is by frame, as
+    the median of the traces is, and for the same reason: the edge map averaged over the frames
+    is dominated by whichever frame holds the strongest cloud edge, and when that edge sits in
+    one frame the climb is the one that was drawn to it and least squares, on the median of the
+    traces, is right (a faint ridge in haze with a dark cloud underside in one frame scores the
+    fitted skyline 65 percent lower on the mean map). A fit that a cloud held in most frames has
+    captured is off the ridge, which every frame holds, so it scores lower in most of them.
+    """
+    height, width = strengths[0].shape
+    kept = predict_skyline(before, horizon, width, height)
+    moved = predict_skyline(after, horizon, width, height)
+    lowered = 0
+    for strength in strengths:
+        was, now = _energy(strength, kept), _energy(strength, moved)
+        if now < was - margin * max(was, 0.0):
+            lowered += 1
+    return lowered
+
+
+def _recorded_energy(
+    strength: np.ndarray, orientation: Orientation, horizon: HorizonProfile
+) -> float:
+    """`_energy` of an orientation, to four decimals, for the guard record (0 where it is -inf)."""
+    height, width = strength.shape
+    energy = _energy(strength, predict_skyline(orientation, horizon, width, height))
+    return round(float(energy), 4) if np.isfinite(energy) else 0.0
+
+
+def _stage_3(
+    start: Orientation,
+    strengths: Sequence[np.ndarray],
+    mean_strength: np.ndarray,
+    horizon: HorizonProfile,
+    prior: Prior,
+) -> tuple[Orientation, np.ndarray, LeastSquaresGuard]:
+    """Stage 3 from the climbed orientation `start`, guarded against capture by a cloud edge.
+
+    The least-squares result stands unless most frames score it lower than the climb (see
+    `_frames_lowered`). Then stage 3 is redone without the traced columns far from the climb; the
+    refit stands unless most frames score it lower than the climb too, and then the climb does.
+    Returns the orientation, the skyline it was fitted to, and the record of what was done.
+    """
+    frames = len(strengths)
+    fitted, observed, _ = _trace_and_fit(start, strengths, horizon, prior)
+    lowered = _frames_lowered(strengths, start, fitted, horizon, _CAPTURE_MARGIN)
+    result, outcome, refit_energy, dropped = fitted, "accepted", None, 0
+    if 2 * lowered > frames:
+        refit, observed, dropped = _trace_and_fit(
+            start, strengths, horizon, prior, keep_within_px=_CAPTURE_DROP_PX
+        )
+        refit_energy = _recorded_energy(mean_strength, refit, horizon)
+        refit_lowered = _frames_lowered(strengths, start, refit, horizon, _CAPTURE_MARGIN)
+        result, outcome = (start, "kept_climb") if 2 * refit_lowered > frames else (refit, "refit")
+    guard = LeastSquaresGuard(
+        climbed_energy=_recorded_energy(mean_strength, start, horizon),
+        fitted_energy=_recorded_energy(mean_strength, fitted, horizon),
+        refit_energy=refit_energy,
+        margin=_CAPTURE_MARGIN,
+        frames=frames,
+        frames_lowered=lowered,
+        refused=outcome != "accepted",
+        columns_dropped=dropped,
+        outcome=outcome,
+    )
+    return result, observed, guard
+
+
 def _fit_to_skyline(
     start: Orientation,
     observed: np.ndarray,
@@ -324,7 +504,9 @@ def fit_orientation(
     """Fit the orientation to one or more frames of the same, fixed camera.
 
     `frames` are RGB (or grayscale) arrays of one size; `exclude` lists the boxes whose edges
-    must not count, such as the burned-in timestamp.
+    must not count, such as the burned-in timestamp. The result's `guard` says whether the
+    least-squares stage was accepted, redone without the columns a cloud edge captured, or
+    replaced by the climb.
     """
     if len(frames) == 0:
         raise ValueError("fit_orientation needs at least one frame")
@@ -340,14 +522,9 @@ def fit_orientation(
     ]
     if not climbed:
         raise ValueError("no placement of the horizon puts half of it inside the frame")
-    orientation = max(climbed, key=lambda item: item[0])[1]
+    start = max(climbed, key=lambda item: item[0])[1]
 
-    observed = np.full(width, np.nan)
-    for half_width in _BANDS:
-        centre = predict_skyline(orientation, horizon, width, height)
-        traces = [trace_skyline(s, around=centre, half_width=half_width) for s in strengths]
-        observed = combine_skylines(traces)
-        orientation = _fit_to_skyline(orientation, observed, horizon, width, height, prior)
+    orientation, observed, guard = _stage_3(start, strengths, mean_strength, horizon, prior)
 
     predicted = predict_skyline(orientation, horizon, width, height)
     difference = (predicted - observed)[np.isfinite(predicted - observed)]
@@ -361,6 +538,7 @@ def fit_orientation(
         n_columns=int(difference.size),
         observed=observed,
         predicted=predicted,
+        guard=guard,
     )
 
 

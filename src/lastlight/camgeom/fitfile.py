@@ -10,6 +10,10 @@ section 2, rule 2) and is what every later slice reads. It holds:
   frame and the SHA-256 of its bytes: never a file name, a time of day or a pixel;
 - the sun check, the radial-distortion check and (when it was run) the position search, and
   the date the fit was frozen;
+- optionally, `least_squares_guard`: how the guard judged the least-squares stage of the fit
+  (accepted, refit without the traced columns far from the climb, or the climb kept) and the
+  edge energies it compared. A fit made before the guard existed has no such object and is
+  still accepted; one is never invented for it;
 - whether the fit is `provisional`, and how far the pointing and pixel scale could be off.
 
 A fit is provisional unless the sun check passed. The skyline alone fixes azimuth, field of view
@@ -36,7 +40,7 @@ from typing import Any
 import numpy as np
 
 from lastlight.camgeom.model import CameraModel, pixels_per_degree
-from lastlight.camgeom.orientation import Orientation
+from lastlight.camgeom.orientation import GUARD_OUTCOMES, LeastSquaresGuard, Orientation
 from lastlight.camgeom.skyline import Box
 
 SCHEMA_VERSION = 2
@@ -133,6 +137,83 @@ def _count(value: Any, name: str, *, minimum: int) -> int:
     return value
 
 
+def _guard_to_json(guard: LeastSquaresGuard) -> dict[str, Any]:
+    return {
+        "climbed_energy": round(guard.climbed_energy, 4),
+        "fitted_energy": round(guard.fitted_energy, 4),
+        "refit_energy": None if guard.refit_energy is None else round(guard.refit_energy, 4),
+        "margin": round(guard.margin, 4),
+        "frames": guard.frames,
+        "frames_lowered": guard.frames_lowered,
+        "refused": guard.refused,
+        "columns_dropped": guard.columns_dropped,
+        "outcome": guard.outcome,
+    }
+
+
+def _guard_from_json(raw: Any) -> LeastSquaresGuard:
+    """Read the guard record, refusing one that contradicts itself (a hand edit, or a bug)."""
+    name = "least_squares_guard"
+    if not isinstance(raw, dict):
+        raise FitFileError(f"{name} must be an object, got {raw!r}")
+
+    def field(key: str) -> Any:
+        if key not in raw:
+            raise FitFileError(f"{name}.{key} is missing")
+        return raw[key]
+
+    def energy(key: str) -> float:
+        value = _number(field(key), f"{name}.{key}")
+        if value < 0.0:
+            raise FitFileError(f"{name}.{key} is an edge strength and cannot be negative")
+        return value
+
+    outcome = field("outcome")
+    if outcome not in GUARD_OUTCOMES:
+        raise FitFileError(f"{name}.outcome must be one of {GUARD_OUTCOMES}, got {outcome!r}")
+    refused = field("refused")
+    if not isinstance(refused, bool):
+        raise FitFileError(f"{name}.refused must be true or false")
+    if refused != (outcome != "accepted"):
+        raise FitFileError(
+            f"{name}.refused must be true exactly when the outcome is not 'accepted' "
+            f"(outcome is {outcome!r}, refused is {refused!r})"
+        )
+    climbed, fitted = energy("climbed_energy"), energy("fitted_energy")
+    refit = field("refit_energy")
+    if outcome == "accepted":
+        if refit is not None:
+            raise FitFileError(f"{name}.refit_energy must be null when no refit was made")
+    else:
+        refit = energy("refit_energy")
+    margin = _number(field("margin"), f"{name}.margin")
+    if not 0.0 < margin < 1.0:
+        raise FitFileError(f"{name}.margin must be a share between 0 and 1, got {margin!r}")
+    frames = _count(field("frames"), f"{name}.frames", minimum=1)
+    lowered = _count(field("frames_lowered"), f"{name}.frames_lowered", minimum=0)
+    if lowered > frames:
+        raise FitFileError(f"{name}.frames_lowered cannot exceed {name}.frames")
+    if refused != (2 * lowered > frames):
+        raise FitFileError(
+            f"{name}.refused must be true exactly when most frames lowered "
+            f"({lowered} of {frames} did, refused is {refused!r})"
+        )
+    dropped = _count(field("columns_dropped"), f"{name}.columns_dropped", minimum=0)
+    if outcome == "accepted" and dropped:
+        raise FitFileError(f"{name}.columns_dropped must be 0 when stage 3 was accepted")
+    return LeastSquaresGuard(
+        climbed_energy=climbed,
+        fitted_energy=fitted,
+        refit_energy=refit,
+        margin=margin,
+        frames=frames,
+        frames_lowered=lowered,
+        refused=refused,
+        columns_dropped=dropped,
+        outcome=outcome,
+    )
+
+
 @dataclass(frozen=True)
 class CameraFit:
     """A frozen fit. `provisional` and `uncertainty` say how far to trust its pixel scale.
@@ -165,6 +246,7 @@ class CameraFit:
     uncertainty: Uncertainty | None
     stated_azimuth_deg: float | None
     azimuth_minus_stated_deg: float | None
+    least_squares_guard: LeastSquaresGuard | None = None
 
     def camera_model(self, lat: float, lon: float, elev_m: float) -> CameraModel:
         """A `CameraModel` with this orientation, standing where the caller says.
@@ -243,6 +325,11 @@ class CameraFit:
             ],
             "sun_check": self.sun_check,
             "radial_term": self.radial_term,
+            **(
+                {}
+                if self.least_squares_guard is None
+                else {"least_squares_guard": _guard_to_json(self.least_squares_guard)}
+            ),
             "position_search": self.position_search,
             "fit_frozen_on": self.frozen_on,
             "position_basis": self.position_basis,
@@ -313,6 +400,9 @@ class CameraFit:
                     f"stated azimuth differ by {expected:.2f}"
                 )
         raw_uncertainty = data["uncertainty"]
+        guard = (
+            _guard_from_json(data["least_squares_guard"]) if "least_squares_guard" in data else None
+        )
         return cls(
             camera_id=str(data["camera_id"]),
             width=width,
@@ -344,6 +434,7 @@ class CameraFit:
             uncertainty=None if raw_uncertainty is None else Uncertainty.from_json(raw_uncertainty),
             stated_azimuth_deg=stated,
             azimuth_minus_stated_deg=difference,
+            least_squares_guard=guard,
         )
 
 

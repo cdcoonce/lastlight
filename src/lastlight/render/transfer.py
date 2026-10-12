@@ -137,6 +137,10 @@ def sky_spectrum(
     The line of sight is cut at the shell boundaries. For the middle of each piece the sunlight
     that reaches it (zero in Earth's shadow), the share scattered toward the observer, and the
     transmittance back to the observer are multiplied and summed.
+
+    This is renderer v0 only. Renderer v1 has no spectra: its table stores the multiply
+    scattered light as CIE XYZ, so v1 is read through `lastlight.render.curve.sky_xyz` with
+    `engine="v1"`, which adds that XYZ to the XYZ of this spectrum.
     """
     if not 0.0 <= view_elevation_deg <= 90.0:
         raise ValueError(f"view_elevation_deg must be in [0, 90], got {view_elevation_deg!r}")
