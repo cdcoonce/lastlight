@@ -361,6 +361,38 @@ def test_the_lead_does_not_point_at_a_painting_when_nothing_verified_to_show(
     assert "shown below" not in home.text, "there is no sealed painting below to point at"
 
 
+def lead_explanation(out: Path) -> str:
+    """The paragraph under the home page's missed statement."""
+    paragraphs = read_page(out, "index.html").find("p")
+    index = next(i for i, paragraph in enumerate(paragraphs) if paragraph.has_class("missed"))
+    return paragraphs[index + 1].text
+
+
+def test_the_lead_points_at_the_newest_sealed_evening_when_that_is_the_one_shown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger = sealed_ledger(tmp_path, monkeypatch, OLDEST, MIDDLE)
+    _report, out = build(ledger, tmp_path, through=NEWEST)
+    assert "The newest sealed evening is shown below under its own date." in lead_explanation(out)
+    assert "2026-10-12" in read_page(out, "index.html").headings()
+
+
+def test_the_lead_does_not_call_an_older_painting_the_newest_sealed_evening(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 2026-10-12 was sealed late, so it does not verify and is not shown; the page shows
+    # 2026-10-11, an older evening. 2026-10-13 and 2026-10-14 are missed, and 2026-10-14 leads.
+    ledger = sealed_ledger(tmp_path, monkeypatch, OLDEST, MIDDLE, late=(MIDDLE,))
+    _report, out = build(ledger, tmp_path, through=dt.date(2026, 10, 14))
+    home = read_page(out, "index.html")
+    assert home.texts("p", "missed") == [sentence(dt.date(2026, 10, 14))]
+    assert "2026-10-11" in home.headings() and "2026-10-12" not in home.headings()
+
+    explanation = lead_explanation(out)
+    assert "newest sealed evening is shown below" not in explanation, "an older one is shown"
+    assert "did not verify" in explanation, "the lead says why the newest sealed one is not shown"
+
+
 # --- the default through, from an injected clock --------------------------------------------
 
 
