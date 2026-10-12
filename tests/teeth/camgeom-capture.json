@@ -69,19 +69,19 @@
       "replace": "LeastSquaresGuard(**data[\"least_squares_guard\"])"
     },
     {
-      "label": "7 [control] the margin 0.20 becomes 0.19, five percent under it: no graded scene's loss lies between 0.19 and 0.20",
+      "label": "7 [control] the margin 0.15 becomes 0.16: inside the band where every graded scene is decided as at 0.15 and both headroom tests hold",
       "file": "../../src/lastlight/camgeom/orientation.py",
       "oracle": "real",
       "expect": "survived",
-      "why": "Every graded scene's loss is at most 0.14 percent, 11.5 percent (the one-pass bands scene) or at least 20.5 percent (the captures), so a margin anywhere from 0.13 to 0.19 decides every graded scene as 0.20 does (measured: 0.13, 0.15, 0.17 and 0.19 all leave the three camgeom files green, and 0.15 leaves the whole camgeom suite green), but the claim ends at about 0.205, where the mismatched-terrain capture slips under.",
-      "find": "_CAPTURE_MARGIN = 0.2",
-      "replace": "_CAPTURE_MARGIN = 0.19"
+      "why": "Every graded scene's loss is at most 0.14 percent, 11.5 percent (the one-wide-pass bands scene) or at least 20.5 percent (the realistic captures: 20.57 in the deciding frame of the mismatched-terrain one). The headroom tests keep a quarter of the margin clear of both, so they accept a margin from 1.25 times 11.48 percent to 20.57 percent over 1.25, that is 0.144 to 0.164, and every other test decides the scenes the same way anywhere from 0.13 to 0.19. 0.16 is inside the band, so no test may tell it from 0.15; the claim ends at 0.164.",
+      "find": "_CAPTURE_MARGIN = 0.15",
+      "replace": "_CAPTURE_MARGIN = 0.16"
     },
     {
-      "label": "7b the blind control 0.20 -> 0.22 (it was meant to survive): a graded capture, mismatched terrain with the cloud held in every frame, loses 20.5 to 20.9 percent and slips under it",
+      "label": "7b margin 0.15 becomes 0.22 (the blind control of the first draft, kept as a kill): a graded capture, mismatched terrain with the cloud held in every frame, loses 20.5 to 20.9 percent and slips under it; the headroom test must red it",
       "file": "../../src/lastlight/camgeom/orientation.py",
       "oracle": "real",
-      "find": "_CAPTURE_MARGIN = 0.2",
+      "find": "_CAPTURE_MARGIN = 0.15",
       "replace": "_CAPTURE_MARGIN = 0.22"
     },
     {
@@ -153,6 +153,20 @@
       "oracle": "real",
       "find": "margin=_CAPTURE_MARGIN,",
       "replace": "margin=0.5,"
+    },
+    {
+      "label": "18 margin 0.15 becomes 0.17: a realistic capture loses 20.6 percent, under 1.25 times the margin (0.2125)",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "_CAPTURE_MARGIN = 0.15",
+      "replace": "_CAPTURE_MARGIN = 0.17"
+    },
+    {
+      "label": "19 margin 0.15 becomes 0.13: the one-wide-pass bands scene loses 11.5 percent, over margin / 1.25 (0.104)",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "_CAPTURE_MARGIN = 0.15",
+      "replace": "_CAPTURE_MARGIN = 0.13"
     }
   ]
 }
