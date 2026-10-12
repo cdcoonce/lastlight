@@ -137,6 +137,34 @@ def test_the_command_line_runs_one_node_per_invocation_then_assembles(
     v1.load_table(out, expected_sha256=digest)
 
 
+def test_every_tiny_node_holds_its_own_atmosphere(tool: ModuleType, tmp_path: Path) -> None:
+    """Node `index` is the (aod, ozone) pair `(aod[index // n], ozone[index % n])`, `n` ozone nodes.
+
+    The tiny grid has two nodes on each atmosphere axis, so a node index that turned `(i, j)` into
+    `(j, i)` agrees with the right one at the first and the last node and differs only at the
+    two between. All four are checked: the atmosphere the generator names for each, and that the
+    table holds a fresh precomputation of that atmosphere at `[i, j]`.
+    """
+    grid = tool.GRIDS["tiny"]
+    out = tmp_path / "table.bin"
+    table = v1.load_table(out, expected_sha256=build(tool, tmp_path / "cache", out))
+    assert tool.node_count("tiny") == len(grid.aod) * len(grid.ozone)
+    for i, aod in enumerate(grid.aod):
+        for j, ozone in enumerate(grid.ozone):
+            index = i * len(grid.ozone) + j
+            atm = tool.node_atmosphere("tiny", index)
+            assert (atm.aod_550, atm.ozone_du) == (aod, ozone), f"node {index}"
+            field = bruneton.precompute(atm, resolution=bruneton.TINY_RESOLUTION)
+            for k, sun in enumerate(table.axes["sun_elevation_deg"]):
+                for n, azimuth in enumerate(table.axes["rel_azimuth_deg"]):
+                    direct = field.multiple_xyz(
+                        float(sun), table.axes["view_elevation_deg"], float(azimuth)
+                    )
+                    np.testing.assert_allclose(
+                        table.values[i, j, k, :, n], direct, rtol=1e-6, err_msg=f"node {index}"
+                    )
+
+
 def test_a_node_out_of_range_is_refused(tool: ModuleType, tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="node"):
         tool.compute_node("tiny", tool.node_count("tiny"), tmp_path)
