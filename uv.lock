@@ -493,6 +493,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "colour-science" },
+    { name = "cryptography" },
     { name = "eccodes" },
     { name = "eccodeslib", marker = "sys_platform != 'win32'" },
     { name = "numpy" },
@@ -514,6 +515,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "colour-science", specifier = ">=0.4.7" },
+    { name = "cryptography", specifier = ">=50.0.2" },
     { name = "eccodes", specifier = ">=2.49.0" },
     { name = "eccodeslib", marker = "sys_platform != 'win32'", specifier = ">=2.48" },
     { name = "numpy", specifier = ">=2.5.4" },

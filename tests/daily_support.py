@@ -41,8 +41,9 @@ class EchoTsa:
     """Stands in for `lastlight.seal.tsa.post_request`: stamps whatever digest it is sent.
 
     The request is DER with a fixed prefix, then the 32-byte SHA-256 imprint (no nonce), so the
-    digest can be read straight out of it. The reply is the recorded response re-dated to
-    `gen_time` and re-pointed at that digest, which is what a real authority would return.
+    digest can be read straight out of it. The reply is a response for that digest issued at
+    `gen_time` and signed by the test authority (`tsa_factory`), which is what a real authority
+    would return; a test that seals through it requests the `trust_test_tsa` fixture.
     """
 
     def __init__(self, gen_time: dt.datetime) -> None:

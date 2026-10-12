@@ -1,0 +1,417 @@
+"""The timestamp's signature against the real pins, with no test fixture (issue #25).
+
+Everything here runs with the product's own trust: FreeTSA's root and TSA certificates, pinned in
+the repository. No test in this file may request `trust_test_tsa` (the guard below fails it if
+it does), because a verifier that accepted anything would pass every test that swaps the trust
+for a fixture authority. The oracles are three:
+
+1. the genuine response recorded from FreeTSA verifies against the pinned pair, offline;
+2. the same response with its signature, its imprint or its time altered does not, and the
+   reason names the signature;
+3. a response from the throwaway test authority does not, and the reason names the chain.
+
+The rest of this file is the same refusals one layer up (`verify` and `seal`), and the checks that
+no trust can be added from outside.
+"""
+
+from __future__ import annotations
+
+import ast
+import datetime as dt
+import hashlib
+import inspect
+import json
+import shutil
+from pathlib import Path
+
+import pytest
+import seal_helpers as helpers
+import tsa_factory
+from cryptography.hazmat.primitives.serialization import Encoding
+
+from lastlight.cli import discover, main
+from lastlight.seal import ledger as ledger_module
+from lastlight.seal import ledger_paths, seal, trust, tsa, verify
+from lastlight.seal.tsa import TsaError
+
+DATE = helpers.STUB_DATE
+RECORDED_IMPRINT_HEX = "9cd91e89d63ac7a4633400eaba9dc69ffefb1b898a67f2c230700d2fb2378de6"
+"""The SHA-256 the recorded FreeTSA response covers (`test_seal_tsa` derives it from the bytes)."""
+SRC = Path(__file__).resolve().parents[1] / "src" / "lastlight"
+PUBLIC_LEDGER = Path(__file__).parent / "fixtures" / "ledger-2026-10-11"
+PUBLIC_DATE = dt.date(2026, 10, 11)
+
+
+@pytest.fixture(autouse=True)
+def only_the_real_pins(request: pytest.FixtureRequest) -> None:
+    assert "trust_test_tsa" not in request.fixturenames, (
+        "a test of the real pins must not swap the trust for the test authority"
+    )
+
+
+def reject(der: bytes) -> tsa.TokenRejected:
+    with pytest.raises(tsa.TokenRejected) as caught:
+        tsa.authenticate(der)
+    return caught.value
+
+
+def write_sealed(ledger: Path, token: bytes) -> None:
+    """Put the stub forecast and `token` where `seal` would, without going through `seal`."""
+    paths = ledger_paths(ledger, DATE)
+    paths.forecast.parent.mkdir(parents=True)
+    paths.forecast.write_bytes(helpers.STUB_CANONICAL)
+    paths.timestamp.write_bytes(token)
+
+
+# --- oracle 1: the genuine response, offline ----------------------------------------------
+
+
+def test_the_recorded_freetsa_response_verifies_against_the_pinned_pair_offline() -> None:
+    stamp = tsa.authenticate(helpers.recorded_response())  # the conftest guard blocks the network
+    assert stamp.algorithm == "sha256"
+    assert stamp.gen_time == helpers.recorded_gen_time()
+    assert stamp.gen_time.utcoffset() == dt.timedelta(0)
+    assert stamp.imprint.hex() == RECORDED_IMPRINT_HEX
+    assert stamp.gen_time.date() == dt.date(2026, 10, 11)
+
+
+# --- oracle 2: the same response, altered -------------------------------------------------
+
+
+@pytest.mark.parametrize("from_the_end", [1, 10, 60])
+def test_the_recorded_response_with_its_signature_altered_is_refused_naming_the_signature(
+    from_the_end: int,
+) -> None:
+    # The last 103 bytes of the response are the ECDSA signature (an OCTET STRING at the end of
+    # the SignerInfo); a bit flipped in its second integer (1, 10) or its first (60) leaves
+    # every length and structure intact, so only the signature check can see it.
+    raw = bytearray(helpers.recorded_response())
+    raw[-from_the_end] ^= 0x01
+    assert len(raw) == len(helpers.recorded_response())
+    error = reject(bytes(raw))
+    assert error.check == "signature"
+    assert "signature" in str(error)
+
+
+def test_the_recorded_response_with_its_imprint_edited_is_refused_naming_the_signature() -> None:
+    forged = helpers.repointed_recorded_response()
+    assert tsa.parse_response(forged).imprint.hex() == helpers.STUB_DIGEST  # parses, and lies
+    error = reject(forged)
+    assert error.check == "signature"
+    assert "signature" in str(error)
+
+
+def test_the_recorded_response_with_its_time_edited_is_refused_naming_the_signature() -> None:
+    raw = helpers.recorded_response()
+    old = helpers.recorded_gen_time().strftime("%Y%m%d%H%M%SZ").encode()
+    new = (helpers.recorded_gen_time() - dt.timedelta(hours=1)).strftime("%Y%m%d%H%M%SZ").encode()
+    assert raw.count(old) == 1
+    error = reject(raw.replace(old, new))
+    assert error.check == "signature"
+
+
+def test_a_genuine_response_for_other_bytes_is_still_genuine() -> None:
+    # The recorded response covers bytes that are not the stub's: authenticity says nothing
+    # about what is covered, and the imprint is compared separately (digest mismatch).
+    stamp = tsa.authenticate(helpers.recorded_response())
+    assert stamp.imprint.hex() != helpers.STUB_DIGEST
+
+
+@pytest.mark.filterwarnings("ignore::UserWarning")  # cryptography notes the garbled names
+def test_no_bit_flip_in_the_genuine_response_is_accepted_or_escapes_as_another_error() -> None:
+    # A hostile `.tsr` is just bytes. Flip one bit at every third position of the genuine
+    # response: each result must be a TsaError (never another exception, never an acceptance),
+    # except in the places the check does not read and that cannot change what it proves: the
+    # root certificate the response carries (the pinned root is used, never the carried one),
+    # the two version numbers, and the signature algorithm's OID (OpenSSL takes the algorithm
+    # from the key and the digest).
+    raw = helpers.recorded_response()
+    carried_root = trust.DEFAULT_TRUST.root.public_bytes(Encoding.DER)
+    root_at = raw.index(carried_root)
+    ecdsa_sha512 = bytes.fromhex("2a8648ce3d040304")
+    algorithm_at = raw.rindex(ecdsa_sha512)
+    ignored = (
+        set(range(root_at, root_at + len(carried_root)))
+        | set(range(algorithm_at, algorithm_at + len(ecdsa_sha512)))
+        | {raw.index(bytes.fromhex("020103")) + 2}  # SignedData version
+        | {raw.index(bytes.fromhex("0201013081a3")) + 2}  # SignerInfo version
+    )
+    accepted: list[int] = []
+    for position in range(0, len(raw), 3):
+        flipped = bytearray(raw)
+        flipped[position] ^= 0x01
+        try:
+            tsa.authenticate(bytes(flipped))
+        except TsaError:
+            continue
+        accepted.append(position)
+    assert accepted, "the ignored regions are large enough that some flips are accepted"
+    assert set(accepted) <= ignored, sorted(set(accepted) - ignored)[:10]
+
+
+# --- the public ledger's sealed evening, offline ------------------------------------------
+#
+# A copy of what the public ledger branch holds for its first sealed evening: the forecast, the
+# FreeTSA response for it, the strip and the index row, fetched once and committed under
+# `tests/fixtures/ledger-2026-10-11/` (the ledger directory itself, so `verify` reads it as it
+# reads the real one). The seal on the live service is the thing this change must not break.
+
+
+def test_the_public_ledgers_sealed_evening_verifies_offline_under_the_pinned_trust() -> None:
+    # No fixture authority and no network (the conftest guard): the product's own pins.
+    assert trust.fingerprint(trust.DEFAULT_TRUST.tsa) == trust.FREETSA_TSA_SHA256
+    outcome = verify(PUBLIC_DATE, PUBLIC_LEDGER)
+    assert outcome.ok and outcome.reason is None
+    assert outcome.strip_verified is True
+
+
+def test_the_command_prints_pass_with_the_strip_verified_for_the_public_evening(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    code = main(["verify", PUBLIC_DATE.isoformat(), "--ledger-dir", str(PUBLIC_LEDGER)])
+    assert code == 0
+    assert capsys.readouterr().out == "PASS (strip verified)\n"
+
+
+def test_the_public_evenings_index_row_names_the_digest_the_timestamp_covers() -> None:
+    forecast = (PUBLIC_LEDGER / "2026" / "10" / "11.forecast.json").read_bytes()
+    rows = [json.loads(line) for line in (PUBLIC_LEDGER / "index.jsonl").read_text().splitlines()]
+    assert [row["date"] for row in rows] == [PUBLIC_DATE.isoformat()]
+    assert rows[0]["digest"] == hashlib.sha256(forecast).hexdigest()
+    stamp = tsa.authenticate((PUBLIC_LEDGER / "2026" / "10" / "11.forecast.tsr").read_bytes())
+    assert stamp.imprint.hex() == rows[0]["digest"]
+
+
+@pytest.mark.parametrize("from_the_end", [1, 60])
+def test_the_public_evening_with_its_timestamp_altered_fails_naming_the_signature(
+    tmp_path: Path, from_the_end: int
+) -> None:
+    ledger = tmp_path / "ledger"
+    shutil.copytree(PUBLIC_LEDGER, ledger)
+    token = ledger / "2026" / "10" / "11.forecast.tsr"
+    raw = bytearray(token.read_bytes())
+    raw[-from_the_end] ^= 0x01
+    token.write_bytes(bytes(raw))
+    outcome = verify(PUBLIC_DATE, ledger)
+    assert not outcome.ok and outcome.strip_verified is False
+    assert "signature" in (outcome.reason or "")
+
+
+# --- oracle 3: a token from a test authority, under the default anchors -------------------
+
+
+def test_a_token_from_the_test_authority_is_refused_naming_the_certificate_chain() -> None:
+    token = helpers.make_tsr(helpers.STUB_DIGEST, helpers.recorded_gen_time())
+    error = reject(token)
+    assert error.check == "chain"
+    reason = str(error)
+    assert "chain" in reason and "pinned" in reason
+    assert "signature" not in reason, "the signature is fine; it is the authority that is unknown"
+
+
+def test_a_token_from_a_second_unknown_authority_is_refused_naming_the_certificate_chain() -> None:
+    token = tsa_factory.sign_response(
+        bytes.fromhex(helpers.STUB_DIGEST),
+        helpers.recorded_gen_time(),
+        signer=tsa_factory.other_authority(),
+    )
+    assert reject(token).check == "chain"
+
+
+def test_verify_refuses_a_ledger_whose_timestamp_is_from_the_test_authority(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "ledger"
+    write_sealed(ledger, helpers.tsr_before_sunset(DATE, helpers.STUB_DIGEST))
+    outcome = verify(DATE, ledger)
+    assert not outcome.ok
+    reason = outcome.reason or ""
+    assert "chain" in reason, reason
+    assert outcome.strip_verified is False
+
+
+def test_verify_refuses_a_ledger_whose_recorded_response_was_re_pointed_at_the_forecast(
+    tmp_path: Path,
+) -> None:
+    # The forgery the issue describes: take a genuine response, patch its imprint to the sealed
+    # forecast's digest. Every check but the signature passes.
+    ledger = tmp_path / "ledger"
+    write_sealed(ledger, helpers.repointed_recorded_response())
+    outcome = verify(DATE, ledger)
+    assert not outcome.ok and "signature" in (outcome.reason or "")
+    assert "digest mismatch" not in (outcome.reason or "")
+
+
+def test_seal_refuses_a_reply_from_an_authority_that_is_not_pinned_and_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ledger = tmp_path / "ledger"
+    reply = helpers.tsr_before_sunset(DATE, helpers.STUB_DIGEST)
+    fake = helpers.FakeTsa(reply)
+    monkeypatch.setattr(tsa, "post_request", fake)
+    with pytest.raises(TsaError, match="chain"):
+        seal(helpers.stub_forecast(), ledger)
+    assert len(fake.calls) == 1
+    assert helpers.snapshot(ledger) == {}, "a reply that does not verify never enters the ledger"
+    assert not ledger.exists()
+
+
+def test_seal_refuses_the_re_pointed_recorded_response_and_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ledger = tmp_path / "ledger"
+    monkeypatch.setattr(tsa, "post_request", helpers.FakeTsa(helpers.repointed_recorded_response()))
+    with pytest.raises(TsaError, match="signature"):
+        seal(helpers.stub_forecast(), ledger)
+    assert not ledger.exists()
+
+
+# --- no trust from outside ----------------------------------------------------------------
+
+
+def test_the_environment_cannot_add_trust(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    authority = tsa_factory.authority()
+    root_pem = tmp_path / "root.pem"
+    tsa_pem = tmp_path / "tsa.pem"
+    root_pem.write_bytes(authority.root_certificate.public_bytes(Encoding.PEM))
+    tsa_pem.write_bytes(authority.tsa_certificate.public_bytes(Encoding.PEM))
+    for name in (
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "LASTLIGHT_TSA_CA",
+        "LASTLIGHT_TSA_CERT",
+        "LASTLIGHT_TSA_ROOT",
+        "LASTLIGHT_TRUST",
+        "LASTLIGHT_CA_FILE",
+    ):
+        monkeypatch.setenv(name, str(root_pem))
+    token = helpers.make_tsr(helpers.STUB_DIGEST, helpers.recorded_gen_time())
+    assert reject(token).check == "chain"
+
+
+ENVIRONMENT_READS = {"environ", "environb", "getenv", "getenvb", "argv"}
+PROCESS_MODULES = {"os", "sys", "posix", "nt"}
+
+
+def outside_reads(source: str) -> list[str]:
+    """Every place `source` could read the environment or the command line, as `line N: what`.
+
+    The names are caught wherever they appear: as an attribute (`os.environ`), as a bare name,
+    as a string (`getattr(os, "environ")`), and in an import that renames them (`from os import
+    getenv as g`, `from os import environ as e`). A module renamed on import (`import os as o`)
+    is flagged too: nothing in the seal package has a reason to hide where `os` or `sys` went.
+    """
+    found: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        name: object
+        if isinstance(node, ast.Attribute):
+            name = node.attr
+        elif isinstance(node, ast.Constant):
+            name = node.value
+        else:
+            name = getattr(node, "id", None)
+        if isinstance(name, str) and name in ENVIRONMENT_READS:
+            found.append(f"line {node.lineno}: {name}")
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                star = alias.name == "*" and (node.module or "").split(".")[0] in PROCESS_MODULES
+                if alias.name in ENVIRONMENT_READS or star:
+                    found.append(f"line {node.lineno}: imports {alias.name}")
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname is not None and alias.name.split(".")[0] in PROCESS_MODULES:
+                    found.append(f"line {node.lineno}: imports {alias.name} as {alias.asname}")
+    return found
+
+
+def test_no_module_of_the_seal_package_reads_the_environment_or_the_command_line() -> None:
+    sources = sorted((SRC / "seal").glob("*.py")) + [
+        SRC / "commands" / "seal.py",
+        SRC / "commands" / "verify.py",
+    ]
+    assert len(sources) >= 7
+    for path in sources:
+        assert outside_reads(path.read_text()) == [], path.name
+
+
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        "import os\nvalue = os.environ['X']\n",
+        "import os\nvalue = os.getenv('X')\n",
+        "import sys\nvalue = sys.argv[1:]\n",
+        "from os import getenv as g\nvalue = g('X')\n",
+        "from os import environ as e\nvalue = e['X']\n",
+        "from sys import argv as a\nvalue = a[1:]\n",
+        "from os import getenv\n",
+        "from os import *\n",
+        "import os as o\nvalue = o.environ['X']\n",
+        "import os as o\nvalue = getattr(o, 'environ')\n",
+        "import os as o\n",
+        "import sys as s\n",
+    ],
+    ids=[
+        "environ",
+        "getenv",
+        "argv",
+        "getenv-renamed",
+        "environ-renamed",
+        "argv-renamed",
+        "getenv-imported",
+        "star-import",
+        "module-renamed-then-read",
+        "module-renamed-then-getattr",
+        "module-renamed",
+        "sys-renamed",
+    ],
+)
+def test_the_environment_scan_flags_a_planted_read(snippet: str) -> None:
+    assert outside_reads(snippet) != []
+
+
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        "import os\npath = os.path.join('a', 'b')\n",
+        "from os import path as p\nvalue = p.sep\n",
+        "import sys\nvalue = sys.version_info\n",
+        "values = {'environment': 1}\nvalue = values['environment']\n",
+    ],
+)
+def test_the_environment_scan_passes_code_that_reads_neither(snippet: str) -> None:
+    assert outside_reads(snippet) == []
+
+
+@pytest.mark.parametrize(
+    ("name", "options"),
+    [
+        ("verify", {"-h", "--help", "--ledger-dir"}),
+        ("seal", {"-h", "--help", "--strip", "--ledger-dir", "--tsa-url"}),
+    ],
+)
+def test_the_commands_take_no_option_that_names_trust_anchors(name: str, options: set[str]) -> None:
+    import argparse
+
+    command = {command.name: command for command in discover()}[name]
+    parser = argparse.ArgumentParser()
+    command.configure(parser)
+    assert {flag for action in parser._actions for flag in action.option_strings} == options
+
+
+@pytest.mark.parametrize(
+    ("module", "name"),
+    [
+        (tsa, "authenticate"),
+        (tsa, "request_timestamp"),
+        (ledger_module, "seal"),
+        (ledger_module, "verify"),
+    ],
+)
+def test_trust_is_an_explicit_keyword_whose_default_is_the_module_default(
+    module: object, name: str
+) -> None:
+    parameter = inspect.signature(getattr(module, name)).parameters["trust"]
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameter.default is None, "None means the module default, resolved at call time"
