@@ -338,3 +338,63 @@ def test_at_a_node_the_table_returns_the_stored_value() -> None:
         axes["rel_azimuth_deg"][n],
     )[0]
     np.testing.assert_allclose(got, table.values[i, j, k, m, n], rtol=1e-6)
+
+
+# (lower node, upper node, fraction of the way from the one to the other), per axis. Each pair is
+# adjacent and, where the axis has more than two nodes, interior, with a large step between its
+# stored values, so a lookup that drops the weight of one axis cannot agree with it.
+INTERPOLATION_PAIRS = {
+    "aod_550": (0.25, 0.5, 0.3),
+    "ozone_du": (250.0, 330.0, 0.3),
+    "sun_elevation_deg": (-4.0, -3.0, 0.25),
+    "view_elevation_deg": (5.0, 6.0, 0.4),
+    "rel_azimuth_deg": (55.0, 70.0, 0.4),
+}
+# every other coordinate sits on a node (ozone has only two, so its upper node stands in)
+ON_A_NODE = {
+    "aod_550": 0.1,
+    "ozone_du": 330.0,
+    "sun_elevation_deg": 0.0,
+    "view_elevation_deg": 3.0,
+    "rel_azimuth_deg": 30.0,
+}
+
+
+@pytest.mark.parametrize("axis", INTERPOLATION_PAIRS)
+def test_the_lookup_interpolates_log_linearly_on_every_axis(axis: str) -> None:
+    """Between two adjacent nodes the lookup is exp((1 - f) log a + f log b) of their values.
+
+    One axis at a time, so each axis's weight is checked on its own. The expected value is made
+    from the table's two stored node values (read straight from `values`, not through the
+    lookup), so it needs no oracle but the format: the 3 percent check above leaves aod 0.035
+    and view 1.7 almost on a node and cannot see a dropped weight on either.
+    """
+    table = v1.default_table()
+    nodes = {name: table.axes[name].tolist() for name in DOMAIN}
+    lower, upper, fraction = INTERPOLATION_PAIRS[axis]
+    assert nodes[axis].index(upper) == nodes[axis].index(lower) + 1
+    if len(nodes[axis]) > 2:
+        assert nodes[axis].index(lower) > 0
+        assert nodes[axis].index(upper) < len(nodes[axis]) - 1
+    index = {name: nodes[name].index(value) for name, value in ON_A_NODE.items()}
+
+    def stored(node: float) -> np.ndarray:
+        where = {**index, axis: nodes[axis].index(node)}
+        return table.values[tuple(where[name] for name in DOMAIN)].astype(float)
+
+    first, second = stored(lower), stored(upper)
+    want = np.exp((1.0 - fraction) * np.log(first) + fraction * np.log(second))
+    # the pair tells a weighted lookup from either node, and a log mix from a plain one
+    for node in (first, second):
+        assert np.abs(want / node - 1.0).max() > 1e-3
+    assert np.abs(want / ((1.0 - fraction) * first + fraction * second) - 1.0).max() > 1e-4
+
+    point = {**ON_A_NODE, axis: lower + fraction * (upper - lower)}
+    got = table.xyz(
+        point["aod_550"],
+        point["ozone_du"],
+        point["sun_elevation_deg"],
+        [point["view_elevation_deg"]],
+        point["rel_azimuth_deg"],
+    )[0]
+    np.testing.assert_allclose(got, want, rtol=1e-5)
