@@ -9,6 +9,10 @@ Rules every page follows (docs/design.md section 3, and the accessibility the is
 - A painting is called sealed only on an evening whose `verify` reported the strip verified
   (`Evening.strip_verified`). A verified evening whose forecast names no painting says so; an
   evening that fails verification claims nothing about its painting.
+- An evening with no seal is stated plainly, with its date and nothing else: "No forecast was
+  sealed for D." (`missed_statement`). The home page leads with it when the newest evening the
+  site reports on is missed and newer than every sealed one; the archive lists every missed
+  evening among the sealed ones. A missed evening has no page and no painting.
 - Everything that came from the ledger is escaped. Nothing is dropped or tidied: if a note or a
   verification reason holds something the scanner rejects, the build fails and says where.
 - No script and no external resource. Every image has alt text; colours are tokens with
@@ -53,6 +57,11 @@ def strip_name(date: dt.date) -> str:
 
 def _e(text: object) -> str:
     return html.escape(str(text), quote=True)
+
+
+def missed_statement(date: dt.date) -> str:
+    """What the site says of an evening that has no seal. Dates only, never a time."""
+    return f"No forecast was sealed for {date.isoformat()}."
 
 
 MINUS = "\u2212"
@@ -292,6 +301,50 @@ def _grid(evenings: Sequence[Evening]) -> str:
     return '<ul class="grid">\n' + "\n".join(_entry(evening) for evening in evenings) + "\n</ul>"
 
 
+def _missed_entry(date: dt.date) -> str:
+    return f'<li class="missed">{_e(missed_statement(date))}</li>'
+
+
+def _timeline(ledger: Ledger) -> str:
+    """Every sealed evening and every missed one, newest first, so a gap shows where it is."""
+    entries = [(evening.date, _entry(evening)) for evening in ledger.evenings]
+    entries += [(date, _missed_entry(date)) for date in ledger.missed]
+    entries.sort(key=lambda entry: entry[0], reverse=True)
+    return '<ul class="grid">\n' + "\n".join(entry for _date, entry in entries) + "\n</ul>"
+
+
+def _missed_lead(ledger: Ledger, *, shows_a_painting: bool) -> str:
+    """The statement that leads the home page, or nothing.
+
+    Only when the newest evening the site reports on (the newest missed one) is newer than every
+    sealed evening: then the newest sealed painting is not tonight's, and the page says so first.
+    A gap behind a later seal is for the archive.
+
+    What it says about the evening shown below is true in each state: the newest sealed evening
+    verified, so it is the one shown; it did not, so the page shows the newest one that did (when
+    `shows_a_painting`) and the lead says why it is not the newest sealed one; or nothing verified
+    and there is nothing to point at.
+    """
+    if not ledger.missed or not ledger.evenings:
+        return ""
+    newest = ledger.missed[0]
+    if newest <= ledger.evenings[0].date:
+        return ""
+    if shows_a_painting and ledger.evenings[0].verified:
+        below = " The newest sealed evening is shown below under its own date."
+    elif shows_a_painting:
+        below = (
+            " The newest sealed evening did not verify, so the evening shown below is the newest"
+            " one that did, under its own date."
+        )
+    else:
+        below = ""
+    return (
+        f'<p class="missed">{_e(missed_statement(newest))}</p>\n'
+        f"<p>A missing seal is not a forecast, and the evening is never back-filled.{below}</p>"
+    )
+
+
 # --- pages ----------------------------------------------------------------------------------
 
 
@@ -301,6 +354,9 @@ def home_page(ledger: Ledger) -> str:
     # The newest evening that verifies is featured; it is called a painting only if it has one.
     sealed = "painting" if featured is None or featured.strip_verified else "forecast"
     parts = [f"<h1>Latest sealed {sealed}</h1>"]
+    lead = _missed_lead(ledger, shows_a_painting=featured is not None)
+    if lead:
+        parts.append(lead)
     if evenings and not evenings[0].verified:
         newest = evenings[0].date
         parts.append(
@@ -354,7 +410,12 @@ def archive_page(ledger: Ledger) -> str:
             f'<p class="notice">{count} {noun} of the ledger index could not be read and '
             f"{'is' if count == 1 else 'are'} not listed.</p>"
         )
-    parts.append(_grid(ledger.evenings) if ledger.evenings else "<p>No evenings sealed yet.</p>")
+    if ledger.missed:
+        parts.append(
+            "<p>An evening with no seal is listed with the statement that none was sealed. "
+            "It is never back-filled, and a missing seal is not a forecast.</p>"
+        )
+    parts.append(_timeline(ledger) if ledger.evenings else "<p>No evenings sealed yet.</p>")
     return _document(title="Archive · lastlight", current="archive.html", body="\n".join(parts))
 
 
