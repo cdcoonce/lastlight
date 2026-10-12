@@ -143,6 +143,7 @@ def _name(common_name: str) -> x509.Name:
 def build_authority(
     *,
     name: str = "lastlight test",
+    root_valid: tuple[dt.datetime, dt.datetime] = ROOT_VALID,
     tsa_valid: tuple[dt.datetime, dt.datetime] = TSA_VALID,
     key_purposes: tuple[x509.ObjectIdentifier, ...] = (ExtendedKeyUsageOID.TIME_STAMPING,),
     key_purposes_critical: bool = True,
@@ -152,7 +153,8 @@ def build_authority(
 
     The same `name` gives the same subject and issuer names, and `tsa_serial` fixes the TSA
     certificate's serial number, so an authority can impersonate another one's names while its
-    keys, and so its certificates, are different.
+    keys, and so its certificates, are different. `root_valid` and `tsa_valid` are the two
+    validity windows.
     """
     root_key = ec.generate_private_key(ec.SECP256R1())
     tsa_key = ec.generate_private_key(ec.SECP256R1())
@@ -163,8 +165,8 @@ def build_authority(
         .issuer_name(root_name)
         .public_key(root_key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(ROOT_VALID[0])
-        .not_valid_after(ROOT_VALID[1])
+        .not_valid_before(root_valid[0])
+        .not_valid_after(root_valid[1])
         .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
         .add_extension(
             x509.KeyUsage(
@@ -183,7 +185,7 @@ def build_authority(
         .add_extension(x509.SubjectKeyIdentifier.from_public_key(root_key.public_key()), False)
         .sign(root_key, hashes.SHA256())
     )
-    tsa = (
+    tsa_builder = (
         x509.CertificateBuilder()
         .subject_name(tsa_name)
         .issuer_name(root_name)
@@ -206,8 +208,14 @@ def build_authority(
             ),
             critical=False,
         )
-        .add_extension(x509.ExtendedKeyUsage(list(key_purposes)), critical=key_purposes_critical)
-        .add_extension(x509.SubjectKeyIdentifier.from_public_key(tsa_key.public_key()), False)
+    )
+    tsa_builder = tsa_builder.add_extension(
+        x509.ExtendedKeyUsage(list(key_purposes)), critical=key_purposes_critical
+    )
+    tsa = (
+        tsa_builder.add_extension(
+            x509.SubjectKeyIdentifier.from_public_key(tsa_key.public_key()), False
+        )
         .add_extension(
             x509.AuthorityKeyIdentifier.from_issuer_public_key(root_key.public_key()), False
         )

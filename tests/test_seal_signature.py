@@ -315,6 +315,43 @@ def test_verify_fails_a_seal_made_after_the_certificate_expired(ledger: Path) ->
     assert not outcome.ok and "validity" in (outcome.reason or "")
 
 
+def test_a_token_issued_after_the_root_expired_fails_naming_the_validity() -> None:
+    # The TSA certificate (valid through 2029) is fine at the token's time; the root it chains to
+    # ended before. The reason must name the root's validity, not the library's generic refusal.
+    root_ended = dt.datetime(2026, 6, 1, tzinfo=dt.UTC)
+    authority = tsa_factory.build_authority(
+        name="root ends first",
+        root_valid=(dt.datetime(2020, 1, 1, tzinfo=dt.UTC), root_ended),
+    )
+    after = root_ended + dt.timedelta(days=30)
+    assert authority.tsa_certificate.not_valid_before_utc < after
+    assert after < authority.tsa_certificate.not_valid_after_utc
+    token = tsa_factory.sign_response(bytes.fromhex(DIGEST), after, signer=authority)
+    with pytest.raises(TokenRejected) as caught:
+        tsa.authenticate(token, trust=trust_of(authority))
+    assert caught.value.check == "validity"
+    reason = str(caught.value)
+    assert "validity" in reason and "root" in reason and "expired" in reason
+    assert "TSA" not in reason
+
+
+def test_a_token_issued_before_the_root_began_fails_naming_the_validity() -> None:
+    root_began = dt.datetime(2026, 9, 1, tzinfo=dt.UTC)
+    authority = tsa_factory.build_authority(
+        name="root begins last",
+        root_valid=(root_began, dt.datetime(2040, 1, 1, tzinfo=dt.UTC)),
+    )
+    before = root_began - dt.timedelta(days=30)
+    assert authority.tsa_certificate.not_valid_before_utc < before
+    token = tsa_factory.sign_response(bytes.fromhex(DIGEST), before, signer=authority)
+    with pytest.raises(TokenRejected) as caught:
+        tsa.authenticate(token, trust=trust_of(authority))
+    assert caught.value.check == "validity"
+    reason = str(caught.value)
+    assert "validity" in reason and "root" in reason and "not yet" in reason
+    assert "TSA" not in reason
+
+
 # --- the imprint ---------------------------------------------------------------------------
 
 
