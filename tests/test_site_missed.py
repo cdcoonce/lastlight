@@ -449,6 +449,22 @@ def test_the_archive_says_a_missing_seal_is_never_back_filled_or_scored(
     assert "never back-filled" in text and "not a forecast" in text
 
 
+def test_the_archive_explains_missed_evenings_only_when_there_are_some(
+    newest_missed: tuple[BuildReport, Path], ledger_dir: Path, tmp_path: Path
+) -> None:
+    # With a missed evening the archive explains what the entry means ...
+    _report, with_missed = newest_missed
+    explained = read_page(with_missed, "archive.html")
+    assert "never back-filled" in explained.text and explained.find("li", "missed") != []
+
+    # ... and with none, nothing on the page talks about one: no explanation, no entry.
+    report, nothing_missed = build(ledger_dir, tmp_path / "none", through=NEWEST)
+    assert report.missed == ()
+    plain = read_page(nothing_missed, "archive.html")
+    assert "never back-filled" not in plain.text and "not a forecast" not in plain.text
+    assert plain.find("li", "missed") == [] and plain.find("p", "missed") == []
+
+
 def test_the_stylesheet_styles_the_missed_entries_with_the_existing_tokens() -> None:
     css = pages.stylesheet()
     assert ".missed" in css
