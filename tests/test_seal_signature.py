@@ -238,6 +238,28 @@ def test_a_tsa_certificate_without_a_critical_timestamping_purpose_fails_naming_
     assert "signature" not in reason and "chain" not in reason
 
 
+def test_a_tsa_certificate_with_timestamping_among_other_purposes_fails_naming_the_eku(
+    ledger: Path,
+) -> None:
+    # RFC 3161 section 2.3: the TSA certificate's extended key usage holds only
+    # id-kp-timeStamping. Timestamping beside another purpose is refused, and the reason names the
+    # key usage, not the chain (the library refuses it too, but as a generic purpose error).
+    authority = tsa_factory.build_authority(
+        name="timestamping and more",
+        key_purposes=(ExtendedKeyUsageOID.TIME_STAMPING, ExtendedKeyUsageOID.CLIENT_AUTH),
+    )
+    usage = authority.tsa_certificate.extensions.get_extension_for_class(x509.ExtendedKeyUsage)
+    assert usage.critical
+    assert ExtendedKeyUsageOID.TIME_STAMPING in usage.value
+    assert len(usage.value) == 2
+    write_sealed(ledger, before_sunset(signer=authority))
+    outcome = verify(DATE, ledger, trust=trust_of(authority))
+    reason = outcome.reason or ""
+    assert not outcome.ok
+    assert "extended key usage" in reason and "EKU" in reason
+    assert "signature" not in reason and "chain" not in reason
+
+
 def test_the_same_authority_with_a_critical_timestamping_purpose_passes(ledger: Path) -> None:
     authority = tsa_factory.build_authority(name="good")
     write_sealed(ledger, before_sunset(signer=authority))
