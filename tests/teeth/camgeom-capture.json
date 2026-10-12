@@ -1,0 +1,158 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_camgeom_capture.py",
+    "tests/test_camgeom_orientation.py",
+    "tests/test_camgeom_fitfile.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_camgeom_capture.py",
+    "tests/test_camgeom_orientation.py",
+    "tests/test_camgeom_fitfile.py"
+  ],
+  "mutants": [
+    {
+      "label": "1 guard never fires: stage 3's least-squares result is always accepted",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "    if 2 * lowered > frames:",
+      "replace": "    if False:"
+    },
+    {
+      "label": "2 refit keeps every traced column: no column is dropped as far from the climbed skyline",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "near = np.abs(observed - reference) <= keep_within_px",
+      "replace": "near = np.abs(observed - reference) <= keep_within_px + 1.0e9"
+    },
+    {
+      "label": "3 refit always accepted: the check that it does not lose against the climb is removed",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "(start, \"kept_climb\") if 2 * refit_lowered > frames else (refit, \"refit\")",
+      "replace": "(refit, \"refit\")"
+    },
+    {
+      "label": "4 write_fit omits the least_squares_guard object",
+      "file": "../../src/lastlight/camgeom/fitfile.py",
+      "oracle": "real",
+      "find": "path.write_text(json.dumps(fit.to_json(), indent=2) + \"\\n\")",
+      "replace": "path.write_text(json.dumps({k: v for k, v in fit.to_json().items() if k != \"least_squares_guard\"}, indent=2) + \"\\n\")"
+    },
+    {
+      "label": "5 from_json requires the least_squares_guard object",
+      "file": "../../src/lastlight/camgeom/fitfile.py",
+      "oracle": "real",
+      "find": " if \"least_squares_guard\" in data else None",
+      "replace": " if True else None"
+    },
+    {
+      "label": "6 the guard object is not validated when present",
+      "file": "../../src/lastlight/camgeom/fitfile.py",
+      "oracle": "real",
+      "find": "_guard_from_json(data[\"least_squares_guard\"])",
+      "replace": "LeastSquaresGuard(**data[\"least_squares_guard\"])"
+    },
+    {
+      "label": "7 [control] the margin 0.20 becomes 0.19, five percent under it: no graded scene's loss lies between 0.19 and 0.20",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "Every graded scene's loss is at most 0.14 percent, 11.5 percent (the one-pass bands scene) or at least 20.5 percent (the captures), so a margin anywhere from 0.13 to 0.19 decides every graded scene as 0.20 does (measured: 0.13, 0.15, 0.17 and 0.19 all leave the three camgeom files green, and 0.15 leaves the whole camgeom suite green), but the claim ends at about 0.205, where the mismatched-terrain capture slips under.",
+      "find": "_CAPTURE_MARGIN = 0.2",
+      "replace": "_CAPTURE_MARGIN = 0.19"
+    },
+    {
+      "label": "7b the blind control 0.20 -> 0.22 (it was meant to survive): a graded capture, mismatched terrain with the cloud held in every frame, loses 20.5 to 20.9 percent and slips under it",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "_CAPTURE_MARGIN = 0.2",
+      "replace": "_CAPTURE_MARGIN = 0.22"
+    },
+    {
+      "label": "8 vote threshold 'more than half of the frames' becomes 'at least one frame'",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "    if 2 * lowered > frames:",
+      "replace": "    if lowered >= 1:"
+    },
+    {
+      "label": "9 vote threshold 'more than half of the frames' becomes 'every frame'",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "    if 2 * lowered > frames:",
+      "replace": "    if lowered == frames:"
+    },
+    {
+      "label": "10 refit vote: the refit is refused when at least one frame scores it lower, not most",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "if 2 * refit_lowered > frames else (refit, \"refit\")",
+      "replace": "if refit_lowered >= 1 else (refit, \"refit\")"
+    },
+    {
+      "label": "11 refit vote: the refit is refused only when every frame scores it lower, not most",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "if 2 * refit_lowered > frames else (refit, \"refit\")",
+      "replace": "if refit_lowered == frames else (refit, \"refit\")"
+    },
+    {
+      "label": "12 drop distance 8 px becomes 0.2 px: honest ridge columns a pixel off the climb are dropped too",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "_CAPTURE_DROP_PX = 4.0 * _ROBUST_SCALE_PX",
+      "replace": "_CAPTURE_DROP_PX = 0.1 * _ROBUST_SCALE_PX"
+    },
+    {
+      "label": "13 the refit starts from the least-squares result, not from the climb",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "            start, strengths, horizon, prior, keep_within_px=_CAPTURE_DROP_PX",
+      "replace": "            fitted, strengths, horizon, prior, keep_within_px=_CAPTURE_DROP_PX"
+    },
+    {
+      "label": "14 the record's fitted_energy is the climbed orientation's score",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "fitted_energy=_recorded_energy(mean_strength, fitted, horizon),",
+      "replace": "fitted_energy=_recorded_energy(mean_strength, start, horizon),"
+    },
+    {
+      "label": "15 the file validator's vote check reads 'at least one frame lowered' for 'most frames'",
+      "file": "../../src/lastlight/camgeom/fitfile.py",
+      "oracle": "real",
+      "find": "if refused != (2 * lowered > frames):",
+      "replace": "if refused != (lowered >= 1):"
+    },
+    {
+      "label": "16 the file validator's vote check reads 'every frame lowered' for 'most frames'",
+      "file": "../../src/lastlight/camgeom/fitfile.py",
+      "oracle": "real",
+      "find": "if refused != (2 * lowered > frames):",
+      "replace": "if refused != (lowered == frames):"
+    },
+    {
+      "label": "17 the record's margin is not the margin the vote used",
+      "file": "../../src/lastlight/camgeom/orientation.py",
+      "oracle": "real",
+      "find": "margin=_CAPTURE_MARGIN,",
+      "replace": "margin=0.5,"
+    }
+  ]
+}
