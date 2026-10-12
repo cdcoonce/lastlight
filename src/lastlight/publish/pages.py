@@ -319,15 +319,26 @@ def _missed_lead(ledger: Ledger, *, shows_a_painting: bool) -> str:
     Only when the newest evening the site reports on (the newest missed one) is newer than every
     sealed evening: then the newest sealed painting is not tonight's, and the page says so first.
     A gap behind a later seal is for the archive.
+
+    What it says about the evening shown below is true in each state: the newest sealed evening
+    verified, so it is the one shown; it did not, so the page shows the newest one that did (when
+    `shows_a_painting`) and the lead says why it is not the newest sealed one; or nothing verified
+    and there is nothing to point at.
     """
     if not ledger.missed or not ledger.evenings:
         return ""
     newest = ledger.missed[0]
     if newest <= ledger.evenings[0].date:
         return ""
-    below = (
-        " The newest sealed evening is shown below under its own date." if shows_a_painting else ""
-    )
+    if shows_a_painting and ledger.evenings[0].verified:
+        below = " The newest sealed evening is shown below under its own date."
+    elif shows_a_painting:
+        below = (
+            " The newest sealed evening did not verify, so the evening shown below is the newest"
+            " one that did, under its own date."
+        )
+    else:
+        below = ""
     return (
         f'<p class="missed">{_e(missed_statement(newest))}</p>\n'
         f"<p>A missing seal is not a forecast, and the evening is never back-filled.{below}</p>"
