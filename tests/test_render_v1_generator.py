@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -163,6 +164,38 @@ def test_every_tiny_node_holds_its_own_atmosphere(tool: ModuleType, tmp_path: Pa
                     np.testing.assert_allclose(
                         table.values[i, j, k, :, n], direct, rtol=1e-6, err_msg=f"node {index}"
                     )
+
+
+def test_a_table_built_in_another_process_has_the_same_sha256(
+    tool: ModuleType, tmp_path: Path
+) -> None:
+    """The container carries nothing of the process that wrote it, such as its id or hash seed.
+
+    Two builds in one process share a process id and a hash seed, so they cannot show it. This one
+    is made by the command line, one subprocess per node and one to assemble, with a different
+    `PYTHONHASHSEED` for the nodes and for the assembly, and compared with an in-process build.
+    """
+    here = tmp_path / "here"
+    digest = build(tool, here / "cache", here / "table.bin")
+    cache, out = tmp_path / "there" / "cache", tmp_path / "there" / "table.bin"
+    common = [sys.executable, str(TOOL), "--grid", "tiny", "--cache-dir", str(cache)]
+
+    def run(arguments: list[str], hash_seed: str) -> subprocess.CompletedProcess[str]:
+        done = subprocess.run(
+            [*common, *arguments],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONHASHSEED": hash_seed},
+        )
+        assert done.returncode == 0, done.stderr
+        return done
+
+    for index in range(tool.node_count("tiny")):
+        run(["--node", str(index)], "1")
+    done = run(["--assemble", "--out", str(out)], "2")
+    assert sha256(out.read_bytes()) == digest
+    assert digest in done.stdout
+    assert out.read_bytes() == (here / "table.bin").read_bytes()
 
 
 def test_a_node_out_of_range_is_refused(tool: ModuleType, tmp_path: Path) -> None:
