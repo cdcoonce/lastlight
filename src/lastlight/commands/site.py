@@ -1,9 +1,12 @@
-"""`lastlight site build --ledger-dir DIR --out DIR`: build the almanac from a sealed ledger.
+"""`lastlight site build --ledger-dir DIR --out DIR [--through YYYY-MM-DD]`: build the almanac.
 
 Thin by design: it parses arguments and prints; the work is `lastlight.publish.build_site`.
-The build runs the privacy scanner over its own output before it finishes. Exit codes: 0 built,
-1 the scan found something (findings are printed and nothing is written), 2 the site could not
-be built (an unreadable ledger, or an output directory that must not be replaced).
+The build runs the privacy scanner over its own output before it finishes. `--through` is the
+newest evening the site reports on: an evening between the first sealed one and it that has no
+seal is listed as missed (default: the newest evening whose deadline has passed). Exit codes:
+0 built, 1 the scan found something (findings are printed and nothing is written), 2 the site
+could not be built (an unreadable ledger, or an output directory that must not be replaced) or
+a usage error.
 """
 
 from __future__ import annotations
@@ -13,6 +16,7 @@ import sys
 from pathlib import Path
 
 from lastlight.cli import Command
+from lastlight.commands._arguments import iso_date
 from lastlight.publish import BuildError, build_site
 
 
@@ -37,6 +41,13 @@ def _configure(parser: argparse.ArgumentParser) -> None:
         metavar="DIR",
         help="where to write the site; an earlier build there is replaced",
     )
+    build.add_argument(
+        "--through",
+        type=iso_date,
+        metavar="YYYY-MM-DD",
+        help="the newest evening the site reports on; an evening up to it with no seal is "
+        "listed as missed (default: the newest evening whose sunset has passed)",
+    )
     build.set_defaults(run_action=_build)
 
 
@@ -46,7 +57,7 @@ def _count(number: int, noun: str) -> str:
 
 def _build(args: argparse.Namespace) -> int:
     try:
-        report = build_site(args.ledger_dir, args.out)
+        report = build_site(args.ledger_dir, args.out, through=args.through)
     except (BuildError, OSError) as error:
         print(f"site build: {error}", file=sys.stderr)
         return 2
@@ -61,10 +72,13 @@ def _build(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
-    print(
+    summary = (
         f"built {_count(report.pages, 'page')} for {_count(report.evenings, 'evening')} "
         f"({report.verified} verified) in {args.out}"
     )
+    if report.missed:
+        summary += f"; {_count(len(report.missed), 'missed evening')} listed"
+    print(summary)
     return 0
 
 

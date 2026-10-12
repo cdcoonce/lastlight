@@ -9,11 +9,17 @@ if that directory is empty, absent, or an earlier build of this site.
 The paintings are the PNGs beside each sealed forecast. They are not copied: each is decoded and
 written again with `render.save_strip`, so the published file holds pixels and nothing else, no
 matter what the original carried. The scan then checks the result for metadata (rule P004).
+
+The site also says so when an evening has no seal (`lastlight.publish.missed`). It reports on
+every evening up to `through`: the one given, or else the newest evening whose deadline has
+passed at the build's clock (`now_utc`, or the real one). That is the only place the build reads
+the clock; pass `through` for a build that must not depend on the day it runs.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import datetime as dt
 import os
 import shutil
 import tempfile
@@ -25,6 +31,7 @@ from PIL import Image
 from lastlight.privacy import Finding, scan
 from lastlight.publish import pages
 from lastlight.publish.ledger import Evening, Ledger, read_ledger
+from lastlight.publish.missed import default_through, missed_evenings
 from lastlight.render.curve import save_strip
 
 SITE_MODE = 0o755
@@ -43,20 +50,44 @@ class BuildReport:
     findings: tuple[Finding, ...]
     """Privacy findings in the generated site; any at all means nothing was written."""
     warnings: tuple[str, ...]
+    missed: tuple[dt.date, ...] = ()
+    """The evenings the site says have no seal, newest first."""
+    through: dt.date | None = None
+    """The newest evening the site reports on."""
 
     @property
     def ok(self) -> bool:
         return not self.findings
 
 
-def build_site(ledger_dir: Path, out_dir: Path) -> BuildReport:
-    """Build the almanac of `ledger_dir` into `out_dir`, unless the privacy scan finds a leak."""
+def utc_now() -> dt.datetime:
+    """The build's clock, used only to choose the default `through`."""
+    return dt.datetime.now(dt.UTC)
+
+
+def build_site(
+    ledger_dir: Path,
+    out_dir: Path,
+    *,
+    through: dt.date | None = None,
+    now_utc: dt.datetime | None = None,
+) -> BuildReport:
+    """Build the almanac of `ledger_dir` into `out_dir`, unless the privacy scan finds a leak.
+
+    `through` is the newest evening the site reports on; an evening between the first sealed one
+    and `through` with no row in the index is shown as missed. By default it is the newest
+    evening whose deadline had passed at `now_utc` (the real clock if not given).
+    """
     if ledger_dir.exists() and not ledger_dir.is_dir():
         raise BuildError(f"the ledger {ledger_dir} is not a directory")
     target = Path(os.path.abspath(out_dir))
     _check_output(target)
 
     ledger = read_ledger(ledger_dir)
+    if through is None:
+        through = default_through(now_utc if now_utc is not None else utc_now())
+    missed = missed_evenings((evening.date for evening in ledger.evenings), through)
+    ledger = dataclasses.replace(ledger, missed=missed)
     warnings = _ledger_warnings(ledger, ledger_dir)
     target.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{target.name}-", suffix=".build", dir=target.parent))
@@ -78,6 +109,8 @@ def build_site(ledger_dir: Path, out_dir: Path) -> BuildReport:
         verified=sum(evening.verified for evening in evenings),
         findings=findings,
         warnings=(*warnings, *strip_warnings),
+        missed=missed,
+        through=through,
     )
 
 

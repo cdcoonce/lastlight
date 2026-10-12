@@ -76,6 +76,10 @@ class Ledger:
     """False when the ledger directory does not exist."""
     skipped_index_lines: int
     """Index lines that were not usable (malformed, or a date already listed) and were left out."""
+    missed: tuple[dt.date, ...] = ()
+    """Evenings with no row in the index between the first sealed one and the site's `through`,
+    newest first (`lastlight.publish.missed`). `read_ledger` leaves it empty: whether an evening
+    is missed depends on the date the site reports through, which the build decides."""
 
 
 @dataclass(frozen=True)
