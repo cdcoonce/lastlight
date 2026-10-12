@@ -145,7 +145,7 @@ def build_authority(
     name: str = "lastlight test",
     root_valid: tuple[dt.datetime, dt.datetime] = ROOT_VALID,
     tsa_valid: tuple[dt.datetime, dt.datetime] = TSA_VALID,
-    key_purposes: tuple[x509.ObjectIdentifier, ...] = (ExtendedKeyUsageOID.TIME_STAMPING,),
+    key_purposes: tuple[x509.ObjectIdentifier, ...] | None = (ExtendedKeyUsageOID.TIME_STAMPING,),
     key_purposes_critical: bool = True,
     tsa_serial: int | None = None,
 ) -> Authority:
@@ -154,7 +154,8 @@ def build_authority(
     The same `name` gives the same subject and issuer names, and `tsa_serial` fixes the TSA
     certificate's serial number, so an authority can impersonate another one's names while its
     keys, and so its certificates, are different. `root_valid` and `tsa_valid` are the two
-    validity windows.
+    validity windows, and `key_purposes=None` leaves the extended key usage extension out of the
+    TSA certificate altogether.
     """
     root_key = ec.generate_private_key(ec.SECP256R1())
     tsa_key = ec.generate_private_key(ec.SECP256R1())
@@ -209,9 +210,10 @@ def build_authority(
             critical=False,
         )
     )
-    tsa_builder = tsa_builder.add_extension(
-        x509.ExtendedKeyUsage(list(key_purposes)), critical=key_purposes_critical
-    )
+    if key_purposes is not None:
+        tsa_builder = tsa_builder.add_extension(
+            x509.ExtendedKeyUsage(list(key_purposes)), critical=key_purposes_critical
+        )
     tsa = (
         tsa_builder.add_extension(
             x509.SubjectKeyIdentifier.from_public_key(tsa_key.public_key()), False

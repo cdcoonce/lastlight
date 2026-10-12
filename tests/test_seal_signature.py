@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 import seal_helpers as helpers
 import tsa_factory
+from cryptography import x509
 from cryptography.hazmat.primitives.serialization import Encoding
 from cryptography.x509.oid import ExtendedKeyUsageOID
 
@@ -241,6 +242,18 @@ def test_the_same_authority_with_a_critical_timestamping_purpose_passes(ledger: 
     authority = tsa_factory.build_authority(name="good")
     write_sealed(ledger, before_sunset(signer=authority))
     assert verify(DATE, ledger, trust=trust_of(authority)).ok
+
+
+def test_a_tsa_certificate_with_no_extended_key_usage_fails_naming_it(ledger: Path) -> None:
+    authority = tsa_factory.build_authority(name="no eku", key_purposes=None)
+    with pytest.raises(x509.ExtensionNotFound):  # the factory really left the extension out
+        authority.tsa_certificate.extensions.get_extension_for_class(x509.ExtendedKeyUsage)
+    write_sealed(ledger, before_sunset(signer=authority))
+    outcome = verify(DATE, ledger, trust=trust_of(authority))
+    reason = outcome.reason or ""
+    assert not outcome.ok
+    assert "extended key usage" in reason and "EKU" in reason
+    assert "signature" not in reason and "chain" not in reason
 
 
 # --- validity is judged at the token's time, not today ------------------------------------
