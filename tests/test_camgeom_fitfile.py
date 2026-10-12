@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -33,7 +34,7 @@ from lastlight.camgeom.fitfile import (
 )
 from lastlight.camgeom.mask import sky_mask, write_mask_png
 from lastlight.camgeom.model import CameraModel, pixels_per_degree
-from lastlight.camgeom.orientation import Orientation, hfov_is_pinned
+from lastlight.camgeom.orientation import LeastSquaresGuard, Orientation, hfov_is_pinned
 from lastlight.privacy.rules import text_hits
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -478,9 +479,7 @@ KEPT_RECORD = {
 }
 
 
-def a_guard(record: dict | None = None):
-    from lastlight.camgeom.orientation import LeastSquaresGuard
-
+def a_guard(record: dict | None = None) -> LeastSquaresGuard:
     return LeastSquaresGuard(**(REFIT_RECORD if record is None else record))
 
 
@@ -520,8 +519,6 @@ def test_a_guard_record_that_is_null_is_refused_rather_than_read_as_absent() -> 
 def test_the_committed_whtm1_fit_predates_the_guard_and_is_byte_for_byte_unchanged(
     tmp_path: Path,
 ) -> None:
-    import hashlib
-
     assert hashlib.sha256(COMMITTED.read_bytes()).hexdigest() == WHTM1_SHA256, (
         "WHTM1.json is frozen: every observation cites its digest"
     )

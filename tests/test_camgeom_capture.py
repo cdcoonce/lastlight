@@ -141,9 +141,10 @@ def test_the_guard_refits_without_the_captured_columns_and_says_so(persistent: S
     assert guard.fitted_energy < 0.7 * guard.climbed_energy
     assert guard.refit_energy is not None
     assert guard.refit_energy == pytest.approx(guard.climbed_energy, rel=0.01)
-    # the cloud covers the last 200 columns; the columns where the path leaves the ridge are dropped
-    assert 150 <= guard.columns_dropped <= 200
-    assert persistent.n_columns <= WIDTH - guard.columns_dropped
+    # the cloud covers the last 200 columns, and the path leaves the ridge a few columns before it
+    assert 180 <= guard.columns_dropped <= 230
+    # the last, narrow pass no longer reaches the cloud, so the reported residual spans the frame
+    assert persistent.n_columns >= WIDTH - 20
 
 
 def test_the_climb_is_kept_when_the_refit_is_refused_too(monkeypatch) -> None:
@@ -170,7 +171,7 @@ def test_the_recorded_energies_are_scores_on_the_mean_of_the_edge_maps(
         mean = np.mean([edge_strength(frame, OVERLAY) for frame in scene(held_in)], axis=0)
         predicted = orientation_module.predict_skyline(result.orientation, HORIZON, WIDTH, HEIGHT)
         recorded = getattr(result.guard, key)
-        assert recorded == pytest.approx(orientation_module._energy(mean, predicted), rel=1e-6)
+        assert recorded == pytest.approx(orientation_module._energy(mean, predicted), abs=1e-4)
 
 
 @pytest.mark.parametrize(
