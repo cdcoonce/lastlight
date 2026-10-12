@@ -22,7 +22,7 @@ For each timestamp, in this order, and a failure names the first check that fail
 1. the response is granted (status 0; "granted with modifications" is refused);
 2. the certificate that signed it is the pinned TSA certificate, which was issued by the pinned root (the certificate chain);
 3. both certificates were valid at the time the token states;
-4. the TSA certificate carries a critical `id-kp-timeStamping` extended key usage;
+4. the TSA certificate carries a critical extended key usage that holds `id-kp-timeStamping` and no other purpose (RFC 3161 section 2.3);
 5. the signature verifies.
 
 Then the caller compares the imprint with the bytes it sealed.

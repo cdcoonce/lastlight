@@ -186,6 +186,13 @@
       "replace": "return"
     },
     {
+      "label": "M10d the extended key usage check goes back to membership (timestamping among other purposes is accepted)",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "if list(usage.value) != [x509.ExtendedKeyUsageOID.TIME_STAMPING]:",
+      "replace": "if x509.ExtendedKeyUsageOID.TIME_STAMPING not in usage.value:"
+    },
+    {
       "label": "M11 a library exception other than the expected ones escapes authenticate",
       "file": "../../src/lastlight/seal/tsa.py",
       "oracle": "real",

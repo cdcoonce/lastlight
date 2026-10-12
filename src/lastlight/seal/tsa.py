@@ -4,9 +4,9 @@ Library choice: `rfc3161-client` (Trail of Bits, also what sigstore uses), which
 verifies timestamp responses. `parse_response` only reads one (the message imprint, the time and
 the hash algorithm; status 0 is the only status it accepts, as in the library). `authenticate`
 proves the token is genuine: the pinned TSA's certificate signed it, the certificate chains to the
-pinned root, the certificate is a timestamping one, and it was valid at the time the token names.
-It judges the certificates at that time, not today (RFC 3161: a timestamp issued while the
-certificate was valid stays valid after it expires), and trusts only the pair in
+pinned root, the certificate's key usage is timestamping alone, and it was valid at the time the
+token names. It judges the certificates at that time, not today (RFC 3161: a timestamp issued
+while the certificate was valid stays valid after it expires), and trusts only the pair in
 `lastlight.seal.trust`, never the certificates a response happens to carry.
 
 The library reports a failed chain, signature or key usage as one exception, so `authenticate`
@@ -183,7 +183,10 @@ def _valid_at(when: dt.datetime, trust: Trust) -> None:
 
 
 def _is_timestamping(certificate: x509.Certificate) -> None:
-    """The TSA certificate needs a critical extended key usage that includes id-kp-timeStamping."""
+    """The TSA certificate needs a critical extended key usage of id-kp-timeStamping alone.
+
+    RFC 3161 section 2.3: the extension must be critical and must hold no other purpose.
+    """
     try:
         usage = certificate.extensions.get_extension_for_class(x509.ExtendedKeyUsage)
     except x509.ExtensionNotFound:
@@ -194,10 +197,11 @@ def _is_timestamping(certificate: x509.Certificate) -> None:
         raise TokenRejected(
             "eku", "the pinned TSA certificate's extended key usage is not critical"
         )
-    if x509.ExtendedKeyUsageOID.TIME_STAMPING not in usage.value:
+    if list(usage.value) != [x509.ExtendedKeyUsageOID.TIME_STAMPING]:
         raise TokenRejected(
             "eku",
-            "the pinned TSA certificate is not allowed to sign timestamps (id-kp-timeStamping)",
+            "the pinned TSA certificate's extended key usage must be id-kp-timeStamping and no "
+            "other purpose (RFC 3161 section 2.3)",
         )
 
 
@@ -227,9 +231,10 @@ def authenticate(der: bytes, *, trust: Trust | None = None) -> Timestamp:
     Checks, in this order, and raises `TokenRejected` naming the first that fails (a malformed or
     refused response is a plain `TsaError` from the parser): the signing certificate is the pinned
     TSA certificate (so it chains to the pinned root); both pinned certificates were valid at the
-    token's own time; the TSA certificate carries a critical timestamping key usage; the signature
-    verifies. `trust` defaults to `lastlight.seal.trust.DEFAULT_TRUST`, FreeTSA's pinned pair.
-    It does not compare the imprint with anything: the caller does, after this.
+    token's own time; the TSA certificate's extended key usage is critical and holds
+    id-kp-timeStamping alone (RFC 3161 section 2.3); the signature verifies. `trust` defaults to
+    `lastlight.seal.trust.DEFAULT_TRUST`, FreeTSA's pinned pair. It does not compare the imprint
+    with anything: the caller does, after this.
     """
     anchors = trust if trust is not None else trust_module.DEFAULT_TRUST
     response, stamp = _read(der)
