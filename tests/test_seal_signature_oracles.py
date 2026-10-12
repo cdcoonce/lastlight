@@ -291,17 +291,97 @@ def test_the_environment_cannot_add_trust(monkeypatch: pytest.MonkeyPatch, tmp_p
     assert reject(token).check == "chain"
 
 
+ENVIRONMENT_READS = {"environ", "environb", "getenv", "getenvb", "argv"}
+PROCESS_MODULES = {"os", "sys", "posix", "nt"}
+
+
+def outside_reads(source: str) -> list[str]:
+    """Every place `source` could read the environment or the command line, as `line N: what`.
+
+    The names are caught wherever they appear: as an attribute (`os.environ`), as a bare name,
+    as a string (`getattr(os, "environ")`), and in an import that renames them (`from os import
+    getenv as g`, `from os import environ as e`). A module renamed on import (`import os as o`)
+    is flagged too: nothing in the seal package has a reason to hide where `os` or `sys` went.
+    """
+    found: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        name: object
+        if isinstance(node, ast.Attribute):
+            name = node.attr
+        elif isinstance(node, ast.Constant):
+            name = node.value
+        else:
+            name = getattr(node, "id", None)
+        if isinstance(name, str) and name in ENVIRONMENT_READS:
+            found.append(f"line {node.lineno}: {name}")
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                star = alias.name == "*" and (node.module or "").split(".")[0] in PROCESS_MODULES
+                if alias.name in ENVIRONMENT_READS or star:
+                    found.append(f"line {node.lineno}: imports {alias.name}")
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname is not None and alias.name.split(".")[0] in PROCESS_MODULES:
+                    found.append(f"line {node.lineno}: imports {alias.name} as {alias.asname}")
+    return found
+
+
 def test_no_module_of_the_seal_package_reads_the_environment_or_the_command_line() -> None:
     sources = sorted((SRC / "seal").glob("*.py")) + [
         SRC / "commands" / "seal.py",
         SRC / "commands" / "verify.py",
     ]
     assert len(sources) >= 7
-    reads = {"environ", "environb", "getenv", "getenvb", "argv"}
     for path in sources:
-        for node in ast.walk(ast.parse(path.read_text())):
-            name = node.attr if isinstance(node, ast.Attribute) else getattr(node, "id", None)
-            assert name not in reads, f"{path.name} line {node.lineno} reads {name}"
+        assert outside_reads(path.read_text()) == [], path.name
+
+
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        "import os\nvalue = os.environ['X']\n",
+        "import os\nvalue = os.getenv('X')\n",
+        "import sys\nvalue = sys.argv[1:]\n",
+        "from os import getenv as g\nvalue = g('X')\n",
+        "from os import environ as e\nvalue = e['X']\n",
+        "from sys import argv as a\nvalue = a[1:]\n",
+        "from os import getenv\n",
+        "from os import *\n",
+        "import os as o\nvalue = o.environ['X']\n",
+        "import os as o\nvalue = getattr(o, 'environ')\n",
+        "import os as o\n",
+        "import sys as s\n",
+    ],
+    ids=[
+        "environ",
+        "getenv",
+        "argv",
+        "getenv-renamed",
+        "environ-renamed",
+        "argv-renamed",
+        "getenv-imported",
+        "star-import",
+        "module-renamed-then-read",
+        "module-renamed-then-getattr",
+        "module-renamed",
+        "sys-renamed",
+    ],
+)
+def test_the_environment_scan_flags_a_planted_read(snippet: str) -> None:
+    assert outside_reads(snippet) != []
+
+
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        "import os\npath = os.path.join('a', 'b')\n",
+        "from os import path as p\nvalue = p.sep\n",
+        "import sys\nvalue = sys.version_info\n",
+        "values = {'environment': 1}\nvalue = values['environment']\n",
+    ],
+)
+def test_the_environment_scan_passes_code_that_reads_neither(snippet: str) -> None:
+    assert outside_reads(snippet) == []
 
 
 @pytest.mark.parametrize(

@@ -216,6 +216,13 @@
       "replace": "anchors = trust if trust is not None else (trust_module.DEFAULT_TRUST if __import__(\"os\").environ.get(\"LASTLIGHT_TSA_CA\") is None else trust_module.DEFAULT_TRUST)"
     },
     {
+      "label": "M13b the pinned anchors are chosen by looking at an environment variable read through a renamed import",
+      "file": "../../src/lastlight/seal/tsa.py",
+      "oracle": "real",
+      "find": "anchors = trust if trust is not None else trust_module.DEFAULT_TRUST",
+      "replace": "from os import getenv as _getenv\n    anchors = trust if trust is not None else (trust_module.DEFAULT_TRUST if _getenv(\"LASTLIGHT_TSA_CA\") is None else trust_module.DEFAULT_TRUST)"
+    },
+    {
       "label": "M15 over-strict: every token is refused as issued before the certificate began",
       "file": "../../src/lastlight/seal/tsa.py",
       "oracle": "real",
