@@ -88,6 +88,13 @@ def mismatched_scene(cloud: dict[str, float] | None = None) -> list[np.ndarray]:
     return frames
 
 
+def hazy_scene_with_a_strong_cloud_in_one_frame() -> list[np.ndarray]:
+    """Haze (30 percent of the contrast) and, in the first frame only, a dark cloud underside."""
+    frames = [haze(frame, 0.7) for frame in scene(held_in=())]
+    frames[0] = paint_cloud_base(frames[0], SKYLINE, offset_start=10, offset_end=4, x0=100, x1=700)
+    return frames
+
+
 def fit(frames: list[np.ndarray]) -> SkylineFit:
     return fit_orientation(frames, HORIZON, PRIOR, exclude=OVERLAY)
 
@@ -227,9 +234,7 @@ def test_a_cloud_edge_in_one_frame_is_outvoted_even_when_the_mean_map_says_the_f
     # then scores less than half of the climbed one (4.0 against 11.6), but that is the one
     # frame with the cloud: in the other two the fitted skyline scores twenty times higher, and
     # the guard, which votes by frame, accepts the least-squares result.
-    frames = [haze(frame, 0.7) for frame in scene(held_in=())]
-    frames[0] = paint_cloud_base(frames[0], SKYLINE, offset_start=10, offset_end=4, x0=100, x1=700)
-    found = fit(frames)
+    found = fit(hazy_scene_with_a_strong_cloud_in_one_frame())
     assert_recovers(found.orientation, TRUTH)
     guard = found.guard
     assert guard is not None and guard.outcome == "accepted"
@@ -314,6 +319,39 @@ def test_the_margin_has_headroom_below_the_loss_of_a_realistic_capture(
     assert decisive >= HEADROOM * margin, f"loses {decisive:.3f} against a margin of {margin}"
     mean_map_loss = 1.0 - guard.fitted_energy / guard.climbed_energy
     assert mean_map_loss >= HEADROOM * margin, f"loses {mean_map_loss:.3f} on the mean map"
+
+
+# A cloud base 22 rows above the ridge over 160 columns of every frame: the scene of
+# test_a_cloud_in_every_frame_is_dropped_by_the_narrower_trace_bands (test_camgeom_orientation.py).
+BANDS_CLOUD = {"offset_start": 22, "offset_end": 22, "x0": 300, "x1": 460, "shade_below": 60.0}
+
+
+@pytest.mark.parametrize(
+    ("frames_of", "one_wide_pass"),
+    [
+        pytest.param(lambda: scene(held_in=()), False, id="clean frames"),
+        pytest.param(lambda: scene(held_in=(0,)), False, id="a cloud in one of three frames"),
+        pytest.param(hazy_scene_with_a_strong_cloud_in_one_frame, False, id="haze and one cloud"),
+        pytest.param(mismatched_scene, False, id="terrain 0.1 degree off"),
+        pytest.param(lambda: scene(cloud=BANDS_CLOUD), True, id="one wide pass and a cloud"),
+    ],
+)
+def test_the_margin_has_headroom_above_the_loss_of_the_scenes_the_guard_must_accept(
+    monkeypatch: pytest.MonkeyPatch, frames_of, one_wide_pass: bool
+) -> None:
+    # The scenes the suite requires the guard to leave alone, scored as the vote scores them. The
+    # last is the one that sets the floor: one pass of the wide band followed by a cloud held in
+    # every frame loses 11.5 percent per frame, and the narrowing bands are what repair it, so a
+    # guard that refused it would leave no scene for the bands to be tested on. The others lose
+    # at most 0.1 percent, or gain (the haze scene's two frames without the cloud). The rest of
+    # the recovery scenes of test_camgeom_orientation.py lose 0.12 percent at most (the build log
+    # of the guard, docs/log/2026-10-11-camgeom-capture.md).
+    if one_wide_pass:
+        monkeypatch.setattr(orientation_module, "_BANDS", orientation_module._BANDS[:1])
+    found, decisive = fit_with_vote(monkeypatch, frames_of())
+    margin = orientation_module._CAPTURE_MARGIN
+    assert found.guard is not None and found.guard.outcome == "accepted"
+    assert HEADROOM * decisive <= margin, f"loses {decisive:.3f} against a margin of {margin}"
 
 
 # --- the record reaches the fit file --------------------------------------------------------------
