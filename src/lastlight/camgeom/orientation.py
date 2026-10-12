@@ -70,10 +70,18 @@ HFOV_BOUND_TOLERANCE_DEG = 0.05  # a fit this close to a limit counts as pinned 
 #     nothing. The guard must leave that to the bands, or no scene would need them.
 # What it must catch: a cloud edge held in every frame at the frame's edge, which the bands cannot
 # drop because the first, wide pass moves the fit onto the cloud and the narrow ones then centre
-# on it, loses 33 to 44 percent in each frame. 20 percent sits between the two (the geometric
-# mean of 11.5 and 33 is 19.5): about 0.2 degrees of azimuth, or 3 percent of the field of view,
-# on the 30 degree lens of those scenes.
-_CAPTURE_MARGIN = 0.2
+# on it. How much the captured fit loses depends on how well the terrain model fits:
+#   - terrain the model has exactly: 33 to 44 percent in each frame;
+#   - terrain it has only nearly, which is the real case (WHTM1's residual is 1.6 px): about 20
+#     percent, 20.5 to 21.0 in each frame, for a 200-column cloud over terrain 0.1 degree off and
+#     for a 150-column cloud 20 rows above the ridge. A margin of 0.22 accepts the first, and the
+#     fit ends 0.30 degrees off in azimuth, 1.95 in roll and 5.5 percent in field of view.
+# So the margin lies between 11.5 and 20.5 percent, and 15 is the geometric midpoint (15.4)
+# rounded down: 1.30 times the loss it must leave alone, 1.38 times under the loss it must catch.
+# Every margin from 0.13 to 0.19 gives the same outcome on every scene of the suite; the headroom
+# tests of test_camgeom_capture.py ask for a quarter of the margin clear of both losses, which
+# leaves about 0.144 to 0.164.
+_CAPTURE_MARGIN = 0.15
 # Columns whose traced skyline lies farther than this from the climbed skyline are left out of
 # the refit. Four robust scales is a distance at which the soft-L1 loss is already linear, so
 # the fit itself discounts such a column; a cloud base 15 to 25 rows above the ridge is two to
