@@ -50,3 +50,23 @@ It does not prove the forecast is good: whether it was right is what the scoring
 ## Missing and late days
 
 A day is sealed only if the job ran before sunset. If the job fails, or runs after the sun has reached the horizon, that day has no files and no index line, and it is recorded as missing, never back-filled. Running the job twice for a sealed day changes nothing. `lastlight verify` for a day with no seal prints `FAIL: no sealed forecast for <date>`.
+
+## Missed evenings
+
+A day can have no seal for reasons nobody controls: the HRRR bucket or the timestamp authority was down, the workflow was dropped or delayed, or it was switched off (next section). Two things keep that honest.
+
+**One retry, in the command.** The workflow runs `lastlight seal-daily --attempts 2`. If the first attempt fails for a reason a pause can cure (the weather service, the timestamp authority, the disk), the command waits `--retry-pause` seconds (300 by default) and tries once more, but only while the pause still ends before the sun reaches the horizon at the reference point. The second attempt starts from a fresh reading of the clock, so the refusal to seal late applies to it exactly as it does to any run. A failure that would only repeat (a refusal, a reduction that cannot work, a seal that does not verify) is not retried, and the exit code is always the last attempt's. The run log names each attempt's failure.
+
+**The site says so.** `lastlight site build` reports on every evening up to `--through YYYY-MM-DD`, by default the newest evening whose sunset at the reference point has passed when the site is built. An evening between the first sealed one and that date that has no line in `index.jsonl` is missed. The archive lists each one as "No forecast was sealed for D." (D is a date, never a time), and the home page leads with that sentence when the newest evening reported on is missed and newer than every sealed one, while still showing the newest sealed painting under its own date. A missed evening has no page and no painting. It is never back-filled, and a missing seal is not a forecast: nothing downstream may treat it as one. An evening sealed too late does have an index line, so the site lists it as sealed and not verified instead.
+
+The site is rebuilt after a successful seal, which runs before sunset, so a failed evening is first called missed by the next day's build.
+
+## The 60-day rule for scheduled workflows
+
+GitHub turns off scheduled workflows in a public repository that has had no repository activity for 60 days (see [the `schedule` event in GitHub's documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)). The daily `seal` workflow (`.github/workflows/seal.yml`) is scheduled, so it is subject to the rule. A workflow that has been switched off does not fail; it simply stops running, so there is no red run to notice, the `ledger` branch stops growing, and the site shows every later evening as missed.
+
+GitHub's pages state the rule but do not define what counts as activity. Whether the seal job's own pushes to the `ledger` branch, made by the Actions bot, count is therefore unverified, and so is whether work on a branch other than the default branch counts. Scheduled workflows run only from the default branch, `main`, so the safe assumption is that a person's commit to `main` is activity and the bot's pushes to `ledger` may not be. Do not rely on the daily seal to keep its own schedule alive.
+
+To turn the workflow back on, open the repository's Actions tab, choose `seal` in the sidebar and press the button that enables it, or run `gh workflow enable seal.yml -R cdcoonce/lastlight` ([GitHub's guide to disabling and enabling workflows](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/disable-and-enable-workflows)). Then run `seal` once by hand from the same tab. A manual run seals only while the evening is still ahead; after the sun is at the horizon it refuses, by design, and that evening stays missed.
+
+Until scoring exists, the conductor's build board records each evening's outcome by hand: sealed, retried or missed. A retried evening shows in the run log as a first attempt that failed and a second that sealed.
