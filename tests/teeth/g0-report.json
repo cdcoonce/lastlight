@@ -50,7 +50,7 @@
       "file": "../../src/lastlight/g0/report.py",
       "oracle": "real",
       "find": "        title,\n        _verdict_section(study),",
-      "replace": "        title + \"\\nRun at 15:32.\\n\",\n        _verdict_section(study),"
+      "replace": "        title + \"\\nRun at 15\" + \":32.\\n\",\n        _verdict_section(study),"
     },
     {
       "label": "report: a HRRR file name with a cycle hour added to the rule",
