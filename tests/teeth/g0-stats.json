@@ -1,0 +1,247 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_g0_stats.py",
+    "tests/test_g0_study.py",
+    "tests/test_g0_report.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "tests/test_g0_stats.py",
+    "tests/test_g0_study.py",
+    "tests/test_g0_report.py"
+  ],
+  "mutants": [
+    {
+      "label": "D: median over elevations/bands/channels instead of the mean",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "find": "difference[:, list(band_members(name))].mean(axis=(1, 2, 3)) for name in BANDS",
+      "replace": "np.median(difference[:, list(band_members(name))], axis=(1, 2, 3)) for name in BANDS"
+    },
+    {
+      "label": "D: abs dropped (signed differences cancel)",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "find": "difference = np.abs(np.asarray(contrast, dtype=float) - np.asarray(baseline, dtype=float))",
+      "replace": "difference = np.asarray(contrast, dtype=float) - np.asarray(baseline, dtype=float)"
+    },
+    {
+      "label": "D: baseline is the mean over dates, not the median",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "find": "return np.median(np.asarray(contrast, dtype=float), axis=0)",
+      "replace": "return np.mean(np.asarray(contrast, dtype=float), axis=0)"
+    },
+    {
+      "label": "D: baseline median over the wrong axis (over elevations)",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "find": "return np.median(np.asarray(contrast, dtype=float), axis=0)",
+      "replace": "return np.broadcast_to(np.median(np.asarray(contrast, dtype=float), axis=1, keepdims=True), np.asarray(contrast).shape)[0]"
+    },
+    {
+      "label": "band edge: lower edge inclusive for every band (e >= lower)",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "find": "(elevation >= lower if closed_below else elevation > lower)",
+      "replace": "elevation >= lower"
+    },
+    {
+      "label": "band edge: upper edge exclusive (e < upper)",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "find": "elevation <= upper and",
+      "replace": "elevation < upper and"
+    },
+    {
+      "label": "band edge: late no longer holds -8.0",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "find": "closed_below = name == BANDS[-1]",
+      "replace": "closed_below = False"
+    },
+    {
+      "label": "threshold: > instead of >=",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "find": ">= THRESHOLD).sum(axis=1)",
+      "replace": "> THRESHOLD).sum(axis=1)"
+    },
+    {
+      "label": "threshold constant 0.05 -> 0.051",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "find": "THRESHOLD: Final = 0.05",
+      "replace": "THRESHOLD: Final = 0.051"
+    },
+    {
+      "label": "threshold constant 0.05 -> 0.049",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "find": "THRESHOLD: Final = 0.05",
+      "replace": "THRESHOLD: Final = 0.049"
+    },
+    {
+      "label": "2-of-3: needs all 3",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "find": "MIN_BANDS: Final = 2",
+      "replace": "MIN_BANDS: Final = 3"
+    },
+    {
+      "label": "2-of-3: needs only 1",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "find": "MIN_BANDS: Final = 2",
+      "replace": "MIN_BANDS: Final = 1"
+    },
+    {
+      "label": "2-of-3: strictly more than 2",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "find": "return bands_at_threshold(distances) >= MIN_BANDS",
+      "replace": "return bands_at_threshold(distances) > MIN_BANDS"
+    },
+    {
+      "label": "25 percent: > instead of >=",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "find": "return self.fraction >= MIN_FRACTION",
+      "replace": "return self.fraction > MIN_FRACTION"
+    },
+    {
+      "label": "25 percent constant -> 0.26",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "find": "MIN_FRACTION: Final = 0.25",
+      "replace": "MIN_FRACTION: Final = 0.26"
+    },
+    {
+      "label": "25 percent constant -> 0.24",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "find": "MIN_FRACTION: Final = 0.25",
+      "replace": "MIN_FRACTION: Final = 0.24"
+    },
+    {
+      "label": "25 percent: denominator is dates attempted, not dates used",
+      "file": "../../src/lastlight/g0/analysis.py",
+      "oracle": "real",
+      "find": "return self.outcomes[NOMINAL].verdict",
+      "replace": "return stats.Verdict(dates=len(self.attempted), meeting=self.outcomes[NOMINAL].verdict.meeting)"
+    },
+    {
+      "label": "late counted: fourth counted band",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "find": "COUNTED_BANDS: Final = (\"golden\", \"early\", \"mid\")",
+      "replace": "COUNTED_BANDS: Final = (\"golden\", \"early\", \"mid\", \"late\")"
+    },
+    {
+      "label": "late counted in place of golden",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "find": "COUNTED_BANDS: Final = (\"golden\", \"early\", \"mid\")",
+      "replace": "COUNTED_BANDS: Final = (\"late\", \"early\", \"mid\")"
+    },
+    {
+      "label": "sensitivity: low pixel scale decides the verdict",
+      "file": "../../src/lastlight/g0/analysis.py",
+      "oracle": "real",
+      "find": "return self.outcomes[NOMINAL].verdict",
+      "replace": "return self.outcomes[\"low\"].verdict"
+    },
+    {
+      "label": "sensitivity: verdict is the worst of the three scales",
+      "file": "../../src/lastlight/g0/analysis.py",
+      "oracle": "real",
+      "find": "return self.outcomes[NOMINAL].verdict",
+      "replace": "return min((o.verdict for o in self.outcomes.values()), key=lambda v: v.fraction)"
+    },
+    {
+      "label": "seasonal control decides the verdict",
+      "file": "../../src/lastlight/g0/analysis.py",
+      "oracle": "real",
+      "find": "return self.outcomes[NOMINAL].verdict",
+      "replace": "return self.seasonal.verdict"
+    },
+    {
+      "label": "channel run (log(B/G) alone) decides the verdict",
+      "file": "../../src/lastlight/g0/analysis.py",
+      "oracle": "real",
+      "find": "return self.outcomes[NOMINAL].verdict",
+      "replace": "return self.channels[\"log(B/G)\"].verdict"
+    },
+    {
+      "label": "sensitivity median taken over the nominal contrast, not the scale's own",
+      "file": "../../src/lastlight/g0/analysis.py",
+      "oracle": "real",
+      "find": "outcomes[scale] = _outcome(scale, contrast, stats.period_median(contrast))",
+      "replace": "outcomes[scale] = _outcome(scale, contrast, stats.period_median(np.stack([record.contrast[\"nominal\"] for record in used])))"
+    },
+    {
+      "label": "extremes ranked by max D, not mean over counted bands",
+      "file": "../../src/lastlight/g0/analysis.py",
+      "oracle": "real",
+      "find": "mean_d = outcome.distances[:, columns].mean(axis=1)",
+      "replace": "mean_d = outcome.distances[:, columns].max(axis=1)"
+    },
+    {
+      "label": "extremes ranked over all four bands (late included)",
+      "file": "../../src/lastlight/g0/analysis.py",
+      "oracle": "real",
+      "find": "columns = [stats.BANDS.index(name) for name in stats.COUNTED_BANDS]",
+      "replace": "columns = list(range(len(stats.BANDS)))"
+    },
+    {
+      "label": "seasonal window exclusive (< instead of <=)",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "find": "near = np.abs(ordinals - ordinal) <= half_window_days",
+      "replace": "near = np.abs(ordinals - ordinal) < half_window_days"
+    },
+    {
+      "label": "criterion sentence in the code says 26 percent",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "find": "on at least 25 percent \"\n    \"of dates.**\"",
+      "replace": "on at least 26 percent \"\n    \"of dates.**\""
+    },
+    {
+      "label": "seasonal channel runs use the whole-period baseline, not the windowed one",
+      "file": "../../src/lastlight/g0/analysis.py",
+      "oracle": "real",
+      "find": "name: _outcome(name, nominal[..., [index]], seasonal.baseline[..., [index]])",
+      "replace": "name: _outcome(name, nominal[..., [index]], baseline[..., [index]])"
+    },
+    {
+      "label": "seasonal channel runs take the other channel's contrast",
+      "file": "../../src/lastlight/g0/analysis.py",
+      "oracle": "real",
+      "find": "name: _outcome(name, nominal[..., [index]], seasonal.baseline[..., [index]])",
+      "replace": "name: _outcome(name, nominal[..., [1 - index]], seasonal.baseline[..., [1 - index]])"
+    },
+    {
+      "label": "[control] closed_below compares the name with the literal 'late' instead of BANDS[-1]",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "BANDS is tuple(ELEVATION_BANDS) and its last key is 'late' (geometry.ELEVATION_BANDS order golden, early, mid, late), so BANDS[-1] == 'late' and the boolean is identical for every band name on every path. Inert over the whole suite; it would differ only if ELEVATION_BANDS were reordered, which no test or caller does.",
+      "find": "closed_below = name == BANDS[-1]",
+      "replace": "closed_below = name == \"late\""
+    }
+  ]
+}

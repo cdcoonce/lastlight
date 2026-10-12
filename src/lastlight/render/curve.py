@@ -40,10 +40,30 @@ _PEAK_LUMINANCE = ((PEAK_LIGHTNESS + 16.0) / 116.0) ** 3
 Curve = list[dict[str, float]]
 
 
-def render_row(atm: Atmosphere, sun_elevation: float) -> Curve:
-    """The sky's colour at every view elevation for one sun elevation, exposed for L* = 70."""
-    spectra = [sky_spectrum(atm, sun_elevation, view) for view in VIEW_ELEVATIONS]
-    xyz = np.array([spectrum_to_xyz(spectrum) for spectrum in spectra])
+def sky_xyz(
+    atm: Atmosphere,
+    sun_elevation: float,
+    view_elevations: Sequence[float],
+    rel_azimuth_deg: float = 0.0,
+) -> np.ndarray:
+    """CIE XYZ of the sky at each of `view_elevations`, shape (views, 3), before any exposure.
+
+    The view is `rel_azimuth_deg` round from the sun's azimuth (0 is the solar vertical, the
+    default); the elevations may be any heights from 0 to 90 degrees. XYZ is relative to a white
+    card lit by the extraterrestrial sun (`lastlight.render.colorimetry`), so contrasts taken from
+    it (ratios between channels) need no exposure at all.
+    """
+    spectra = [sky_spectrum(atm, sun_elevation, view, rel_azimuth_deg) for view in view_elevations]
+    return np.array([spectrum_to_xyz(spectrum) for spectrum in spectra])
+
+
+def render_row(atm: Atmosphere, sun_elevation: float, rel_azimuth_deg: float = 0.0) -> Curve:
+    """The sky's colour at every view elevation for one sun elevation, exposed for L* = 70.
+
+    `rel_azimuth_deg` is the view's azimuth minus the sun's: 0 (the default, and what the sealed
+    forecast uses) is the solar vertical, and plus and minus the same angle are the same sky.
+    """
+    xyz = sky_xyz(atm, sun_elevation, VIEW_ELEVATIONS, rel_azimuth_deg)
     brightest = xyz[:, 1].max()
     exposure = _PEAK_LUMINANCE / brightest if brightest > 0.0 else 0.0
     lab = xyz_to_lab(xyz * exposure)

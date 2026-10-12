@@ -1,0 +1,2 @@
+1:0:d=2025100100:AOTK:entire atmosphere:anl:aerosol=Total aerosol:aerosol_size <2e-05:aerosol_wavelength >=5.45e-07,<=5.65e-07
+2:1482:d=2025100100:AOTK:entire atmosphere:anl:aerosol=Dust dry:aerosol_size <2e-05:aerosol_wavelength >=5.45e-07,<=5.65e-07

@@ -60,6 +60,17 @@ def xyz_to_lab(xyz: np.ndarray) -> np.ndarray:
     return np.asarray(_colour().XYZ_to_Lab(xyz, illuminant=white_point))
 
 
+def xyz_to_linear_srgb(xyz: np.ndarray) -> np.ndarray:
+    """Linear-light sRGB (D65) of XYZ values (last axis of size 3): no gamma, no clipping.
+
+    Out-of-gamut colours keep their negative channels, so the caller decides what to do with
+    them. This is the webcam proxy of the G0 study: a camera's exposure and white balance act as
+    one gain per channel on exactly this signal.
+    """
+    _, _, white_point = _tables()
+    return np.asarray(_colour().XYZ_to_sRGB(xyz, illuminant=white_point, apply_cctf_encoding=False))
+
+
 def _xyz_to_srgb(xyz: np.ndarray) -> tuple[float, float, float]:
     _, _, white_point = _tables()
     encoded = np.asarray(_colour().XYZ_to_sRGB(xyz, illuminant=white_point))
@@ -86,3 +97,8 @@ def lab_to_srgb(lightness: float, a: float, b: float) -> tuple[float, float, flo
     _, _, white_point = _tables()
     xyz = _colour().Lab_to_XYZ(np.array([lightness, a, b]), illuminant=white_point)
     return _xyz_to_srgb(xyz)
+
+
+def delta_e_2000(lab_a: np.ndarray, lab_b: np.ndarray) -> np.ndarray:
+    """CIE 2000 colour difference between CIELAB colours (last axis of size 3), elementwise."""
+    return np.asarray(_colour().delta_E(lab_a, lab_b, method="CIE 2000"))

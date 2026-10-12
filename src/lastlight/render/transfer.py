@@ -102,6 +102,23 @@ def _distance_to_height(height_km: np.ndarray, sin_view: float) -> np.ndarray:
     return -lift + np.sqrt(lift**2 + 2.0 * EARTH_RADIUS_KM * height_km + height_km**2)
 
 
+def scattering_cosine(
+    sun_elevation_deg: float, view_elevation_deg: float, rel_azimuth_deg: float
+) -> float:
+    """Cosine of the angle between the direction of the sun and the line of sight.
+
+    Spherical geometry on the sky: the sun is at elevation `sun_elevation_deg` and azimuth 0, the
+    view at `view_elevation_deg` and `rel_azimuth_deg` round from it, so
+    cos(theta) = sin(view) sin(sun) + cos(view) cos(sun) cos(azimuth). It is even in the azimuth,
+    so a view to the left of the sun and the mirror view to the right are the same sky. Looking
+    straight at the sun is 1; over the zenith, 30 degrees up on each side, it is cos(120) = -1/2.
+    """
+    sun = math.radians(sun_elevation_deg)
+    view = math.radians(view_elevation_deg)
+    azimuth = math.radians(rel_azimuth_deg)
+    return math.cos(view) * math.cos(azimuth) * math.cos(sun) + math.sin(view) * math.sin(sun)
+
+
 # --- the integral --------------------------------------------------------------------------------
 
 
@@ -128,8 +145,7 @@ def sky_spectrum(
 
     sun = math.radians(sun_elevation_deg)
     view = math.radians(view_elevation_deg)
-    azimuth = math.radians(rel_azimuth_deg)
-    cos_theta = math.cos(view) * math.cos(azimuth) * math.cos(sun) + math.sin(view) * math.sin(sun)
+    cos_theta = scattering_cosine(sun_elevation_deg, view_elevation_deg, rel_azimuth_deg)
 
     # Along the line of sight: pieces between shell boundaries, and optical depth to each middle.
     mid_height = 0.5 * (LEVELS_KM[:-1] + LEVELS_KM[1:])

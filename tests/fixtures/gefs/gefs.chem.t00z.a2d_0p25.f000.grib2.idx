@@ -1,0 +1,32 @@
+1:0:d=2025100100:AOTK:entire atmosphere:anl:aerosol=Total aerosol:aerosol_size <2e-05:aerosol_wavelength >=3.38e-07,<=3.42e-07
+2:967848:d=2025100100:ASYSFK:entire atmosphere:anl:aerosol=Total aerosol:aerosol_size <2e-05:aerosol_wavelength >=3.38e-07,<=3.42e-07
+3:2308447:d=2025100100:SSALBK:entire atmosphere:anl:aerosol=Total aerosol:aerosol_size <2e-05:aerosol_wavelength >=3.38e-07,<=3.42e-07
+4:3517339:d=2025100100:AOTK:entire atmosphere:anl:aerosol=Total aerosol:aerosol_size <2e-05:aerosol_wavelength >=4.3e-07,<=4.5e-07
+5:4597344:d=2025100100:AOTK:entire atmosphere:anl:aerosol=Total aerosol:aerosol_size <2e-05:aerosol_wavelength >=5.45e-07,<=5.65e-07
+6:5655105:d=2025100100:SCTAOTK:entire atmosphere:anl:aerosol=Total aerosol:aerosol_size <2e-05:aerosol_wavelength >=5.45e-07,<=5.65e-07
+7:6710197:d=2025100100:AOTK:entire atmosphere:anl:aerosol=Dust dry:aerosol_size <2e-05:aerosol_wavelength >=5.45e-07,<=5.65e-07
+8:7155026:d=2025100100:SCTAOTK:entire atmosphere:anl:aerosol=Dust dry:aerosol_size <2e-05:aerosol_wavelength >=5.45e-07,<=5.65e-07
+9:7594072:d=2025100100:AOTK:entire atmosphere:anl:aerosol=Sea salt dry:aerosol_size <2e-05:aerosol_wavelength >=5.45e-07,<=5.65e-07
+10:8631281:d=2025100100:SCTAOTK:entire atmosphere:anl:aerosol=Sea salt dry:aerosol_size <2e-05:aerosol_wavelength >=5.45e-07,<=5.65e-07
+11:9668490:d=2025100100:AOTK:entire atmosphere:anl:aerosol=Sulphate dry:aerosol_size <2e-05:aerosol_wavelength >=5.45e-07,<=5.65e-07
+12:10437213:d=2025100100:SCTAOTK:entire atmosphere:anl:aerosol=Sulphate dry:aerosol_size <7e-07:aerosol_wavelength >=5.45e-07,<=5.65e-07
+13:11205936:d=2025100100:AOTK:entire atmosphere:anl:aerosol=Particulate organic matter dry:aerosol_size <2e-05:aerosol_wavelength >=5.45e-07,<=5.65e-07
+14:12097091:d=2025100100:SCTAOTK:entire atmosphere:anl:aerosol=Particulate organic matter dry:aerosol_size <7e-07:aerosol_wavelength >=5.45e-07,<=5.65e-07
+15:12987428:d=2025100100:AOTK:entire atmosphere:anl:aerosol=Black carbon dry:aerosol_size <2e-05:aerosol_wavelength >=5.45e-07,<=5.65e-07
+16:13775857:d=2025100100:SCTAOTK:entire atmosphere:anl:aerosol=Black carbon dry:aerosol_size <7e-07:aerosol_wavelength >=5.45e-07,<=5.65e-07
+17:14597879:d=2025100100:AOTK:entire atmosphere:anl:aerosol=Total aerosol:aerosol_size <2e-05:aerosol_wavelength >=6.2e-07,<=6.7e-07
+18:15771951:d=2025100100:AOTK:entire atmosphere:anl:aerosol=Total aerosol:aerosol_size <2e-05:aerosol_wavelength >=8.41e-07,<=8.76e-07
+19:16956602:d=2025100100:AOTK:entire atmosphere:anl:aerosol=Total aerosol:aerosol_size <2e-05:aerosol_wavelength >=1.628e-06,<=1.652e-06
+20:18054303:d=2025100100:AOTK:entire atmosphere:anl:aerosol=Total aerosol:aerosol_size <2e-05:aerosol_wavelength >=1.1e-05,<=1.12e-05
+21:19079949:d=2025100100:PMTF:surface:anl:aerosol=Dust dry:aerosol_size <2.5e-06:
+22:19355160:d=2025100100:PMTC:surface:anl:aerosol=Dust dry:aerosol_size <1e-05:
+23:19581908:d=2025100100:PMTF:surface:anl:aerosol=Sea salt dry:aerosol_size <2.5e-06:
+24:20580818:d=2025100100:PMTC:surface:anl:aerosol=Total aerosol:aerosol_size <1e-05:
+25:21395804:d=2025100100:PMTF:surface:anl:aerosol=Total aerosol:aerosol_size <2.5e-06:
+26:22011964:d=2025100100:COLMD:entire atmosphere:anl:aerosol=Total aerosol:aerosol_size <1e-05:
+27:22898002:d=2025100100:COLMD:entire atmosphere:anl:aerosol=Total aerosol:aerosol_size <2.5e-06:
+28:23769812:d=2025100100:COLMD:entire atmosphere:anl:aerosol=Dust dry:aerosol_size <2.5e-06:
+29:24276587:d=2025100100:COLMD:entire atmosphere:anl:aerosol=Sea salt dry:aerosol_size <2.5e-06:
+30:25401282:d=2025100100:COLMD:entire atmosphere:anl:aerosol=Black carbon dry:aerosol_size <2.36e-08:
+31:26005462:d=2025100100:COLMD:entire atmosphere:anl:aerosol=Particulate organic matter dry:aerosol_size <4.24e-08:
+32:26553810:d=2025100100:COLMD:entire atmosphere:anl:aerosol=Sulphate dry:aerosol_size <2.5e-06:

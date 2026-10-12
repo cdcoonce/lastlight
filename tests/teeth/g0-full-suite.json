@@ -1,0 +1,45 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q"
+  ],
+  "mutants": [
+    {
+      "label": "threshold: > instead of >=",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "find": ">= THRESHOLD).sum(axis=1)",
+      "replace": "> THRESHOLD).sum(axis=1)"
+    },
+    {
+      "label": "sensitivity median taken over the nominal contrast, not the scale's own",
+      "file": "../../src/lastlight/g0/analysis.py",
+      "oracle": "real",
+      "find": "outcomes[scale] = _outcome(scale, contrast, stats.period_median(contrast))",
+      "replace": "outcomes[scale] = _outcome(scale, contrast, stats.period_median(np.stack([record.contrast[\"nominal\"] for record in used])))"
+    },
+    {
+      "label": "[control] closed_below compares the name with the literal 'late' instead of BANDS[-1]",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "BANDS is tuple(ELEVATION_BANDS) and its last key is 'late' (geometry.ELEVATION_BANDS order golden, early, mid, late), so BANDS[-1] == 'late' and the boolean is identical for every band name on every path. Inert over the whole suite; it would differ only if ELEVATION_BANDS were reordered, which no test or caller does.",
+      "find": "closed_below = name == BANDS[-1]",
+      "replace": "closed_below = name == \"late\""
+    }
+  ]
+}

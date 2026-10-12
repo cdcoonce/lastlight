@@ -63,11 +63,12 @@ Python 3.12, `uv`, `src/lastlight/`, pytest, ruff. Small modules with one job ea
 | `site` | Public reference point; private site loader that refuses to run in CI |
 | `inputs.hrrr` | Byte-range fetch of selected HRRR fields from the public AWS bucket via `.idx`; sample along the transect |
 | `inputs.http`, `inputs.grib` | Shared by the input modules: the HTTP transport (existence checks, byte ranges, loud failures) and the one place a GRIB2 library is imported (ecCodes) |
+| `inputs.gefs` | GEFS-Aerosols (NOAA, public bucket, no account): total and dust aerosol optical depth at 550 nm of the latest analysis at or before the sun reaching the horizon, by `.idx` byte range, nearest cell; used by G0 because HRRR carries smoke only |
 | `inputs.goes` | GOES-18 ABI clear-sky mask along the transect at twilight (regime labels) |
 | `inputs.*` | Later: RRFS-SD dust and smoke, CAMS aerosol and ozone, AirNow PM |
 | `render` | Spectral atmosphere model → radiance per (sun elevation, view elevation) → CIE XYZ → camera RGB and sRGB; v0 single scattering, v1 Bruneton precomputed-scattering lookup table |
 | `forecast` | The sealed forecast schema (pydantic v2): strict fields, no time of day, only the public reference point, and the nullable `strip_sha256` that seals the painting |
-| `atmosphere` | v0 reduction of HRRR transect samples to the renderer's parameters: AOD = HRRR `AOTK` plus a fixed 0.06 background, ozone from a bundled monthly climatology for 30 to 35 N (NASA SBUV), cloud summarised in the notes and not rendered; reused by the G0 spread study |
+| `atmosphere` | v0 reduction of HRRR transect samples to the renderer's parameters: AOD = HRRR `AOTK` plus a fixed 0.06 background (or, for the G0 spread study, an optional `AerosolColumn` from an archive with total and dust, whose total replaces both), ozone from a bundled monthly climatology for 30 to 35 N (NASA SBUV), cloud summarised in the notes and not rendered |
 | `vividness` | The v0 vividness rule: a named placeholder with a deliberately wide sd, until the pre-registered definition and the M4 physics exist |
 | `painting` | The daily forecast end to end before sealing: HRRR run, transect, reduction, curve and strip, `Forecast` with every input's source, cycle and digest |
 | `daily` | The scheduled seal: paint, seal, verify; idempotent (a sealed evening is left alone) and never late (refuses once the sun is at the horizon) |
@@ -79,6 +80,7 @@ Python 3.12, `uv`, `src/lastlight/`, pytest, ruff. Small modules with one job ea
 | `capture`, `calibrate` | Tier B only: RAW capture, dark frames, colour-chart spectral sensitivity |
 | `score` | delta-E 2000, CRPS, baselines, regimes, skill with confidence intervals |
 | `publish` | Static almanac site from the ledger: painted vs real, scoreboard |
+| `g0` | The G0 spread study: WHTM1's bands as view elevations, the rendered within-frame contrast (the quantity `observe` measures, from the renderer toward the camera's azimuth), one cached record per date, D(d, s) and the 2 of 3 bands / 25 percent of dates rule, the report and its figures (`lastlight g0`) |
 | `privacy` | The scanner in section 3 |
 
 ### Data layout
@@ -111,7 +113,7 @@ Daily data never lives on `main`. It lives on an orphan branch named `ledger` (n
 | --- | --- | --- |
 | M0 Foundations | Scaffold, CI, privacy scanner, geometry, seal ledger, HRRR transect ingest | CI green; privacy scanner proven by planted leaks |
 | M1 First painting | Renderer v0, daily sealed forecast, almanac site showing tonight's painting | A forecast sealed and verified on 5 consecutive days |
-| **G0** | Spread study: render a year of clear-sky curves from archived inputs | On at least 25 percent of dates, the rendered contrast profile differs from the period's median by a band-mean of at least 0.05 in log-chromaticity contrast in at least 2 of 3 twilight bands (delta-E 2000 reported alongside for tier B); otherwise the physics barely varies and the forecast cannot beat climatology on clear evenings |
+| **G0** | Spread study: render a year of clear-sky curves from archived inputs | On at least 25 percent of dates, the rendered within-frame contrast (WHTM1's bands above its frozen skyline, in linear RGB) differs from the period's median by D(d, s) of at least 0.05 in at least 2 of the 3 counted twilight bands (golden, early, mid; late reported only), exactly as registered in `docs/gates/G0/criterion.md`, with delta-E 2000 reported alongside for tier B; otherwise the physics barely varies and the forecast cannot beat climatology on clear evenings |
 | M2 Public-camera truth | Tier A collector (owner installs the timer), camera geometry calibration, contrast-profile observations, permission requests to operators (owner sends) | **G1**: on pairs of consecutive clear evenings, the observed contrast profile repeats more closely than the spread across all evenings (repeatability at most half the spread), over at least 10 pairs |
 | M3 Scoring | Forecast invariants per camera, baselines, regimes, public scoreboard | First 30 scored evenings |
 | M4 Physics | Bruneton lookup table, cloud-lit vividness, RRFS-SD dust, CAMS | Pre-registered comparison of v1 against v0 on held-out evenings |

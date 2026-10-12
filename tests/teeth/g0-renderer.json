@@ -1,0 +1,114 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_render_view_azimuth.py",
+    "tests/test_render_curve.py",
+    "tests/test_render_physics.py",
+    "tests/test_render_atmosphere.py",
+    "tests/test_atmosphere_aerosol.py",
+    "tests/test_atmosphere_reduction.py",
+    "tests/test_painting.py",
+    "tests/test_forecast.py",
+    "tests/test_g0_contrast.py",
+    "tests/test_g0_collect.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "tests/test_render_view_azimuth.py",
+    "tests/test_render_curve.py",
+    "tests/test_render_physics.py",
+    "tests/test_render_atmosphere.py",
+    "tests/test_atmosphere_aerosol.py",
+    "tests/test_atmosphere_reduction.py",
+    "tests/test_painting.py",
+    "tests/test_forecast.py",
+    "tests/test_g0_contrast.py",
+    "tests/test_g0_collect.py"
+  ],
+  "mutants": [
+    {
+      "label": "render_row: default relative azimuth 0.0 -> 1.0",
+      "file": "../../src/lastlight/render/curve.py",
+      "oracle": "real",
+      "find": "def render_row(atm: Atmosphere, sun_elevation: float, rel_azimuth_deg: float = 0.0) -> Curve:",
+      "replace": "def render_row(atm: Atmosphere, sun_elevation: float, rel_azimuth_deg: float = 1.0) -> Curve:"
+    },
+    {
+      "label": "sky_xyz: default relative azimuth 0.0 -> 0.5",
+      "file": "../../src/lastlight/render/curve.py",
+      "oracle": "real",
+      "find": "    rel_azimuth_deg: float = 0.0,\n) -> np.ndarray:",
+      "replace": "    rel_azimuth_deg: float = 0.5,\n) -> np.ndarray:"
+    },
+    {
+      "label": "render_row ignores the relative azimuth",
+      "file": "../../src/lastlight/render/curve.py",
+      "oracle": "real",
+      "find": "xyz = sky_xyz(atm, sun_elevation, VIEW_ELEVATIONS, rel_azimuth_deg)",
+      "replace": "xyz = sky_xyz(atm, sun_elevation, VIEW_ELEVATIONS)"
+    },
+    {
+      "label": "sky_xyz ignores the relative azimuth",
+      "file": "../../src/lastlight/render/curve.py",
+      "oracle": "real",
+      "find": "spectra = [sky_spectrum(atm, sun_elevation, view, rel_azimuth_deg) for view in view_elevations]",
+      "replace": "spectra = [sky_spectrum(atm, sun_elevation, view) for view in view_elevations]"
+    },
+    {
+      "label": "sky_spectrum scatters at azimuth 0 whatever it is given",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "cos_theta = scattering_cosine(sun_elevation_deg, view_elevation_deg, rel_azimuth_deg)",
+      "replace": "cos_theta = scattering_cosine(sun_elevation_deg, view_elevation_deg, 0.0)"
+    },
+    {
+      "label": "scattering angle: negative azimuths treated as zero (sign asymmetry)",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "return math.cos(view) * math.cos(azimuth) * math.cos(sun) + math.sin(view) * math.sin(sun)",
+      "replace": "return math.cos(view) * math.cos(max(azimuth, 0.0)) * math.cos(sun) + math.sin(view) * math.sin(sun)"
+    },
+    {
+      "label": "scattering angle: elevation product subtracted",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "return math.cos(view) * math.cos(azimuth) * math.cos(sun) + math.sin(view) * math.sin(sun)",
+      "replace": "return math.cos(view) * math.cos(azimuth) * math.cos(sun) - math.sin(view) * math.sin(sun)"
+    },
+    {
+      "label": "scattering angle: cos(sun) factor dropped",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "return math.cos(view) * math.cos(azimuth) * math.cos(sun) + math.sin(view) * math.sin(sun)",
+      "replace": "return math.cos(view) * math.cos(azimuth) + math.sin(view) * math.sin(sun)"
+    },
+    {
+      "label": "scattering angle: azimuth taken as radians",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "azimuth = math.radians(rel_azimuth_deg)",
+      "replace": "azimuth = rel_azimuth_deg"
+    },
+    {
+      "label": "[control] closed_below compares the name with the literal 'late' instead of BANDS[-1]",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "BANDS is tuple(ELEVATION_BANDS) and its last key is 'late' (geometry.ELEVATION_BANDS order golden, early, mid, late), so BANDS[-1] == 'late' and the boolean is identical for every band name on every path. Inert over the whole suite; it would differ only if ELEVATION_BANDS were reordered, which no test or caller does.",
+      "find": "closed_below = name == BANDS[-1]",
+      "replace": "closed_below = name == \"late\""
+    }
+  ]
+}

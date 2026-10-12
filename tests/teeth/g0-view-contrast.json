@@ -1,0 +1,135 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_g0_view.py",
+    "tests/test_g0_contrast.py",
+    "tests/test_g0_report.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "tests/test_g0_view.py",
+    "tests/test_g0_contrast.py",
+    "tests/test_g0_report.py"
+  ],
+  "mutants": [
+    {
+      "label": "row->elevation: centre row (lo+hi)/2 instead of (lo+hi-1)/2",
+      "file": "../../src/lastlight/g0/view.py",
+      "oracle": "real",
+      "find": "return skyline_deg + (low + high - 1) / 2.0 / scale_px_per_deg",
+      "replace": "return skyline_deg + (low + high) / 2.0 / scale_px_per_deg"
+    },
+    {
+      "label": "row->elevation: multiplies by the pixel scale",
+      "file": "../../src/lastlight/g0/view.py",
+      "oracle": "real",
+      "find": "return skyline_deg + (low + high - 1) / 2.0 / scale_px_per_deg",
+      "replace": "return skyline_deg + (low + high - 1) / 2.0 * scale_px_per_deg"
+    },
+    {
+      "label": "row->elevation: skyline offset dropped",
+      "file": "../../src/lastlight/g0/view.py",
+      "oracle": "real",
+      "find": "return skyline_deg + (low + high - 1) / 2.0 / scale_px_per_deg",
+      "replace": "return (low + high - 1) / 2.0 / scale_px_per_deg"
+    },
+    {
+      "label": "skyline elevation: mean over columns instead of the median",
+      "file": "../../src/lastlight/g0/view.py",
+      "oracle": "real",
+      "find": "return float(np.median(elevation))",
+      "replace": "return float(np.mean(elevation))"
+    },
+    {
+      "label": "sky columns: any band inside instead of every band",
+      "file": "../../src/lastlight/g0/view.py",
+      "oracle": "real",
+      "find": "return np.logical_and.reduce(inside)",
+      "replace": "return np.logical_or.reduce(inside)"
+    },
+    {
+      "label": "sensitivity ends: low end uses the high px_per_deg",
+      "file": "../../src/lastlight/g0/view.py",
+      "oracle": "real",
+      "find": "\"low\": float(low),",
+      "replace": "\"low\": float(high),"
+    },
+    {
+      "label": "sensitivity ends: high end uses the low px_per_deg",
+      "file": "../../src/lastlight/g0/view.py",
+      "oracle": "real",
+      "find": "\"high\": float(high),",
+      "replace": "\"high\": float(low),"
+    },
+    {
+      "label": "view order: reference first, bands after",
+      "file": "../../src/lastlight/g0/view.py",
+      "oracle": "real",
+      "find": "return (*self.band_elevations_deg, self.reference_elevation_deg)",
+      "replace": "return (self.reference_elevation_deg, *self.band_elevations_deg)"
+    },
+    {
+      "label": "relative azimuth: no wrap",
+      "file": "../../src/lastlight/g0/view.py",
+      "oracle": "real",
+      "find": "return (view_azimuth_deg - sun_azimuth_deg + 180.0) % 360.0 - 180.0",
+      "replace": "return view_azimuth_deg - sun_azimuth_deg"
+    },
+    {
+      "label": "relative azimuth: sun minus view",
+      "file": "../../src/lastlight/g0/view.py",
+      "oracle": "real",
+      "find": "return (view_azimuth_deg - sun_azimuth_deg + 180.0) % 360.0 - 180.0",
+      "replace": "return (sun_azimuth_deg - view_azimuth_deg + 180.0) % 360.0 - 180.0"
+    },
+    {
+      "label": "contrast: log(B/G) column replaced by log(R/G)",
+      "file": "../../src/lastlight/g0/contrast.py",
+      "oracle": "real",
+      "find": "logs = np.log(clipped[:, [0, 2]] / clipped[:, [1]])",
+      "replace": "logs = np.log(clipped[:, [0, 0]] / clipped[:, [1]])"
+    },
+    {
+      "label": "contrast: channel floor dropped",
+      "file": "../../src/lastlight/g0/contrast.py",
+      "oracle": "real",
+      "find": "clipped = np.where(raised, floor, rgb)",
+      "replace": "clipped = np.abs(rgb)"
+    },
+    {
+      "label": "contrast: reference minus band",
+      "file": "../../src/lastlight/g0/contrast.py",
+      "oracle": "real",
+      "find": "return logs[:-1] - logs[-1], floored",
+      "replace": "return logs[-1] - logs[:-1], floored"
+    },
+    {
+      "label": "contrast: floor derived from the wrong observe levels",
+      "file": "../../src/lastlight/g0/contrast.py",
+      "oracle": "real",
+      "find": "srgb_to_linear(np.array(DARK_LEVEL + 1.0))",
+      "replace": "srgb_to_linear(np.array(DARK_LEVEL + 10.0))"
+    },
+    {
+      "label": "[control] closed_below compares the name with the literal 'late' instead of BANDS[-1]",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "BANDS is tuple(ELEVATION_BANDS) and its last key is 'late' (geometry.ELEVATION_BANDS order golden, early, mid, late), so BANDS[-1] == 'late' and the boolean is identical for every band name on every path. Inert over the whole suite; it would differ only if ELEVATION_BANDS were reordered, which no test or caller does.",
+      "find": "closed_below = name == BANDS[-1]",
+      "replace": "closed_below = name == \"late\""
+    }
+  ]
+}

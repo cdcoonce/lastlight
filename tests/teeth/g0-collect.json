@@ -1,0 +1,188 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_g0_collect.py",
+    "tests/test_g0_record.py",
+    "tests/test_g0_study.py",
+    "tests/test_g0_command.py",
+    "tests/test_g0_report.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "tests/test_g0_collect.py",
+    "tests/test_g0_record.py",
+    "tests/test_g0_study.py",
+    "tests/test_g0_command.py",
+    "tests/test_g0_report.py"
+  ],
+  "mutants": [
+    {
+      "label": "drop: any fetch error reads as a missing file",
+      "file": "../../src/lastlight/g0/collect.py",
+      "oracle": "real",
+      "find": "    if is_not_found(error):\n        return _Dropped(missing_reason",
+      "replace": "    if True:\n        return _Dropped(missing_reason"
+    },
+    {
+      "label": "drop: a missing file reads as a fault",
+      "file": "../../src/lastlight/g0/collect.py",
+      "oracle": "real",
+      "find": "    if is_not_found(error):\n        return _Dropped(missing_reason",
+      "replace": "    if False:\n        return _Dropped(missing_reason"
+    },
+    {
+      "label": "drop: network fault recorded as a dropped date",
+      "file": "../../src/lastlight/g0/collect.py",
+      "oracle": "real",
+      "find": "raise TransientError(f\"{source}: {_clean(str(error))}\") from error",
+      "replace": "return _Dropped(\"hrrr_unreadable\", f\"{source}: {_clean(str(error))}\")"
+    },
+    {
+      "label": "drop reason: HRRR missing field and unreadable swapped",
+      "file": "../../src/lastlight/g0/collect.py",
+      "oracle": "real",
+      "find": "reason = \"hrrr_field_missing\" if _FIELD_MISSING in str(error) else \"hrrr_unreadable\"",
+      "replace": "reason = \"hrrr_unreadable\" if _FIELD_MISSING in str(error) else \"hrrr_field_missing\""
+    },
+    {
+      "label": "drop reason: HRRR run missing mislabelled as aerosol",
+      "file": "../../src/lastlight/g0/collect.py",
+      "oracle": "real",
+      "find": "_classify_fetch(error, \"hrrr_run_missing\", \"HRRR\")",
+      "replace": "_classify_fetch(error, \"aerosol_run_missing\", \"HRRR\")"
+    },
+    {
+      "label": "drop reason: aerosol run missing mislabelled as HRRR",
+      "file": "../../src/lastlight/g0/collect.py",
+      "oracle": "real",
+      "find": "_classify_fetch(error, \"aerosol_run_missing\", \"GEFS-Aerosols\")",
+      "replace": "_classify_fetch(error, \"hrrr_run_missing\", \"GEFS-Aerosols\")"
+    },
+    {
+      "label": "drop reason: unreadable aerosol mislabelled as missing run",
+      "file": "../../src/lastlight/g0/collect.py",
+      "oracle": "real",
+      "find": "_Dropped(\"aerosol_unreadable\"",
+      "replace": "_Dropped(\"aerosol_run_missing\""
+    },
+    {
+      "label": "drop reason: empty field mislabelled unreadable",
+      "file": "../../src/lastlight/g0/collect.py",
+      "oracle": "real",
+      "find": "_Dropped(\"hrrr_field_empty\"",
+      "replace": "_Dropped(\"hrrr_unreadable\""
+    },
+    {
+      "label": "drop detail: URLs not scrubbed",
+      "file": "../../src/lastlight/g0/collect.py",
+      "oracle": "real",
+      "find": "text = _URL.sub(\"the archive\", text)",
+      "replace": "text = text"
+    },
+    {
+      "label": "drop detail: archive file names (cycle hour) not scrubbed",
+      "file": "../../src/lastlight/g0/collect.py",
+      "oracle": "real",
+      "find": "text = _RUN_FILE.sub(\"the archive file\", text)",
+      "replace": "text = text"
+    },
+    {
+      "label": "collect_range: time budget inclusive",
+      "file": "../../src/lastlight/g0/collect.py",
+      "oracle": "real",
+      "find": "clock() - started >= budget_seconds",
+      "replace": "clock() - started > budget_seconds"
+    },
+    {
+      "label": "collect_range: records re-fetched even when present",
+      "file": "../../src/lastlight/g0/collect.py",
+      "oracle": "real",
+      "find": "if not refresh and store.path(day).is_file():",
+      "replace": "if False:"
+    },
+    {
+      "label": "record: unknown drop reason accepted",
+      "file": "../../src/lastlight/g0/record.py",
+      "oracle": "real",
+      "find": "if self.drop_reason not in DROP_REASONS:",
+      "replace": "if False:"
+    },
+    {
+      "label": "record: dropped record may hold a rendered curve",
+      "file": "../../src/lastlight/g0/record.py",
+      "oracle": "real",
+      "find": "if self.atmosphere is not None or self.contrast or self.curve_lab is not None:",
+      "replace": "if False:"
+    },
+    {
+      "label": "record: schema version not checked",
+      "file": "../../src/lastlight/g0/record.py",
+      "oracle": "real",
+      "find": "if document.get(\"schema_version\") != SCHEMA_VERSION:",
+      "replace": "if False:"
+    },
+    {
+      "label": "record: non-finite values accepted",
+      "file": "../../src/lastlight/g0/record.py",
+      "oracle": "real",
+      "find": "if not np.isfinite(array).all():",
+      "replace": "if False:"
+    },
+    {
+      "label": "study: a date with no record is silently skipped",
+      "file": "../../src/lastlight/g0/analysis.py",
+      "oracle": "real",
+      "find": "dropped.append(_not_collected(day))",
+      "replace": "pass"
+    },
+    {
+      "label": "study: a dropped record is counted as used",
+      "file": "../../src/lastlight/g0/analysis.py",
+      "oracle": "real",
+      "find": "elif record.ok:",
+      "replace": "elif True:"
+    },
+    {
+      "label": "drop detail: neither URL nor archive file name scrubbed (both scrubbers removed)",
+      "file": "../../src/lastlight/g0/collect.py",
+      "oracle": "real",
+      "find": "    text = _URL.sub(\"the archive\", text)\n    text = _RUN_FILE.sub(\"the archive file\", text)\n",
+      "replace": ""
+    },
+    {
+      "label": "drop detail: whitespace not joined",
+      "file": "../../src/lastlight/g0/collect.py",
+      "oracle": "real",
+      "find": "return \" \".join(text.split())[:_DETAIL_LIMIT]",
+      "replace": "return text[:_DETAIL_LIMIT]"
+    },
+    {
+      "label": "drop detail: error text kept to 100000 characters instead of 240",
+      "file": "../../src/lastlight/g0/collect.py",
+      "oracle": "real",
+      "find": "_DETAIL_LIMIT: Final = 240",
+      "replace": "_DETAIL_LIMIT: Final = 100000"
+    },
+    {
+      "label": "[control] closed_below compares the name with the literal 'late' instead of BANDS[-1]",
+      "file": "../../src/lastlight/g0/stats.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "BANDS is tuple(ELEVATION_BANDS) and its last key is 'late' (geometry.ELEVATION_BANDS order golden, early, mid, late), so BANDS[-1] == 'late' and the boolean is identical for every band name on every path. Inert over the whole suite; it would differ only if ELEVATION_BANDS were reordered, which no test or caller does.",
+      "find": "closed_below = name == BANDS[-1]",
+      "replace": "closed_below = name == \"late\""
+    }
+  ]
+}
