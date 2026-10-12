@@ -441,3 +441,154 @@ def test_the_committed_fit_makes_a_sensible_sky_mask() -> None:
     share = mask.mean()
     assert 0.3 < share < 0.7, "about half of the frame is sky, as the camera's page says"
     assert not mask[-30:, -200:].any(), "the timestamp corner is never sky"
+
+
+# --- the least-squares guard record (issue 28) ----------------------------------------------------
+#
+# A fit made after the guard existed says how the guard judged the least-squares stage. A fit
+# made before it (the committed WHTM1, whose digest every observation cites) has no such object,
+# is still accepted, and is not given one.
+
+WHTM1_SHA256 = "a2f462fea27f99552e8262c742166bbd92b6f3c4e815acc7f0e302f26220cfc5"
+REFIT_RECORD = {
+    "climbed_energy": 17.8033,
+    "fitted_energy": 10.0647,
+    "refit_energy": 17.8031,
+    "margin": 0.02,
+    "frames": 3,
+    "frames_lowered": 3,
+    "refused": True,
+    "columns_dropped": 187,
+    "outcome": "refit",
+}
+ACCEPTED_RECORD = {
+    **REFIT_RECORD,
+    "fitted_energy": 17.8031,
+    "refit_energy": None,
+    "frames_lowered": 0,
+    "refused": False,
+    "columns_dropped": 0,
+    "outcome": "accepted",
+}
+KEPT_RECORD = {
+    **REFIT_RECORD,
+    "refit_energy": 10.0647,
+    "columns_dropped": 0,
+    "outcome": "kept_climb",
+}
+
+
+def a_guard(record: dict | None = None):
+    from lastlight.camgeom.orientation import LeastSquaresGuard
+
+    return LeastSquaresGuard(**(REFIT_RECORD if record is None else record))
+
+
+def test_write_fit_writes_the_guard_record_and_it_survives_a_round_trip(tmp_path: Path) -> None:
+    fit = example_fit(least_squares_guard=a_guard())
+    path = write_fit(fit, tmp_path / "SYN1.json")
+    assert json.loads(path.read_text())["least_squares_guard"] == REFIT_RECORD
+    loaded = load_fit("SYN1", directory=tmp_path)
+    assert loaded.least_squares_guard == a_guard()
+    assert loaded.to_json() == fit.to_json()
+
+
+@pytest.mark.parametrize("record", [ACCEPTED_RECORD, REFIT_RECORD, KEPT_RECORD])
+def test_each_outcome_of_the_guard_is_a_valid_record(record: dict) -> None:
+    data = example_fit(least_squares_guard=a_guard(record)).to_json()
+    assert data["least_squares_guard"] == record
+    assert CameraFit.from_json(data).least_squares_guard == a_guard(record)
+
+
+def test_a_fit_without_a_guard_record_is_accepted_and_is_not_given_one(tmp_path: Path) -> None:
+    fit = example_fit()
+    assert fit.least_squares_guard is None
+    data = fit.to_json()
+    assert "least_squares_guard" not in data, "a record nobody made is not invented"
+    again = CameraFit.from_json(data)
+    assert again.least_squares_guard is None and again.to_json() == data
+    assert json.loads(write_fit(fit, tmp_path / "SYN1.json").read_text()) == data
+
+
+def test_a_guard_record_that_is_null_is_refused_rather_than_read_as_absent() -> None:
+    data = example_fit().to_json()
+    data["least_squares_guard"] = None
+    with pytest.raises(FitFileError, match="least_squares_guard"):
+        CameraFit.from_json(data)
+
+
+def test_the_committed_whtm1_fit_predates_the_guard_and_is_byte_for_byte_unchanged(
+    tmp_path: Path,
+) -> None:
+    import hashlib
+
+    assert hashlib.sha256(COMMITTED.read_bytes()).hexdigest() == WHTM1_SHA256, (
+        "WHTM1.json is frozen: every observation cites its digest"
+    )
+    fit = load_fit("WHTM1")
+    assert fit.least_squares_guard is None
+    assert "least_squares_guard" not in COMMITTED.read_text()
+    assert write_fit(fit, tmp_path / "WHTM1.json").read_bytes() == COMMITTED.read_bytes()
+
+
+def test_the_guard_record_holds_no_coordinates_or_clock_times(tmp_path: Path) -> None:
+    fit = example_fit(least_squares_guard=a_guard())
+    assert_nothing_private(write_fit(fit, tmp_path / "SYN1.json").read_text())
+
+
+def _with_record(record: dict, **changes):
+    def edit(data: dict) -> None:
+        data["least_squares_guard"] = {**record, **changes}
+
+    return edit
+
+
+def _without(record: dict, key: str):
+    def edit(data: dict) -> None:
+        data["least_squares_guard"] = {k: v for k, v in record.items() if k != key}
+
+    return edit
+
+
+@pytest.mark.parametrize(
+    ("edit", "message"),
+    [
+        (lambda d: d.update(least_squares_guard=[]), "least_squares_guard"),
+        (_with_record(REFIT_RECORD, outcome="rejected"), "outcome"),
+        (_with_record(REFIT_RECORD, outcome=None), "outcome"),
+        (_with_record(REFIT_RECORD, refused=False), "refused"),
+        (_with_record(ACCEPTED_RECORD, refused=True), "refused"),
+        (_with_record(REFIT_RECORD, refused="yes"), "refused"),
+        (_with_record(REFIT_RECORD, climbed_energy=math.nan), "climbed_energy"),
+        (_with_record(REFIT_RECORD, climbed_energy="high"), "climbed_energy"),
+        (_with_record(REFIT_RECORD, climbed_energy=-1.0), "climbed_energy"),
+        (_with_record(REFIT_RECORD, fitted_energy=True), "fitted_energy"),
+        (_with_record(REFIT_RECORD, fitted_energy=math.inf), "fitted_energy"),
+        (_with_record(REFIT_RECORD, refit_energy=None), "refit_energy"),
+        (_with_record(REFIT_RECORD, refit_energy=math.nan), "refit_energy"),
+        (_with_record(ACCEPTED_RECORD, refit_energy=3.0), "refit_energy"),
+        (_with_record(REFIT_RECORD, margin=0.0), "margin"),
+        (_with_record(REFIT_RECORD, margin=1.0), "margin"),
+        (_with_record(REFIT_RECORD, margin=math.nan), "margin"),
+        (_with_record(REFIT_RECORD, frames=0, frames_lowered=0), "frames"),
+        (_with_record(REFIT_RECORD, frames=3.0), "frames"),
+        (_with_record(REFIT_RECORD, frames_lowered=4), "frames_lowered"),
+        (_with_record(REFIT_RECORD, frames_lowered=-1), "frames_lowered"),
+        (_with_record(REFIT_RECORD, frames_lowered=1), "refused"),
+        (_with_record(ACCEPTED_RECORD, frames_lowered=2), "refused"),
+        (_with_record(REFIT_RECORD, columns_dropped=-1), "columns_dropped"),
+        (_with_record(REFIT_RECORD, columns_dropped=12.5), "columns_dropped"),
+        (_with_record(ACCEPTED_RECORD, columns_dropped=5), "columns_dropped"),
+        (_without(REFIT_RECORD, "outcome"), "least_squares_guard.outcome"),
+        (_without(REFIT_RECORD, "columns_dropped"), "least_squares_guard.columns_dropped"),
+        (_without(REFIT_RECORD, "refit_energy"), "least_squares_guard.refit_energy"),
+    ],
+)
+def test_a_guard_record_that_contradicts_itself_is_refused_with_the_field(
+    tmp_path: Path, edit, message
+) -> None:
+    data = example_fit().to_json()
+    edit(data)
+    (tmp_path / "BAD1.json").write_text(json.dumps(data))
+    with pytest.raises(FitFileError, match=message):
+        load_fit("BAD1", directory=tmp_path)
