@@ -174,20 +174,50 @@ def test_the_extra_light_is_positive_everywhere(aod: float) -> None:
             assert (extra > 0.0).all(), (aod, sun, azimuth)
 
 
-@pytest.mark.parametrize("aod", [0.03, 0.3])
-@pytest.mark.parametrize("azimuth", [0.0, 27.6, 90.0, 180.0])
-@pytest.mark.parametrize("view", [1.5, 4.0, 10.0, 45.0])
-def test_the_extra_lights_share_of_the_total_rises_as_the_sun_sets(
-    aod: float, azimuth: float, view: float
-) -> None:
-    """From sun +6 to -6 in 1-degree steps the multiply scattered share of Y only grows."""
+DOME_VIEWS = tuple(float(v) for v in range(2, 90, 4))
+DOME_AZIMUTHS = tuple(float(a) for a in range(0, 181, 15))
+
+
+def _dome_share(atm: Atmosphere, sun: float) -> float:
+    """The extra light's share of the sky's Y, over the sky dome (weighted by solid angle)."""
+    weight = np.cos(np.radians(DOME_VIEWS))
+    extra = total = 0.0
+    for azimuth in DOME_AZIMUTHS:
+        extra += v1.multiple_scattering_xyz(atm, sun, DOME_VIEWS, azimuth)[:, 1] @ weight
+        total += sky_xyz(atm, sun, DOME_VIEWS, azimuth, engine="v1")[:, 1] @ weight
+    return float(extra / total)
+
+
+@pytest.mark.parametrize("aod", [0.0, 0.03, 0.3, 1.0])
+def test_over_the_sky_the_extra_lights_share_rises_as_the_sun_sets(aod: float) -> None:
+    """Over the whole sky, the multiply scattered share is larger at sun -6 than at +6, and it
+    keeps growing into deep twilight (-9, -12), where it is most of the light.
+
+    The conductor's sign was stated per direction: "its share of the total rises as the sun
+    sets, from +6 to -6". Per direction it is false, in the table and in an independent Monte
+    Carlo (`docs/renderer/bruneton-convergence.md`), so it is tested over the sky; the exception
+    is pinned below.
+    """
     atm = Atmosphere(aod_550=aod)
-    shares = []
-    for sun in np.arange(6.0, -6.5, -1.0):
-        extra = v1.multiple_scattering_xyz(atm, float(sun), (view,), azimuth)[0, 1]
-        total = sky_xyz(atm, float(sun), (view,), azimuth, engine="v1")[0, 1]
-        shares.append(extra / total)
-    assert all(later > earlier for earlier, later in zip(shares, shares[1:], strict=False)), shares
+    shares = [_dome_share(atm, sun) for sun in (6.0, -6.0, -9.0, -12.0)]
+    assert shares[1] > shares[0], shares
+    assert shares[3] > shares[2] > shares[1], shares
+
+
+def test_toward_the_sun_the_twilight_glow_lowers_the_share_after_sun_minus_2() -> None:
+    """The exception, pinned: at WHTM1's lowest band, looking 27.6 degrees from the sun, the
+    multiply scattered share climbs from +6 to about -2, then falls by -6, because the bright
+    single-scattered glow of distant air still in sunlight rises along the low sightline. An
+    independent backward Monte Carlo of the same atmosphere shows the same peak.
+    """
+    atm = Atmosphere(aod_550=0.03)
+
+    def share(sun: float) -> float:
+        extra = v1.multiple_scattering_xyz(atm, sun, (1.5,), 27.6)[0, 1]
+        return float(extra / sky_xyz(atm, sun, (1.5,), 27.6, engine="v1")[0, 1])
+
+    assert share(-2.0) > share(6.0) + 0.1
+    assert share(-6.0) < share(-2.0) - 0.05
 
 
 def test_a_black_ground_gives_less_extra_light_than_an_albedo_of_0_2() -> None:
