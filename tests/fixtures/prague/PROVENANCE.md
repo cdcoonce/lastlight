@@ -91,7 +91,7 @@ the extraterrestrial sun has Y = 1.
 ## Regenerating
 
 ```
-uv run python tools/prague_reference.py fetch build fixture    # about 6 minutes after the downloads
+uv run python tools/prague_reference.py fetch build fixture    # about 4 minutes after the downloads
 uv run python tools/prague_reference.py fixture --check        # re-evaluate and compare, write nothing
 uv run python tools/prague_reference.py report                 # the results tables, from the fixture
 ```
