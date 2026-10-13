@@ -48,9 +48,16 @@ QUADRATURES: tuple[str, ...] = ("registered", "adaptive")
 
 ADAPTIVE_TRIGGER_DEPTH = 0.7
 """Adaptive refines only if some piece of the sightline has more optical depth than this, at any
-wavelength. Below it the registered result is within about 1 percent of the refined one (measured
-over atmospheres just under the trigger, `docs/log/2026-10-12-v0-heavy-aerosol.md`), and adaptive
-returns the registered result exactly, so paintings at ordinary aerosol loads do not move."""
+wavelength. At or below it adaptive returns the registered result exactly, so paintings at
+ordinary aerosol loads do not move.
+
+The result is not continuous across the trigger. Between an atmosphere just under it and one just
+over it the sky jumps by the registered quadrature's own error at that load, which adaptive
+removes on the refined side only. For the default aerosol shape luminance moves by up to 4.4
+percent (10 degree view, sun -1.0; 2.1 percent at 3 degrees, 0.8 to 1.1 at 1.5, 2 and 5) and the
+painting's rows by up to 1.6 dE76 (at the 10 degree view; 0.5 at 5 and 0.3 at 2 degrees). It is
+the lit edge of Earth's shadow falling inside one piece, resolved better on one side. See
+`docs/log/2026-10-12-v0-heavy-aerosol.md`."""
 
 ADAPTIVE_PIECE_DEPTH = 0.1
 """Once refining, no piece is left with more optical depth than this (the midpoint rule is then
