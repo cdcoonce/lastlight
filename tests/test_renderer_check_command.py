@@ -307,6 +307,37 @@ def test_a_zero_observed_median_makes_the_ratio_infinite_and_it_still_takes_part
     assert verdict_line(rig) == "ADOPT"  # [inf, inf, 1, 1, 1]: the median is 1
 
 
+def test_a_used_frame_with_a_null_log_rg_is_left_out_of_the_log_rg_ratios_only(rig: Rig) -> None:
+    date = day(0)
+    triples = observed_for_ratio(date, 1.7)
+    triples[2] = (
+        triples[2][0],
+        triples[2][1],
+        5.0 * triples[2][2],
+    )  # uneven R/G, so subsets differ
+    triples[1] = (triples[1][0], triples[1][1], None)  # used (log_bg is set), but no R/G value
+    rig.evening(0, triples=triples)
+    code, _, err = rig.run()
+    assert code == 0, err
+    row = rig.evenings()["2026-10-10"]
+    assert row["status"] == "counted"
+    # log(B/G) takes all four frames; log(R/G) takes the three that have it.
+    assert float(row["r_e_v1_bg"]) == pytest.approx(1.7, rel=1e-4)
+    rendered = expected_rendered("v1", date, AOD, OZONE, SUNS)[:, 0]
+    observed = observed_values(rig, date)[0]
+    kept = [(r, o) for r, o in zip(rendered, observed, strict=True) if o is not None]
+    assert len(kept) == 3
+    want = _median([abs(r) for r, _ in kept]) / _median([abs(o) for _, o in kept])
+    assert float(row["r_e_v1_rg"]) == pytest.approx(want, rel=1e-4)
+    zeroed = [0.0 if o is None else o for o in observed]  # a null read as zero would differ
+    wrong = _median([abs(r) for r in rendered]) / _median([abs(o) for o in zeroed])
+    assert abs(want - wrong) > 1e-3
+    frames = {r["frame"]: r for r in rig.rows("frames.csv") if r["date"] == "2026-10-10"}
+    assert frames["2"]["observed_log_rg"] == "" and frames["2"]["observed_log_bg"] != ""
+    assert frames["2"]["rendered_log_rg_v1"] != ""  # still rendered
+    assert all(frames[n]["observed_log_rg"] != "" for n in ("1", "3", "4"))
+
+
 def test_three_infinite_ratios_among_the_first_five_keep_v0(rig: Rig) -> None:
     zero = [(sun, 0.0, 0.0) for sun in SUNS]
     for n in (0, 1, 2):
@@ -448,6 +479,23 @@ def test_a_pending_evening_blocks_later_evenings_from_taking_a_first_five_slot(r
     assert verdict_line(rig) == "NOT YET DECIDABLE (0 of 5 counted evenings)"
     rows = rig.evenings()
     assert rows["2026-10-11"]["status"] == "counted" and rows["2026-10-11"]["slot"] == ""
+
+
+def test_a_counted_evening_between_two_pending_ones_holds_no_slot(rig: Rig) -> None:
+    rig.evening(0, record=False)
+    rig.evening(1, ratio=1.0)  # after the earliest pending evening, before the latest
+    rig.evening(2, record=False)
+    for n in range(3, 7):
+        rig.evening(n, ratio=1.0)
+    code, _, err = rig.run()
+    assert code == 1 and "2026-10-10" in err and "2026-10-12" in err
+    assert verdict_line(rig) == "NOT YET DECIDABLE (0 of 5 counted evenings)"
+    rows = rig.evenings()
+    assert [rows[day(n).isoformat()]["slot"] for n in range(7)] == [""] * 7
+    report = rig.text("report.md")
+    for n in (1, 3, 4, 5, 6):
+        waiting = "counted, waiting for an earlier evening's inputs"
+        assert f"| {day(n).isoformat()} | {waiting} |" in report
 
 
 def test_a_pending_evening_after_four_counted_leaves_four(rig: Rig) -> None:
