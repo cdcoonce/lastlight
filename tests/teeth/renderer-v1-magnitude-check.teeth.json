@@ -608,6 +608,34 @@
       "oracle": "real",
       "find": "atmosphere = Atmosphere(aod_550=aod_550, ozone_du=ozone_du)",
       "replace": "atmosphere = Atmosphere(aod_550=aod_550)"
+    },
+    {
+      "label": "S1 fixer: a missing-run drop is stored while its retry window is open",
+      "file": "../../src/lastlight/renderer_check/fetch.py",
+      "oracle": "real",
+      "find": "        if record.drop_reason in RETRIED_REASONS and retry_window_open(day, now_utc):",
+      "replace": "        if False:"
+    },
+    {
+      "label": "S2 fixer: the window that holds a drop back lasts a day too long (<= for <)",
+      "file": "../../src/lastlight/renderer_check/fetch.py",
+      "oracle": "real",
+      "find": "    return (now_utc.date() - evening).days < RETRY_WINDOW_DAYS",
+      "replace": "    return (now_utc.date() - evening).days <= RETRY_WINDOW_DAYS"
+    },
+    {
+      "label": "S3 fixer: every drop reason is held back while the window is open, not only a missing run",
+      "file": "../../src/lastlight/renderer_check/fetch.py",
+      "oracle": "real",
+      "find": "        if record.drop_reason in RETRIED_REASONS and retry_window_open(day, now_utc):",
+      "replace": "        if record.drop_reason is not None and retry_window_open(day, now_utc):"
+    },
+    {
+      "label": "S4 fixer: the window never closes, so a missing-run drop is never stored",
+      "file": "../../src/lastlight/renderer_check/fetch.py",
+      "oracle": "real",
+      "find": "        if record.drop_reason in RETRIED_REASONS and retry_window_open(day, now_utc):",
+      "replace": "        if record.drop_reason in RETRIED_REASONS:"
     }
   ]
 }
