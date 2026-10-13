@@ -73,7 +73,12 @@ CONTRAST_TOLERANCE = 0.10
 CHROMATICITY_TOLERANCE = 0.02
 """Euclidean distance in CIE 1976 u'v' at the reference elevation: the issue's tolerance."""
 
-VARIANTS = ("xyz_binned", "xyz_inverse_visibility", "xyz_altitude_0")
+VARIANTS = (
+    "xyz_binned",
+    "xyz_inverse_visibility",
+    "xyz_altitude_0",
+    "xyz_matched_aerosol_depth",
+)
 """The fixture's diagnostic readings of Prague, each laid out like the primary `xyz`."""
 
 
