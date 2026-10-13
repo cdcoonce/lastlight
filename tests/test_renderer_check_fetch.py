@@ -379,6 +379,102 @@ def test_other_drop_reasons_are_never_retried(tmp_path) -> None:
         assert scripted.asked == [], reason
 
 
+# A run missing from an archive may be a publication lag, so no record is kept of it while the
+# evening is less than two calendar days old: the evening is pending, as if its analysis were not
+# published yet. Only the fetch stage knows the clock; the report stage sees final records or none.
+
+RETRIED = sorted(fetch.RETRIED_REASONS)
+FINAL_AT_ONCE = sorted(set(store.INPUT_DROP_REASONS) - fetch.RETRIED_REASONS)
+
+
+def late_on(evening: dt.date, days_after: int) -> dt.datetime:
+    """The last hour of the calendar day `days_after` days after `evening`."""
+    return dt.datetime.combine(evening + dt.timedelta(days=days_after), dt.time(23), tzinfo=dt.UTC)
+
+
+def not_in_the_archive(day: dt.date, reason: str) -> store.EveningInputs:
+    return store.EveningInputs.dropped(day, reason, "not in the archive")
+
+
+@pytest.mark.parametrize("age", [0, 1])
+@pytest.mark.parametrize("reason", RETRIED)
+def test_a_missing_run_drop_inside_the_retry_window_is_not_stored_and_stays_pending(
+    tmp_path, reason: str, age: int
+) -> None:
+    day = dt.date(2026, 10, 10)
+    records = store.InputStore(tmp_path)
+    lines: list[str] = []
+    summary = fetch.fetch_range(
+        [day],
+        records,
+        Scripted({day: not_in_the_archive(day, reason)}),
+        now_utc=late_on(day, age),
+        progress=lines.append,
+    )
+    assert records.load(day) is None and records.dates() == set()
+    assert summary.pending == (day,)
+    assert (summary.recorded, summary.dropped, summary.faults) == (0, 0, ())
+    assert lines and all(line.startswith("2026-10-10") for line in lines)
+    assert fetch.needs_fetch(records, day, late_on(day, age))  # tried again on the next run
+
+
+@pytest.mark.parametrize("age", [2, 3, 30])
+@pytest.mark.parametrize("reason", RETRIED)
+def test_a_missing_run_drop_is_stored_as_final_once_the_retry_window_has_passed(
+    tmp_path, reason: str, age: int
+) -> None:
+    day = dt.date(2026, 10, 10)
+    records = store.InputStore(tmp_path)
+    summary = fetch.fetch_range(
+        [day], records, Scripted({day: not_in_the_archive(day, reason)}), now_utc=late_on(day, age)
+    )
+    assert records.load(day).drop_reason == reason
+    assert (summary.dropped, summary.pending) == (1, ())
+    assert not fetch.needs_fetch(records, day, late_on(day, age))  # final: never asked again
+
+
+@pytest.mark.parametrize("reason", FINAL_AT_ONCE)
+def test_every_other_drop_reason_is_stored_at_once_even_on_the_evening_itself(
+    tmp_path, reason: str
+) -> None:
+    day = dt.date(2026, 10, 10)
+    records = store.InputStore(tmp_path)
+    summary = fetch.fetch_range(
+        [day], records, Scripted({day: not_in_the_archive(day, reason)}), now_utc=late_on(day, 0)
+    )
+    assert records.load(day).drop_reason == reason
+    assert (summary.dropped, summary.pending) == (1, ())
+
+
+def test_an_evening_held_for_a_missing_run_is_recorded_when_a_later_run_finds_it(tmp_path) -> None:
+    day = dt.date(2026, 10, 10)
+    records = store.InputStore(tmp_path)
+    now = late_on(day, 1)
+    fetch.fetch_range(
+        [day], records, Scripted({day: not_in_the_archive(day, "aerosol_run_missing")}), now_utc=now
+    )
+    assert records.load(day) is None
+    summary = fetch.fetch_range([day], records, Scripted({day: ok(day)}), now_utc=now)
+    assert summary.recorded == 1 and records.load(day).ok
+
+
+@pytest.mark.parametrize("age", range(5))
+def test_the_window_that_holds_a_drop_back_is_the_window_that_retries_a_stored_one(
+    tmp_path, age: int
+) -> None:
+    """A record from before this rule (a missing-run drop kept inside its window) is fetched
+    again exactly while a new one would be held back."""
+    day = dt.date(2026, 10, 10)
+    now = late_on(day, age)
+    old = store.InputStore(tmp_path / "old")
+    old.save(not_in_the_archive(day, "hrrr_run_missing"))
+    new = store.InputStore(tmp_path / "new")
+    fetch.fetch_range(
+        [day], new, Scripted({day: not_in_the_archive(day, "hrrr_run_missing")}), now_utc=now
+    )
+    assert (new.load(day) is None) == fetch.needs_fetch(old, day, now)
+
+
 def test_a_collector_record_that_g0_could_not_build_is_stored_as_a_drop(tmp_path) -> None:
     class DroppingCollector:
         def collect(self, evening: dt.date) -> DateRecord:

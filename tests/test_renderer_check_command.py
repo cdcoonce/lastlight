@@ -21,6 +21,7 @@ import re
 from pathlib import Path
 
 import pytest
+from hrrr_support import FakeTransport
 from test_renderer_check_support import (
     CRITERION,
     NOW,
@@ -462,6 +463,101 @@ def test_the_report_stage_never_touches_the_network(rig: Rig) -> None:
     rig.evening(0, record=False)
     code, _, _ = rig.run("--stage", "report", transport=NoNetwork())
     assert code == 1
+
+
+# A run missing from an archive may only be a publication lag, so the fetch stage keeps no record
+# of it while the evening is less than two calendar days old: the evening stays pending, exactly
+# like an analysis not published yet, and the first-5 rule holds the later evenings' slots. The
+# report stage has no clock; it only ever sees final records or none.
+
+MISSING_RUN_REASONS = ("hrrr_run_missing", "aerosol_run_missing")
+
+
+def clock(evening: dt.date, days_after: int) -> dt.datetime:
+    """A moment `days_after` calendar days after `evening` (the archives are long published)."""
+    return dt.datetime.combine(evening + dt.timedelta(days=days_after), dt.time(12), tzinfo=dt.UTC)
+
+
+def archives_without(reason: str, evening: dt.date, now: dt.datetime) -> FakeTransport:
+    """The archives of `evening` as served at `now`, except the run that `reason` names."""
+    served = served_run(evening, now, tcdc=5.0)
+    missing = "gefs" if reason == "aerosol_run_missing" else "hrrr"
+    return FakeTransport({url: body for url, body in served.files.items() if missing not in url})
+
+
+def around_a_missing_run(rig: Rig) -> dt.date:
+    """Days 0 to 3 counted (r_e 1, 1, 9, 9), day 4 observed with no record, day 5 counted (r_e 9).
+
+    With day 4 out, the first five are [1, 1, 9, 9, 9] (KEEP V0); with day 4 counted at r_e of
+    about 1 they are [1, 1, 9, 9, 1] (ADOPT): a verdict given too early would flip.
+    """
+    for n, ratio in enumerate([1.0, 1.0, 9.0, 9.0]):
+        rig.evening(n, ratio=ratio)
+    missing = rig.evening(4, ratio=1.0, record=False)
+    rig.evening(5, ratio=9.0)
+    return missing
+
+
+def stored_record(rig: Rig, evening: dt.date) -> dict | None:
+    path = rig.cache / "renderer-v1" / f"{evening.isoformat()}.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+
+
+@pytest.mark.parametrize("reason", MISSING_RUN_REASONS)
+def test_a_recent_missing_run_drop_holds_the_slots_of_later_evenings(rig: Rig, reason: str) -> None:
+    missing = around_a_missing_run(rig)
+    opened = clock(missing, 1)
+    code, _, err = rig.run(
+        transport=archives_without(reason, missing, opened), now=opened, default_stage=None
+    )
+    # No record: the evening is pending, as if its analysis were not published yet.
+    assert code == 1 and "2026-10-14" in err
+    assert stored_record(rig, missing) is None
+    rows = rig.evenings()
+    assert rows["2026-10-14"]["status"] == "pending" and rows["2026-10-14"]["slot"] == ""
+    # The later counted evening holds no slot, so no verdict is given that a retry could flip.
+    assert rows["2026-10-15"]["status"] == "counted" and rows["2026-10-15"]["slot"] == ""
+    assert "counted, waiting for an earlier evening's inputs" in rig.text("report.md")
+    assert verdict_line(rig) == "NOT YET DECIDABLE (4 of 5 counted evenings)"
+
+    # The archive publishes the run. The next run records the evening, and it takes slot 5.
+    code, _, err = rig.run(
+        transport=served_run(missing, opened, tcdc=5.0), now=opened, default_stage=None
+    )
+    assert code == 0, err
+    rows = rig.evenings()
+    assert rows["2026-10-14"]["status"] == "counted" and rows["2026-10-14"]["slot"] == "5"
+    assert rows["2026-10-15"]["slot"] == ""
+    assert verdict_line(rig) == "ADOPT"
+
+
+@pytest.mark.parametrize("reason", MISSING_RUN_REASONS)
+def test_a_missing_run_drop_is_stored_as_final_once_the_window_has_passed(
+    rig: Rig, reason: str
+) -> None:
+    missing = around_a_missing_run(rig)
+    opened = clock(missing, 1)
+    rig.run(transport=archives_without(reason, missing, opened), now=opened, default_stage=None)
+    assert stored_record(rig, missing) is None  # still inside the window: nothing kept
+
+    closed = clock(missing, 2)
+    code, _, err = rig.run(
+        transport=archives_without(reason, missing, closed), now=closed, default_stage=None
+    )
+    assert code == 0, err
+    record = stored_record(rig, missing)
+    assert record is not None and record["drop_reason"] == reason
+    rows = rig.evenings()
+    assert rows["2026-10-14"]["status"] == "dropped" and rows["2026-10-14"]["reason"] == reason
+    assert rows["2026-10-15"]["status"] == "counted" and rows["2026-10-15"]["slot"] == "5"
+    assert verdict_line(rig) == "KEEP V0"
+
+    # Final: the run turning up later changes nothing and is not even asked for.
+    published = served_run(missing, closed, tcdc=5.0)
+    code, _, _ = rig.run(transport=published, now=closed, default_stage=None)
+    assert code == 0 and published.calls == []
+    assert stored_record(rig, missing) == record
+    assert verdict_line(rig) == "KEEP V0"
 
 
 # --- refusals -------------------------------------------------------------------------------------
