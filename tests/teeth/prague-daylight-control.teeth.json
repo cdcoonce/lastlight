@@ -1,0 +1,126 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_prague_control.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "tests/test_prague_control.py"
+  ],
+  "mutants": [
+    {
+      "label": "#1 Rayleigh cross-section goes as lambda^-3 instead of lambda^-4 (level at 550 nm kept)",
+      "file": "../../src/lastlight/render/atmosphere.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "A resolution limit of the control, accepted by the conductor, not an unguarded renderer property. The control's tolerances are fixed by issue #34 (0.10 log units on the lowest band's contrast, 0.02 in u'v'), and an exponent of 3 moves that band's log(B/G) by 0.044 and u'v' by 0.002, inside both at every azimuth; only a grey Rayleigh (row 1b) turns the control red. The existing physics tests kill this mutation (tests/test_render_atmosphere.py::test_rayleigh_scattering_falls_roughly_as_wavelength_to_the_minus_four and tests/test_render_physics.py::test_a_very_thin_atmosphere_shows_rayleigh_scattered_sunlight), and the renderer-v1 check (#35) pins v1's output separately. A drift pin on the measured deviations was proposed and declined.",
+      "find": "wavelength_cm**4 * _AIR_NUMBER_DENSITY_CM3**2",
+      "replace": "wavelength_cm**3 * 5.5e-5 * _AIR_NUMBER_DENSITY_CM3**2"
+    },
+    {
+      "label": "#1b Rayleigh cross-section has no wavelength dependence (grey, level at 550 nm kept)",
+      "file": "../../src/lastlight/render/atmosphere.py",
+      "oracle": "real",
+      "find": "wavelength_cm**4 * _AIR_NUMBER_DENSITY_CM3**2",
+      "replace": "5.5e-5**4 * _AIR_NUMBER_DENSITY_CM3**2"
+    },
+    {
+      "label": "#2 aerosol phase function flipped to backward scattering (g -> -g)",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "henyey_greenstein_phase(cos_theta, atm.asymmetry)",
+      "replace": "henyey_greenstein_phase(cos_theta, -atm.asymmetry)"
+    },
+    {
+      "label": "#3 Rayleigh extinction halved along the sightline only (scattering and sunward path untouched)",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "piece_depth = extinction * chord[:, None]",
+      "replace": "piece_depth = (extinction - 0.5 * optics.rayleigh_scattering) * chord[:, None]"
+    },
+    {
+      "label": "#4 the comparison hands v1 the opposite relative azimuth (0 <-> 180, 90 fixed)",
+      "file": "../test_prague_control.py",
+      "oracle": "real",
+      "find": "Atmosphere(aod_550=aod), SUN_ELEVATION, view_elevations(), azimuth, engine=engine",
+      "replace": "Atmosphere(aod_550=aod), SUN_ELEVATION, view_elevations(), 180.0 - azimuth, engine=engine"
+    },
+    {
+      "label": "#4b sky_xyz adds 180 degrees to the relative azimuth (renderer-side form of #4)",
+      "file": "../../src/lastlight/render/curve.py",
+      "oracle": "real",
+      "find": "    check_engine(engine)\n    if engine == \"v1\":\n        v1.check_domain(atm, sun_elevation, view_elevations)\n    spectra = [",
+      "replace": "    check_engine(engine)\n    rel_azimuth_deg = rel_azimuth_deg + 180.0\n    if engine == \"v1\":\n        v1.check_domain(atm, sun_elevation, view_elevations)\n    spectra = ["
+    },
+    {
+      "label": "#5 [informational] multiple_scattering_xyz returns zeros (v1 equals v0 in sky_xyz)",
+      "file": "../../src/lastlight/render/v1.py",
+      "oracle": "real",
+      "find": "return default_table().xyz(",
+      "replace": "return 0.0 * default_table().xyz("
+    },
+    {
+      "label": "#5b [informational] sky_xyz adds zero times the multiple-scattering term (v1 equals v0; the share diagnostic still sees the real table)",
+      "file": "../../src/lastlight/render/curve.py",
+      "oracle": "real",
+      "find": "xyz = xyz + v1.multiple_scattering_xyz(atm, sun_elevation, view_elevations, rel_azimuth_deg)",
+      "replace": "xyz = xyz + 0.0 * v1.multiple_scattering_xyz(atm, sun_elevation, view_elevations, rel_azimuth_deg)"
+    },
+    {
+      "label": "G1 [gap] the lowest-band contrast tolerance is loosened from 0.10 to 0.15 log units",
+      "file": "../test_prague_control.py",
+      "oracle": "real",
+      "find": "CONTRAST_TOLERANCE = 0.10",
+      "replace": "CONTRAST_TOLERANCE = 0.15"
+    },
+    {
+      "label": "G2 [gap] the u'v' tolerance is loosened from 0.02 to 0.025",
+      "file": "../test_prague_control.py",
+      "oracle": "real",
+      "find": "CHROMATICITY_TOLERANCE = 0.02",
+      "replace": "CHROMATICITY_TOLERANCE = 0.025"
+    },
+    {
+      "label": "G3 [gap] the NOTICE no longer names the Apache License, Version 2.0",
+      "file": "../fixtures/prague/NOTICE",
+      "oracle": "real",
+      "find": "Licensed under the Apache License, Version 2.0 (the \"License\"); you may not use the model",
+      "replace": "Licensed under the \"License\"; you may not use the model"
+    },
+    {
+      "label": "G4 [gap] the contrast is taken against the fifth band instead of the reference band",
+      "file": "../test_prague_control.py",
+      "oracle": "real",
+      "find": "return (logs[:-1] - logs[-1])[0]",
+      "replace": "return (logs[:-1] - logs[-2])[0]"
+    },
+    {
+      "label": "G5 [gap] the u'v' distance is the largest axis difference instead of the Euclidean distance",
+      "file": "../test_prague_control.py",
+      "oracle": "real",
+      "find": "return float(np.linalg.norm(here - there))",
+      "replace": "return float(np.abs(here - there).max())"
+    },
+    {
+      "label": "#6 [control] u' computed as (8 x) / (2 denominator) in the u'v' helper",
+      "file": "../test_prague_control.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "Multiplying numerator and denominator of u' by 2 is exact in IEEE-754 (a power of two only shifts the exponent), so (8.0 * x) / (2.0 * denominator) is bit-identical to 4.0 * x / denominator for every finite input, and v' is untouched. Inert over every path the file reaches (the D65 known-white test, the control, the self-comparison that must equal 0.0); it would matter only to a test that pinned the helper's source text.",
+      "find": "4.0 * x / denominator",
+      "replace": "(8.0 * x) / (2.0 * denominator)"
+    }
+  ]
+}

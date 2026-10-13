@@ -1,0 +1,36 @@
+Prague Sky Model
+
+The numbers in sun10.json are values of sky radiance computed with the Prague Sky Model, by the
+reference implementation and the datasets published by its authors. No part of the model's source
+code or of its datasets is included in this repository; only the numbers it produced for the
+configurations listed in PROVENANCE.md.
+
+    Prague Sky Model
+    Copyright 2022 Charles University
+    SPDX-License-Identifier: Apache-2.0
+
+    Implementation repository and software by Petr Vévoda.
+    https://github.com/PetrVevoda/pragueskymodel
+
+    The model is described in
+      Alexander Wilkie, Petr Vévoda, Thomas Bashford-Rogers, Lukáš Hošek, Tomáš Iser,
+      Monika Kolářová, Tobias Rittig and Jaroslav Křivánek. A fitted radiance and attenuation
+      model for realistic atmospheres. ACM Transactions on Graphics (SIGGRAPH 2021) 40(4), 2021.
+      https://cgg.mff.cuni.cz/publications/skymodel-2021/
+    and
+      Petr Vévoda, Thomas Bashford-Rogers, Monika Kolářová and Alexander Wilkie. A wide spectral
+      range sky radiance model. Computer Graphics Forum 41(7), 2022.
+      https://cgg.mff.cuni.cz/publications/infrared-skymodel-2022/
+
+    Licensed under the Apache License, Version 2.0 (the "License"); you may not use the model
+    except in compliance with the License. You may obtain a copy of the License at
+      http://www.apache.org/licenses/LICENSE-2.0
+    Unless required by applicable law or agreed to in writing, software distributed under the
+    License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+    either express or implied. See the License for the specific language governing permissions and
+    limitations under the License.
+
+This notice carries the model's copyright line, licence name and licence link, as the licence asks
+of anyone who redistributes the Work or a Derivative Work. Nothing here has been modified from the
+authors' source: the evaluation driver in tools/prague_reference.py is lastlight's own code (MIT),
+compiled against the unmodified source of the pinned commit, outside the repository.
