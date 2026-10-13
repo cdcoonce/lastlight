@@ -66,6 +66,12 @@ def test_the_cloud_mean_is_the_arithmetic_mean_of_the_values() -> None:
     assert rules.cloud_mean([0.0, 10.0, 20.0, 30.0]) == pytest.approx(15.0)
 
 
+def test_the_cloud_mean_is_not_the_median() -> None:
+    skewed = [0.0] * 15 + [50.0, 50.0]  # the mean is 100 / 17 = 5.88, the median is 0
+    assert rules.cloud_mean(skewed) == pytest.approx(100.0 / 17.0, rel=1e-12)
+    assert rules.cloud_mean([0.0, 0.0, 9.0]) == pytest.approx(3.0)  # a median would say 0
+
+
 def test_exactly_ten_percent_counts() -> None:
     values = [17.0, 3.0] + [10.0] * 15  # 17 points whose mean is exactly 10
     assert rules.cloud_mean(values) == 10.0

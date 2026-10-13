@@ -119,6 +119,11 @@ def test_the_cloud_is_the_mean_of_tcdc_over_the_points() -> None:
     assert fetch.cloud_percent(samples_with([0.0, 10.0, 20.0, 30.0])) == pytest.approx(15.0)
 
 
+def test_the_cloud_is_the_mean_not_the_median_of_the_points() -> None:
+    skewed = [0.0] * 15 + [50.0, 50.0]  # a mean of 5.88, a median of 0
+    assert fetch.cloud_percent(samples_with(skewed)) == pytest.approx(100.0 / 17.0, rel=1e-12)
+
+
 def test_a_point_without_a_value_makes_the_cloud_unknown() -> None:
     assert fetch.cloud_percent(samples_with([1.0, None, 3.0])) is None
 
@@ -251,6 +256,25 @@ def test_a_transient_fault_while_fetching_the_cloud_is_raised_not_recorded(
     monkeypatch.setattr(hrrr, "fetch_fields", flaky)
     with pytest.raises(TransientError):
         fetch.InputFetcher(served_run(EVENING, NOW, tcdc=5.0), tmp_path, NOW).fetch(EVENING)
+
+
+def test_a_tcdc_file_missing_after_the_collector_succeeded_is_a_missing_hrrr_run(
+    tmp_path, monkeypatch
+) -> None:
+    real = hrrr.fetch_fields
+
+    def vanished(cycle_date, cycle_hour, forecast_hour, fields, cache_dir, *, transport=None):
+        if [f.name for f in fields] == ["TCDC"]:
+            raise FetchError("https://example.invalid/x: HTTP 404 Not Found")
+        return real(cycle_date, cycle_hour, forecast_hour, fields, cache_dir, transport=transport)
+
+    monkeypatch.setattr(hrrr, "fetch_fields", vanished)
+    transport = served_run(EVENING, NOW, tcdc=5.0)
+    record = fetch.InputFetcher(transport, tmp_path, NOW).fetch(EVENING)  # no TransientError
+    assert record is not None and not record.ok
+    assert record.drop_reason == "hrrr_run_missing"
+    assert "not in the archive" in record.drop_detail
+    assert record.cloud_mean_pct is None and record.aod_550 is None
 
 
 def test_the_cloud_is_fetched_from_the_analysis_with_the_whole_atmosphere_tcdc_spec(
