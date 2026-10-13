@@ -159,6 +159,19 @@ def test_a_component_off_by_less_than_one_millionth_is_accepted() -> None:
     guards.check_fingerprint(scaled(1.0 - 5e-7))
 
 
+@pytest.mark.parametrize("where", [(0, 0, 0), (1, 1, 1), (2, 1, 2)])
+def test_a_nan_probe_component_is_refused(where: tuple[int, int, int]) -> None:
+    def evaluate(engine: str):
+        values = np.array(V1_REGISTERED)
+        values[where] = np.nan
+        return values
+
+    with pytest.raises(guards.Refusal) as caught:
+        guards.check_fingerprint(evaluate)
+    message = str(caught.value)
+    assert "nan" in message.lower() and "\n" not in message
+
+
 @pytest.mark.parametrize("probe", [0, 1, 2])
 @pytest.mark.parametrize("view", [0, 1])
 @pytest.mark.parametrize("component", [0, 1, 2])
