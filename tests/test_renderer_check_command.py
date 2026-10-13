@@ -37,7 +37,9 @@ from test_renderer_check_support import (
 
 from lastlight.cli import Command, discover, main
 from lastlight.commands import g0, renderer_check
+from lastlight.g0 import collect
 from lastlight.privacy.scanner import scan
+from lastlight.render import v1 as v1_engine
 from lastlight.renderer_check import guards, store
 
 D0 = dt.date(2026, 10, 10)
@@ -443,6 +445,28 @@ def test_an_evening_outside_the_v1_table_is_dropped_with_its_reason(rig: Rig) ->
     rig.run()
     row = rig.evenings()["2026-10-10"]
     assert row["status"] == "dropped" and row["reason"] == "v1_outside_table"
+    assert verdict_line(rig) == "NOT YET DECIDABLE (1 of 5 counted evenings)"
+
+
+def test_a_pixel_scale_end_outside_the_table_is_blank_for_that_end_and_the_evening_counts(
+    rig: Rig, monkeypatch
+) -> None:
+    real = collect.build_views
+
+    def views_with_a_high_end_above_the_table():
+        views = real()
+        ceiling = v1_engine.DOMAIN["view_elevation_deg"][1]
+        high = dataclasses.replace(views["high"], reference_elevation_deg=ceiling + 5.0)
+        return {**views, "high": high}
+
+    monkeypatch.setattr(collect, "build_views", views_with_a_high_end_above_the_table)
+    rig.evening(0, ratio=1.0)
+    code, _, err = rig.run()
+    assert code == 0, err
+    row = rig.evenings()["2026-10-10"]
+    assert row["status"] == "counted" and row["slot"] == "1"
+    assert row["r_e_v1_bg_scale_high"] == ""  # n/a for that end only
+    assert float(row["r_e_v1_bg_scale_low"]) > 0.0 and float(row["r_e_v1_bg"]) > 0.0
     assert verdict_line(rig) == "NOT YET DECIDABLE (1 of 5 counted evenings)"
 
 

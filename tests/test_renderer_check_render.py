@@ -8,6 +8,7 @@ reported-only ratios, with the fit's centre azimuth minus the sun's azimuth at t
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 
 import numpy as np
@@ -20,6 +21,7 @@ from lastlight.g0.contrast import log_chromaticity
 from lastlight.g0.view import sun_azimuths
 from lastlight.geometry import ELEVATION_SWEEP
 from lastlight.render import Atmosphere, sky_xyz
+from lastlight.render import v1 as v1_engine
 from lastlight.renderer_check import render
 from lastlight.renderer_check.observed import UsedFrame
 
@@ -142,6 +144,23 @@ def test_the_third_decimal_of_the_sun_elevation_reaches_the_render(views) -> Non
     b = render.render_evening(DAY, AOD, OZONE, frames(0.4049), views)[0]
     for name in ("v1_bg", "v0_bg", "v1_rg", "v0_rg"):  # they differ by 1e-4 to 8e-4
         assert abs(getattr(a, name) - getattr(b, name)) > 1e-5, name
+
+
+def test_a_pixel_scale_end_outside_the_table_is_none_for_that_end_only(views) -> None:
+    ceiling = v1_engine.DOMAIN["view_elevation_deg"][1]
+    high = dataclasses.replace(views["high"], reference_elevation_deg=ceiling + 5.0)
+    edited = {**views, "high": high}
+    pairs = render.render_evening(DAY, AOD, OZONE, frames(*SUNS), edited)
+    untouched = render.render_evening(DAY, AOD, OZONE, frames(*SUNS), views)
+    assert all(pair.v1_bg_high is None for pair in pairs)
+    for pair, normal in zip(pairs, untouched, strict=True):
+        assert normal.v1_bg_high is not None  # the real high end is inside the table
+        assert np.isfinite(pair.v1_bg) and np.isfinite(pair.v1_bg_low)
+        assert (pair.v1_bg, pair.v1_bg_low, pair.v0_bg) == (
+            normal.v1_bg,
+            normal.v1_bg_low,
+            normal.v0_bg,
+        )
 
 
 def test_pairs_come_in_order_of_falling_sun_elevation_whatever_the_file_order(views) -> None:
