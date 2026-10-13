@@ -459,6 +459,24 @@ def test_a_pending_evening_after_four_counted_leaves_four(rig: Rig) -> None:
     assert verdict_line(rig) == "NOT YET DECIDABLE (4 of 5 counted evenings)"
 
 
+def verdict_section(rig: Rig) -> str:
+    """The text of report.md's Verdict section, up to the next heading."""
+    report = rig.text("report.md")
+    return report.split("## Verdict\n", 1)[1].split("\n## ", 1)[0]
+
+
+def test_four_counted_evenings_are_reported_as_four_of_five_so_far(rig: Rig) -> None:
+    for n in range(4):
+        rig.evening(n, ratio=1.0)
+    code, _, _ = rig.run()
+    assert code == 0
+    section = verdict_section(rig)
+    assert "4 of the 5 counted evenings the verdict needs so far" in section
+    assert "With fewer than 5 the criterion's verdict is not yet decidable" in section
+    assert "The median of their" not in section  # no median is given before the fifth
+    assert verdict_line(rig) == "NOT YET DECIDABLE (4 of 5 counted evenings)"
+
+
 def test_the_report_stage_never_touches_the_network(rig: Rig) -> None:
     rig.evening(0, record=False)
     code, _, _ = rig.run("--stage", "report", transport=NoNetwork())
@@ -830,6 +848,16 @@ def test_only_considered_evenings_are_fetched(rig: Rig) -> None:
     assert code == 0
     assert transport.calls == []
     assert not rig.cache.exists()
+
+
+def test_an_evening_with_exactly_three_used_frames_is_fetched(rig: Rig) -> None:
+    date = day(0)
+    write_observed(rig.observed, date, observed_for_ratio(date, 1.0)[:3])
+    transport = served_run(date, NOW, tcdc=5.0)
+    code, _, err = rig.run("--stage", "fetch", transport=transport)
+    assert code == 0, err
+    assert (rig.cache / "renderer-v1" / "2026-10-10.json").is_file()
+    assert transport.calls  # the archives were asked for the evening
 
 
 def test_a_second_fetch_makes_no_new_request(rig: Rig) -> None:
