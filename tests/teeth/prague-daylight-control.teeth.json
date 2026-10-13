@@ -24,6 +24,8 @@
       "label": "#1 Rayleigh cross-section goes as lambda^-3 instead of lambda^-4 (level at 550 nm kept)",
       "file": "../../src/lastlight/render/atmosphere.py",
       "oracle": "real",
+      "expect": "survived",
+      "why": "A resolution limit of the control, accepted by the conductor, not an unguarded renderer property. The control's tolerances are fixed by issue #34 (0.10 log units on the lowest band's contrast, 0.02 in u'v'), and an exponent of 3 moves that band's log(B/G) by 0.044 and u'v' by 0.002, inside both at every azimuth; only a grey Rayleigh (row 1b) turns the control red. The existing physics tests kill this mutation (tests/test_render_atmosphere.py::test_rayleigh_scattering_falls_roughly_as_wavelength_to_the_minus_four and tests/test_render_physics.py::test_a_very_thin_atmosphere_shows_rayleigh_scattered_sunlight), and the renderer-v1 check (#35) pins v1's output separately. A drift pin on the measured deviations was proposed and declined.",
       "find": "wavelength_cm**4 * _AIR_NUMBER_DENSITY_CM3**2",
       "replace": "wavelength_cm**3 * 5.5e-5 * _AIR_NUMBER_DENSITY_CM3**2"
     },
