@@ -209,7 +209,8 @@ def test_adaptive_stays_within_one_percent_of_registered_up_to_aod_0_1() -> None
             registered = sky_spectrum(atm, sun, view, azimuth)
             adaptive = sky_spectrum(atm, sun, view, azimuth, quadrature="adaptive")
             lit = registered > 0.0
-            worst = max(worst, float(np.abs(adaptive[lit] / registered[lit] - 1.0).max()))
+            if lit.any():
+                worst = max(worst, float(np.abs(adaptive[lit] / registered[lit] - 1.0).max()))
     assert worst < 0.01, worst
 
 
@@ -252,13 +253,16 @@ def test_adaptive_keeps_the_mirror_symmetry_in_relative_azimuth() -> None:
     )
 
 
-def test_adaptive_copes_with_a_level_view_through_a_single_thick_shell() -> None:
-    """A view at 0 degrees runs 25 km inside the lowest 50 m shell: finite, and not wild."""
+@pytest.mark.parametrize("view", [0.0, 0.3, 0.7])
+def test_adaptive_copes_with_views_down_to_the_horizon_and_never_reads_below_registered(
+    view: float,
+) -> None:
+    """A level view runs 25 km inside the lowest 50 m shell: finite, and above registered, which
+    reads that piece (and the ones above it) low by up to two orders of magnitude at aod 1."""
     atm = Atmosphere(aod_550=1.0)
-    level = sky_spectrum(atm, 6.0, 0.0, quadrature="adaptive")
-    registered = sky_spectrum(atm, 6.0, 0.0)
-    assert np.isfinite(level).all() and (level >= 0.0).all()
-    np.testing.assert_allclose(level, registered, rtol=0.5)
+    level = sky_spectrum(atm, 6.0, view, quadrature="adaptive")
+    assert np.isfinite(level).all()
+    assert (level >= sky_spectrum(atm, 6.0, view)).all()
 
 
 # --- the keyword reaches every renderer entry point -------------------------------------

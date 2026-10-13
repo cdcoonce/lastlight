@@ -487,3 +487,18 @@ def test_the_brute_force_comparison_can_tell_the_two_quadratures_apart() -> None
         adaptive = sky_spectrum(atm, sun, view, azimuth, quadrature="adaptive")[_i(450.0)]
         assert registered < (1.0 - minimum) * reference
         assert abs(adaptive / reference - 1.0) < 0.01
+
+
+@pytest.mark.parametrize("view", [0.7, 1.0])
+def test_adaptive_quadrature_also_holds_below_whtm1s_lowest_band(view: float) -> None:
+    """Views the camera never reads, where registered is worse still: aod 1.0, sun +6, 550 nm.
+
+    Registered reads 19 percent low at 0.7 degrees and 9 percent low at 1.0; adaptive is within
+    2 percent of the brute-force sum.
+    """
+    atm = Atmosphere(aod_550=1.0)
+    reference = _reference_radiance(atm, 6.0, view, 0.0, 550.0)
+    registered = sky_spectrum(atm, 6.0, view, 0.0)[_i(550.0)]
+    adaptive = sky_spectrum(atm, 6.0, view, 0.0, quadrature="adaptive")[_i(550.0)]
+    assert adaptive == pytest.approx(reference, rel=0.02)
+    assert registered < 0.92 * reference
