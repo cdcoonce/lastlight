@@ -42,7 +42,7 @@ import numpy as np
 import pytest
 
 from lastlight.g0.collect import build_views
-from lastlight.g0.contrast import log_chromaticity
+from lastlight.g0.contrast import log_chromaticity, rendered_contrasts
 from lastlight.render import Atmosphere
 from lastlight.render.atmosphere import (
     RAYLEIGH_SCALE_HEIGHT_KM,
@@ -54,6 +54,8 @@ from lastlight.render.v1 import multiple_scattering_xyz
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests" / "fixtures" / "prague" / "sun10.json"
+NOTICE = FIXTURE.parent / "NOTICE"
+PROVENANCE = FIXTURE.parent / "PROVENANCE.md"
 TOOL = ROOT / "tools" / "prague_reference.py"
 CACHE = Path.home() / ".cache" / "lastlight" / "prague"
 
@@ -201,6 +203,26 @@ def test_the_tool_computes_the_same_mapping() -> None:
         assert tool.visibility_km(Atmosphere(aod_550=aod)) == pytest.approx(recorded, rel=1e-9)
 
 
+def test_the_notice_and_provenance_name_the_model() -> None:
+    """The licence asks for its notice wherever the model's numbers go; PROVENANCE pins the run."""
+    provenance = fixture()["provenance"]
+    model = provenance["model"]
+    notice = NOTICE.read_text(encoding="utf-8")
+    assert "Prague Sky Model" in notice
+    assert model["copyright"] == "Copyright 2022 Charles University"
+    assert model["copyright"] in notice
+    assert f"SPDX-License-Identifier: {model['licence']}" in notice
+    assert "Licensed under the Apache License, Version 2.0" in notice
+    assert "http://www.apache.org/licenses/LICENSE-2.0" in notice
+    assert model["repository"].removesuffix(".git") in notice
+    commit = model["commit"]
+    digest = provenance["datasets"]["full"]["sha256"]
+    assert len(commit) == 40 and len(digest) == 64  # a blank value would be "in" any text
+    text = PROVENANCE.read_text(encoding="utf-8")
+    assert commit in text
+    assert digest in text
+
+
 # --- the control ------------------------------------------------------------------------------
 
 
@@ -223,6 +245,48 @@ def test_v1_reference_chromaticity_matches_prague(azimuth: float) -> None:
 
 
 # --- the checks can fail ----------------------------------------------------------------------
+
+
+def test_the_tolerances_are_the_issues() -> None:
+    """Issue #34 fixed 0.10 log units and 0.02 in u'v' before any comparison."""
+    assert CONTRAST_TOLERANCE == 0.10
+    assert CHROMATICITY_TOLERANCE == 0.02
+
+
+@pytest.mark.parametrize("azimuth", AZIMUTHS)
+def test_the_contrast_helper_is_g0s_definition(azimuth: float) -> None:
+    """The control's contrast is `rendered_contrasts`': a band minus the reference band."""
+    atm = Atmosphere(aod_550=LOW_AEROSOL)
+    nominal = build_views()["nominal"]
+    xyz = sky_xyz(atm, SUN_ELEVATION, nominal.elevations_deg, azimuth)
+    contrasts, _ = rendered_contrasts(atm, SUN_ELEVATION, nominal, azimuth)
+    assert contrasts.shape == (NOMINAL_VIEWS - 1, 2)
+    assert lowest_band_contrast(xyz) == pytest.approx(contrasts[0], abs=1e-12)
+
+
+def xyz_at_chromaticity(u: float, v: float, luminance: float = 1.0) -> np.ndarray:
+    """XYZ with the given CIE 1976 (u', v') and Y: the inverse of `u_prime_v_prime`."""
+    denominator = 9.0 * luminance / v
+    x = u * denominator / 4.0
+    z = (denominator - x - 15.0 * luminance) / 3.0
+    return np.array([x, luminance, z])
+
+
+def test_the_chromaticity_distance_is_euclidean() -> None:
+    """A 3-4-5 pair: the Euclidean distance is 0.005, the largest axis difference only 0.004."""
+    here = xyz_at_chromaticity(0.200, 0.460)
+    there = xyz_at_chromaticity(0.203, 0.464)
+    assert u_prime_v_prime(here) == pytest.approx([0.200, 0.460], abs=1e-12)
+    assert u_prime_v_prime(there) == pytest.approx([0.203, 0.464], abs=1e-12)
+
+    def views(reference: np.ndarray) -> np.ndarray:
+        """Nominal views whose reference elevation alone has the colour `reference`."""
+        rows = np.tile(xyz_at_chromaticity(0.300, 0.300), (NOMINAL_VIEWS, 1))
+        rows[NOMINAL_VIEWS - 1] = reference
+        return rows
+
+    assert chromaticity_distance(views(here), views(there)) == pytest.approx(0.005, abs=1e-9)
+    assert chromaticity_distance(views(there), views(here)) == pytest.approx(0.005, abs=1e-9)
 
 
 def test_the_chromaticity_helper_reproduces_a_known_white() -> None:
