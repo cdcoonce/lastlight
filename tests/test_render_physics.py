@@ -393,3 +393,97 @@ def test_aerosol_brightens_the_sky_toward_the_sun_the_aureole() -> None:
     toward = sky_spectrum(atm, 20.0, 10.0, rel_azimuth_deg=0.0).sum()
     away = sky_spectrum(atm, 20.0, 10.0, rel_azimuth_deg=180.0).sum()
     assert toward > 2.0 * away
+
+
+# --- heavy aerosol: the adaptive quadrature against the same brute-force sum ----------------
+#
+# Issue #40. The registered integration cuts the sightline at the shell boundaries and samples
+# each piece once, in its middle. Where a piece is optically thick (a low view through heavy
+# aerosol, in the 50 m shells that are 1.9 km long at 1.5 degrees) the light it carries falls by
+# a factor of several across the piece, and one sample reads it low. The "adaptive" quadrature
+# cuts those pieces thinner. The registered one is not touched, so its pins stay valid.
+
+WHTM1_LOWEST_BAND = 1.5066301585401483  # the frozen fit's bands, at its nominal pixel scale
+WHTM1_MIDDLE_BAND = 2.4112668856434167
+WHTM1_REFERENCE_BAND = 3.9943811580741357
+
+
+def _adaptive_sweep(
+    aod: float,
+) -> list[tuple[float, float, float, tuple[float, ...]]]:
+    """(sun, view, azimuth, wavelengths) of the geometries swept at each aerosol load.
+
+    Every sun elevation, both azimuths and all three wavelengths at the lowest band where the
+    registered integration is worst, plus the middle band and the reference band at the two
+    suns that separate the effects (+6, the thick low sightline; -3, the shadow edge). The
+    full grid of the issue (six elevations, 900 brute-force sums) takes minutes; this is 30
+    sums per load.
+    """
+    all_three = (450.0, 550.0, 650.0)
+    ends = (450.0, 650.0)
+    sweep: list[tuple[float, float, float, tuple[float, ...]]] = []
+    for sun in (6.0, 0.0, -3.0):
+        for azimuth in (0.0, 30.0):
+            sweep.append((sun, WHTM1_LOWEST_BAND, azimuth, all_three))
+    for sun in (3.0, -6.0):
+        sweep.append((sun, WHTM1_LOWEST_BAND, 30.0, ends))
+    for sun in (6.0, -3.0):
+        sweep.append((sun, WHTM1_MIDDLE_BAND, 0.0, ends))
+        sweep.append((sun, WHTM1_REFERENCE_BAND, 30.0, ends))
+    return sweep
+
+
+@pytest.mark.parametrize("aod", [0.03, 0.1, 0.3, 0.5, 1.0])
+def test_adaptive_quadrature_agrees_with_brute_force_at_whtm1_bands_for_every_aerosol_load(
+    aod: float,
+) -> None:
+    """Within 2 percent of the brute-force sum at WHTM1's band elevations, aod 0.03 to 1.0.
+
+    Registered reads 5.8 percent low at aod 1.0 (sun +6, 30 degrees round, 1.5 degrees, 450 nm);
+    adaptive is within 2 percent everywhere here (the worst is 1.8 percent *high*, at the shadow
+    edge: a different effect, from the shells' mean densities along the sunward path).
+    """
+    atm = Atmosphere(aod_550=aod)
+    for sun, view, azimuth, wavelengths in _adaptive_sweep(aod):
+        model = sky_spectrum(atm, sun, view, azimuth, quadrature="adaptive")
+        for wavelength in wavelengths:
+            reference = _reference_radiance(atm, sun, view, azimuth, wavelength)
+            assert model[_i(wavelength)] == pytest.approx(reference, rel=0.02), (
+                f"aod {aod}, {wavelength} nm at sun {sun}, view {view}, azimuth {azimuth}"
+            )
+
+
+@pytest.mark.parametrize(
+    ("sun", "azimuth"),
+    [(10.0, 0.0), (6.0, 0.0), (6.0, 30.0), (3.0, 0.0), (0.0, 30.0), (-3.0, 0.0), (-6.0, 30.0)],
+)
+def test_adaptive_quadrature_agrees_with_brute_force_for_the_thin_aerosol_layer(
+    sun: float, azimuth: float
+) -> None:
+    """Aerosol scale height 0.6 km, aod 0.6 (`UNLIKE`) at a 1.5 degree view: registered is
+    6 to 11 percent low at sun +6 to +10, adaptive within 2 percent everywhere."""
+    model = sky_spectrum(UNLIKE, sun, 1.5, azimuth, quadrature="adaptive")
+    for wavelength in (450.0, 550.0, 650.0):
+        reference = _reference_radiance(UNLIKE, sun, 1.5, azimuth, wavelength)
+        assert model[_i(wavelength)] == pytest.approx(reference, rel=0.02), (
+            f"{wavelength} nm at sun {sun}, view 1.5, azimuth {azimuth}"
+        )
+
+
+def test_the_brute_force_comparison_can_tell_the_two_quadratures_apart() -> None:
+    """Positive control: where registered is known to be low, the comparison sees it.
+
+    Without this the sweep above could pass for any quadrature that happens to track the
+    brute-force sum; here registered must fail the 2 percent bound it holds adaptive to.
+    """
+    heavy = Atmosphere(aod_550=1.0)
+    for atm, sun, view, azimuth, minimum in (
+        (heavy, 6.0, WHTM1_LOWEST_BAND, 30.0, 0.05),
+        (UNLIKE, 10.0, 1.5, 0.0, 0.10),
+        (UNLIKE, 6.0, WHTM1_LOWEST_BAND, 30.0, 0.08),
+    ):
+        reference = _reference_radiance(atm, sun, view, azimuth, 450.0)
+        registered = sky_spectrum(atm, sun, view, azimuth)[_i(450.0)]
+        adaptive = sky_spectrum(atm, sun, view, azimuth, quadrature="adaptive")[_i(450.0)]
+        assert registered < (1.0 - minimum) * reference
+        assert abs(adaptive / reference - 1.0) < 0.01
