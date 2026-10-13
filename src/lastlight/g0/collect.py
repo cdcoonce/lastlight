@@ -21,6 +21,10 @@ fault is not a reason: it is raised as `TransientError`, nothing is written, and
 tries the date again. `collect_range` writes each record as soon as it exists, so a run can stop
 and resume (or be split in chunks, or stop itself at a time budget) without losing or repeating
 work.
+
+The v1 re-run (`render_v1`, `rerender_range`) does not touch an archive: a record the v0 run
+wrote already holds the atmosphere its date was rendered from, so the date is re-rendered from
+that with renderer v1, through the same seams, into a sibling store.
 """
 
 from __future__ import annotations
@@ -28,7 +32,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -51,7 +55,8 @@ from lastlight.g0.view import SkyView, pixel_scales, relative_azimuth, sky_view,
 from lastlight.inputs import gefs, hrrr
 from lastlight.inputs.http import FetchError, Transport
 from lastlight.observe.bands import validate_contrast
-from lastlight.render import render_curve
+from lastlight.render import Atmosphere, render_curve
+from lastlight.render import v1 as v1_engine
 from lastlight.site import REFERENCE_POINT
 
 HRRR_FIELD_NAMES: Final = ("LCDC", "AOTK", "PWAT")
@@ -309,3 +314,122 @@ def collect_range(
     return CollectSummary(
         collected, dropped, skipped, len(unrecorded), tuple(unrecorded), (), False
     )
+
+
+# --- the re-run with renderer v1 --------------------------------------------------------------
+
+
+def render_v1(record: DateRecord, views: Mapping[str, SkyView]) -> DateRecord:
+    """The record of the same date rendered with renderer v1 from the v0 record's atmosphere.
+
+    The atmosphere is rebuilt as `reduce_transect` builds it: `aod_550` is the record's
+    `aod_total`, `ozone_du` its ozone, every other field of `Atmosphere` at its default. A dropped
+    v0 record stays dropped with the same reason and detail. An atmosphere outside the table v1
+    reads is dropped with the reason `v1_outside_table`, never clamped.
+    """
+    if record.atmosphere is None:
+        return DateRecord(
+            date=record.date,
+            drop_reason=record.drop_reason,
+            drop_detail=record.drop_detail,
+            atmosphere=None,
+            contrast={},
+            floor_channels={},
+            curve_lab=None,
+            inputs=dict(record.inputs),
+        )
+    atmosphere = Atmosphere(
+        aod_550=record.atmosphere.aod_total, ozone_du=record.atmosphere.ozone_du
+    )
+    try:
+        for view in views.values():
+            v1_engine.check_domain(atmosphere, geometry.ELEVATION_SWEEP[0], view.elevations_deg)
+    except ValueError as error:
+        return DateRecord(
+            date=record.date,
+            drop_reason="v1_outside_table",
+            drop_detail=_clean(str(error)),
+            atmosphere=None,
+            contrast={},
+            floor_channels={},
+            curve_lab=None,
+            inputs=dict(record.inputs),
+        )
+    lat, lon, _ = REFERENCE_POINT
+    azimuths = tuple(
+        relative_azimuth(views["nominal"].azimuth_deg, sun)
+        for sun in sun_azimuths(record.date, lat, lon)
+    )
+    contrast: dict[str, np.ndarray] = {}
+    floored: dict[str, int] = {}
+    for name in RENDER_SCALES:
+        contrast[name], floored[name] = day_contrasts(
+            atmosphere, views[name], azimuths, engine="v1"
+        )
+    lab = np.array(
+        [[row["L"], row["a"], row["b"]] for row in render_curve(atmosphere, engine="v1")]
+    )
+    return DateRecord(
+        date=record.date,
+        drop_reason=None,
+        drop_detail="",
+        atmosphere=record.atmosphere,
+        contrast=contrast,
+        floor_channels=floored,
+        curve_lab=lab.reshape(len(geometry.ELEVATION_SWEEP), -1, 3),
+        inputs={**record.inputs, "engine": "v1"},
+    )
+
+
+def rerender_range(
+    days: Iterable[dt.date],
+    source: RecordStore,
+    target: RecordStore,
+    views: Mapping[str, SkyView],
+    *,
+    progress: Callable[[str], None] | None = None,
+    budget_seconds: float | None = None,
+    clock: Callable[[], float] = time.monotonic,
+    refresh: bool = False,
+) -> CollectSummary:
+    """Re-render each date of `source` (the v0 records) with v1 into `target`, resumably.
+
+    A date already in `target` is skipped (unless `refresh`); a date with no record in `source`
+    cannot be re-rendered and is listed in `unrecorded`. `collected` counts dates rendered,
+    `dropped` dropped records carried over (or newly outside the table). No archive is read.
+    With `budget_seconds`, the run stops between dates once that much time has passed.
+    """
+    report = progress or (lambda line: None)
+    todo = list(days)
+    started = clock()
+    rendered = dropped = skipped = 0
+    unrecorded: list[dt.date] = []
+    for position, day in enumerate(todo):
+        if budget_seconds is not None and clock() - started >= budget_seconds:
+            return CollectSummary(
+                rendered,
+                dropped,
+                skipped,
+                len(unrecorded),
+                tuple(unrecorded),
+                tuple(d for d in todo[position:] if d not in target.dates()),
+                True,
+            )
+        if not refresh and target.path(day).is_file():
+            skipped += 1
+            report(f"{day.isoformat()} skipped (already re-rendered)")
+            continue
+        original = source.load(day)
+        if original is None:
+            unrecorded.append(day)
+            report(f"{day.isoformat()} has no v0 record, so there is nothing to re-render")
+            continue
+        record = render_v1(original, views)
+        target.save(record)
+        if record.ok:
+            rendered += 1
+            report(f"{day.isoformat()} re-rendered with v1")
+        else:
+            dropped += 1
+            report(f"{day.isoformat()} dropped: {record.drop_reason}")
+    return CollectSummary(rendered, dropped, skipped, len(unrecorded), tuple(unrecorded), (), False)

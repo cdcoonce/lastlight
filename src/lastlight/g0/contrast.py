@@ -49,23 +49,34 @@ def log_chromaticity(xyz: np.ndarray) -> tuple[np.ndarray, int]:
 
 
 def rendered_contrasts(
-    atm: Atmosphere, sun_elevation_deg: float, view: SkyView, rel_azimuth_deg: float
+    atm: Atmosphere,
+    sun_elevation_deg: float,
+    view: SkyView,
+    rel_azimuth_deg: float,
+    *,
+    engine: str = "v0",
 ) -> tuple[np.ndarray, int]:
     """The contrast of each band at one sun elevation: shape (bands, 2), and channels floored.
 
-    `rel_azimuth_deg` is the camera's azimuth minus the sun's at this sun elevation.
+    `rel_azimuth_deg` is the camera's azimuth minus the sun's at this sun elevation. `engine` is
+    the renderer, "v0" (the default, what G0 was run with) or "v1".
     """
-    xyz = sky_xyz(atm, sun_elevation_deg, view.elevations_deg, rel_azimuth_deg)
+    xyz = sky_xyz(atm, sun_elevation_deg, view.elevations_deg, rel_azimuth_deg, engine=engine)
     logs, floored = log_chromaticity(xyz)
     return logs[:-1] - logs[-1], floored
 
 
 def day_contrasts(
-    atm: Atmosphere, view: SkyView, rel_azimuths_deg: tuple[float, ...]
+    atm: Atmosphere,
+    view: SkyView,
+    rel_azimuths_deg: tuple[float, ...],
+    *,
+    engine: str = "v0",
 ) -> tuple[np.ndarray, int]:
     """One evening's contrasts at every sweep elevation: shape (29, bands, 2), channels floored.
 
     `rel_azimuths_deg` holds the camera's azimuth minus the sun's at each sweep elevation.
+    `engine` is as for `rendered_contrasts`.
     """
     if len(rel_azimuths_deg) != len(ELEVATION_SWEEP):
         raise ValueError(
@@ -75,7 +86,7 @@ def day_contrasts(
     rows = []
     floored = 0
     for elevation, azimuth in zip(ELEVATION_SWEEP, rel_azimuths_deg, strict=True):
-        contrast, count = rendered_contrasts(atm, elevation, view, azimuth)
+        contrast, count = rendered_contrasts(atm, elevation, view, azimuth, engine=engine)
         rows.append(contrast)
         floored += count
     return np.stack(rows), floored

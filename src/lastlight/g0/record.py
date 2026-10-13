@@ -36,6 +36,7 @@ DROP_REASONS: Final[dict[str, str]] = {
     "aerosol_run_missing": "The GEFS-Aerosols run for this evening is not in the archive.",
     "aerosol_unreadable": "The GEFS-Aerosols messages for this evening could not be read.",
     "not_collected": "No record exists for this date: it has not been collected.",
+    "v1_outside_table": "The date's atmosphere is outside the table renderer v1 reads.",
 }
 """Why a date may be left out, with the sentence the report prints. Codes are stable."""
 
