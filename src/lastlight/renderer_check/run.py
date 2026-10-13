@@ -83,10 +83,11 @@ def run_check(
                     f"{summary.skipped} skipped, {len(summary.pending)} pending, "
                     f"{len(summary.faults)} faults"
                 )
-            if any(store.load(day) is None for day in considered):
-                waiting = ", ".join(d.isoformat() for d in considered if store.load(d) is None)
+            missing = [day for day in considered if store.load(day) is None]
+            if missing and not writes_report:  # the report stage says it for itself
                 print(
-                    f"{PROG}: no input record yet for {waiting}: a network fault or an HRRR "
+                    f"{PROG}: no input record yet for "
+                    f"{', '.join(day.isoformat() for day in missing)}: a network fault or an HRRR "
                     "analysis not published yet; run again later to collect it",
                     file=sys.stderr,
                 )
@@ -99,7 +100,11 @@ def run_check(
             print(f"wrote the report, evenings and frames to {out_dir}")
             if evaluation.pending:
                 waiting = ", ".join(r.date.isoformat() for r in evaluation.pending)
-                print(f"{PROG}: no input record yet for {waiting}", file=sys.stderr)
+                print(
+                    f"{PROG}: no input record yet for {waiting}: a network fault or an HRRR "
+                    "analysis not published yet; run again later to collect it",
+                    file=sys.stderr,
+                )
                 code = 1
     except InputRecordError as error:
         return _error(str(error))
