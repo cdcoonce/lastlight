@@ -448,7 +448,7 @@ def test_adaptive_quadrature_agrees_with_brute_force_at_whtm1_bands_for_every_ae
         model = sky_spectrum(atm, sun, view, azimuth, quadrature="adaptive")
         for wavelength in wavelengths:
             reference = _reference_radiance(atm, sun, view, azimuth, wavelength)
-            assert model[_i(wavelength)] == pytest.approx(reference, rel=0.02), (
+            assert model[_i(wavelength)] == pytest.approx(reference, rel=0.02, abs=0.0), (
                 f"aod {aod}, {wavelength} nm at sun {sun}, view {view}, azimuth {azimuth}"
             )
 
@@ -465,7 +465,7 @@ def test_adaptive_quadrature_agrees_with_brute_force_for_the_thin_aerosol_layer(
     model = sky_spectrum(UNLIKE, sun, 1.5, azimuth, quadrature="adaptive")
     for wavelength in (450.0, 550.0, 650.0):
         reference = _reference_radiance(UNLIKE, sun, 1.5, azimuth, wavelength)
-        assert model[_i(wavelength)] == pytest.approx(reference, rel=0.02), (
+        assert model[_i(wavelength)] == pytest.approx(reference, rel=0.02, abs=0.0), (
             f"{wavelength} nm at sun {sun}, view 1.5, azimuth {azimuth}"
         )
 
@@ -500,5 +500,19 @@ def test_adaptive_quadrature_also_holds_below_whtm1s_lowest_band(view: float) ->
     reference = _reference_radiance(atm, 6.0, view, 0.0, 550.0)
     registered = sky_spectrum(atm, 6.0, view, 0.0)[_i(550.0)]
     adaptive = sky_spectrum(atm, 6.0, view, 0.0, quadrature="adaptive")[_i(550.0)]
-    assert adaptive == pytest.approx(reference, rel=0.02)
+    assert adaptive == pytest.approx(reference, rel=0.02, abs=0.0)
     assert registered < 0.92 * reference
+
+
+@pytest.mark.parametrize("view", [0.1, 0.3])
+def test_adaptive_holds_at_grazing_views_at_aod_1(view: float) -> None:
+    """Views the camera never reads, nearly level: the 128-part cap per shell must be enough.
+
+    Aod 1.0, sun +6, azimuth 0, 550 nm. As built adaptive is within 0.1 percent of the brute-force
+    sum at both views (-0.09 and -0.06 percent); with the cap lowered to 8 parts it would read
+    14.2 percent low at 0.1 degrees and 2.1 percent low at 0.3. Graded to 0.5 percent.
+    """
+    atm = Atmosphere(aod_550=1.0)
+    reference = _reference_radiance(atm, 6.0, view, 0.0, 550.0)
+    adaptive = sky_spectrum(atm, 6.0, view, 0.0, quadrature="adaptive")[_i(550.0)]
+    assert adaptive == pytest.approx(reference, rel=0.005, abs=0.0)
