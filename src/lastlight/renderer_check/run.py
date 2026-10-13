@@ -5,10 +5,11 @@
             `frames.csv` (no network at all)
     all     both (the default)
 
-Exit codes: 0 done; 1 done, but a considered evening has no input record yet (a network fault, or
-an HRRR analysis not published yet; the report is still written and lists it); 2 usage or input
-error; 3 refusal (the registered renderer is not the one in this checkout): nothing is written to
-`--out`, and in the `all` stage nothing is fetched either.
+Exit codes: 0 done; 1 done, but a considered evening has no input record yet (a network fault, an
+HRRR analysis not published yet, or a run still missing from an archive within two days of the
+evening; the report is still written and lists it); 2 usage or input error; 3 refusal (the
+registered renderer is not the one in this checkout): nothing is written to `--out`, and in the
+`all` stage nothing is fetched either.
 """
 
 from __future__ import annotations

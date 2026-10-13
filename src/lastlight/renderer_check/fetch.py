@@ -16,6 +16,12 @@ Criterion definitions 4 and 7. For one evening:
 
 Requests go through whatever transport the caller gives (the command passes G0's polite one).
 A network fault is raised as `TransientError`, nothing is written, and the next run tries again.
+
+A run missing from an archive (`hrrr_run_missing`, `aerosol_run_missing`) may only be a
+publication lag while the evening is recent, so while its retry window is open the evening gets no
+record at all: it is pending, exactly like an analysis not published yet. Only the fetch stage
+knows the clock; the report stage sees final records or none, and its pending rule then holds the
+first-5 slots of the later evenings, so a verdict is never given and then changed by a retry.
 """
 
 from __future__ import annotations
@@ -46,8 +52,9 @@ TRANSECT_POINTS: Final = len(hrrr.TRANSECT_DISTANCES_KM)
 RETRIED_REASONS: Final = frozenset({"hrrr_run_missing", "aerosol_run_missing"})
 RETRY_WINDOW_DAYS: Final = 2
 """A run missing from an archive is a fact about an old evening but may only be a publication lag
-for a recent one (GEFS-Aerosols' cycle at the sunset can be published hours after the evening), so
-such a record is tried again until the evening is two calendar days old, and kept after that."""
+for a recent one (GEFS-Aerosols' cycle at the sunset can be published hours after the evening). So
+until the evening is two calendar days old no record of it is kept (`fetch_range`), and from then
+on the drop is stored and final."""
 
 _TCDC: Final = "TCDC"
 _FIELD_MISSING: Final = "expected exactly one idx message"
@@ -176,8 +183,17 @@ class _Fetches(Protocol):
     def fetch(self, evening: dt.date) -> EveningInputs | None: ...
 
 
+def retry_window_open(evening: dt.date, now_utc: dt.datetime) -> bool:
+    """True while `evening` is less than `RETRY_WINDOW_DAYS` calendar days old at `now_utc`."""
+    return (now_utc.date() - evening).days < RETRY_WINDOW_DAYS
+
+
 def needs_fetch(store: InputStore, evening: dt.date, now_utc: dt.datetime) -> bool:
-    """True when the evening has no record, or a missing-run one still inside its retry window."""
+    """True when the evening has no record, or a missing-run one still inside its retry window.
+
+    `fetch_range` no longer stores a missing-run drop while its window is open, so the second case
+    is only a record left by an earlier version of the check.
+    """
     record = store.load(evening)
     if record is None:
         return True
@@ -187,7 +203,8 @@ def needs_fetch(store: InputStore, evening: dt.date, now_utc: dt.datetime) -> bo
 
 @dataclass(frozen=True)
 class FetchSummary:
-    """What a run did. `pending` evenings are not published yet, `faults` had a network fault."""
+    """What a run did. `pending` evenings are not published yet (no record is kept), `faults` had a
+    network fault."""
 
     recorded: int
     dropped: int
@@ -204,7 +221,11 @@ def fetch_range(
     now_utc: dt.datetime,
     progress: Callable[[str], None] | None = None,
 ) -> FetchSummary:
-    """Fetch each evening that needs it, saving every record as soon as it exists."""
+    """Fetch each evening that needs it, saving every final record as soon as it exists.
+
+    An evening with no answer yet (its analysis is not published, or a run is missing from an
+    archive while the retry window is open) is `pending` and keeps no record.
+    """
     report = progress or (lambda line: None)
     recorded = dropped = skipped = 0
     pending: list[dt.date] = []
@@ -223,6 +244,10 @@ def fetch_range(
         if record is None:
             pending.append(day)
             report(f"{day.isoformat()} pending: the analysis is not published yet")
+            continue
+        if record.drop_reason in RETRIED_REASONS and retry_window_open(day, now_utc):
+            pending.append(day)
+            report(f"{day.isoformat()} pending: a run is not in the archive yet, no record kept")
             continue
         store.save(record)
         if record.ok:
@@ -246,4 +271,5 @@ __all__ = [
     "cloud_percent",
     "fetch_range",
     "needs_fetch",
+    "retry_window_open",
 ]

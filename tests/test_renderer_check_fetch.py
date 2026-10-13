@@ -383,8 +383,15 @@ def test_other_drop_reasons_are_never_retried(tmp_path) -> None:
 # evening is less than two calendar days old: the evening is pending, as if its analysis were not
 # published yet. Only the fetch stage knows the clock; the report stage sees final records or none.
 
-RETRIED = sorted(fetch.RETRIED_REASONS)
-FINAL_AT_ONCE = sorted(set(store.INPUT_DROP_REASONS) - fetch.RETRIED_REASONS)
+RETRIED = ["aerosol_run_missing", "hrrr_run_missing"]
+FINAL_AT_ONCE = [
+    "aerosol_unreadable",
+    "hrrr_field_empty",
+    "hrrr_field_missing",
+    "hrrr_unreadable",
+    "tcdc_missing",
+    "v1_outside_table",
+]
 
 
 def late_on(evening: dt.date, days_after: int) -> dt.datetime:
@@ -394,6 +401,11 @@ def late_on(evening: dt.date, days_after: int) -> dt.datetime:
 
 def not_in_the_archive(day: dt.date, reason: str) -> store.EveningInputs:
     return store.EveningInputs.dropped(day, reason, "not in the archive")
+
+
+def test_the_two_lists_above_are_every_reason_an_evening_can_be_dropped_for() -> None:
+    assert sorted(RETRIED + FINAL_AT_ONCE) == sorted(store.INPUT_DROP_REASONS)
+    assert sorted(RETRIED) == sorted(fetch.RETRIED_REASONS)
 
 
 @pytest.mark.parametrize("age", [0, 1])
