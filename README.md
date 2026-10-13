@@ -56,6 +56,8 @@ The G0 gate (issue #10) asks whether the rendered curve varies enough from day t
 ```sh
 uv run lastlight g0 --start 2025-10-01 --end 2025-10-31 --out docs/gates/G0 --stage fetch   # resumable; one chunk per month
 uv run lastlight g0 --start 2025-10-01 --end 2026-09-30 --out docs/gates/G0 --stage report  # reads only the cache
+uv run lastlight g0 --engine v1 --start 2025-10-01 --end 2026-09-30 --out docs/gates/G0/v1   # re-render the cached year with renderer v1, no network
+uv run lastlight renderer-check --observed-dir ~/.workshop/lastlight/observed/WHTM1 --out docs/gates/renderer-v1   # the pre-registered camera magnitude check for renderer v1
 ```
 
 The cache is `~/.cache/lastlight` (about a gigabyte for a year); a rerun skips every date that is already there.
