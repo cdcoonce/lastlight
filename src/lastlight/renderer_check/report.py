@@ -216,10 +216,17 @@ def _verdict_section(evaluation: Evaluation) -> str:
             "are reported beside it and never change it."
         )
     else:
-        head = (
+        so_far = (
             f"{len(slots)} of the {rules.COUNTED_NEEDED} counted evenings the verdict needs so "
-            f"far: {dates}. With fewer than {rules.COUNTED_NEEDED} the criterion's verdict is "
-            "not yet decidable and v0 keeps painting."
+            f"far: {dates}."
+            if slots
+            else f"No evening is counted yet, and the verdict needs {rules.COUNTED_NEEDED} (an "
+            "evening is counted when its mean cloud cover along the sightline is at most "
+            f"{rules.CLOUD_LIMIT_PCT:g} percent)."
+        )
+        head = (
+            f"{so_far} With fewer than {rules.COUNTED_NEEDED} the criterion's verdict is not yet "
+            "decidable and v0 keeps painting."
         )
     pending = evaluation.pending
     if pending:

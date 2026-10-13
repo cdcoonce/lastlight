@@ -103,8 +103,8 @@ def samples_with(values) -> list[hrrr.TransectSample]:
         hrrr.TransectSample(
             point_index=i,
             field="TCDC",
-            lat=33.0,
-            lon=-112.0,
+            lat=40.0,
+            lon=-100.0,
             value=v,
             units="%",
             method="nearest-cell",
