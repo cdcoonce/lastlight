@@ -12,7 +12,9 @@ callers ask for it. The accuracy of adaptive against the brute-force sum is in
 
 from __future__ import annotations
 
+import dataclasses
 import inspect
+import math
 import time
 from pathlib import Path
 from typing import Any
@@ -20,10 +22,14 @@ from typing import Any
 import daily_support as support
 import numpy as np
 import pytest
+from g0_support import EVENING, NOW, combined_transport
 
 import lastlight.painting
 import lastlight.render
 from lastlight.daily import seal_daily
+from lastlight.g0 import collect as g0_collect
+from lastlight.g0 import contrast as g0_contrast
+from lastlight.g0.view import SkyView
 from lastlight.painting import paint
 from lastlight.render import (
     VIEW_ELEVATIONS,
@@ -35,6 +41,8 @@ from lastlight.render import (
     sky_xyz,
 )
 from lastlight.render import __all__ as render_exports
+from lastlight.render.atmosphere import LEVELS_KM, layer_optics
+from lastlight.render.transfer import _sightline_cuts
 
 # WHTM1's lowest band and its reference band, at the frozen fit's nominal pixel scale.
 LOWEST_BAND = 1.5066301585401483
@@ -265,6 +273,102 @@ def test_adaptive_copes_with_views_down_to_the_horizon_and_never_reads_below_reg
     assert (level >= sky_spectrum(atm, 6.0, view)).all()
 
 
+# --- the refinement itself: where it starts, how finely it cuts, how far it can jump -------
+
+
+def _cuts(aod: float, view_deg: float) -> tuple[np.ndarray, np.ndarray]:
+    """`_sightline_cuts` under the adaptive quadrature for the default aerosol shape."""
+    extinction = layer_optics(Atmosphere(aod_550=aod)).extinction
+    return _sightline_cuts(extinction, math.sin(math.radians(view_deg)), "adaptive")
+
+
+def test_adaptive_refines_when_only_the_blue_pieces_are_thick() -> None:
+    """The trigger reads the thickest wavelength, not the thinnest or the green.
+
+    At aod 0.1 and WHTM1's lowest band the thickest piece has an optical depth of 0.75 (at the
+    blue end), over the trigger of 0.7; at 550 nm it is 0.43 and at the thinnest wavelength lower
+    still. A trigger that read anything but the thickest wavelength would leave this sky exactly
+    registered. The move is small (0.03 percent at most), which is why it is only checked to
+    differ.
+    """
+    atm = Atmosphere(aod_550=0.1)
+    registered = sky_spectrum(atm, 3.0, LOWEST_BAND, 0.0)
+    adaptive = sky_spectrum(atm, 3.0, LOWEST_BAND, 0.0, quadrature="adaptive")
+    assert not np.array_equal(adaptive, registered)
+
+
+def test_refined_cuts_tile_each_shell_in_equal_parts() -> None:
+    """At aod 1.0 and WHTM1's lowest band every shell is cut, from its floor, in equal parts."""
+    heights, shell = _cuts(1.0, LOWEST_BAND)
+    shells = len(LEVELS_KM) - 1
+    assert shell.size > shells  # refined: more pieces than shells
+    assert heights.size == shell.size + 1
+    assert heights[0] == LEVELS_KM[0]
+    assert heights[-1] == LEVELS_KM[-1]
+    assert (np.diff(heights) > 0.0).all()
+    assert np.isin(LEVELS_KM, heights).all()  # every shell boundary is still a cut
+    pieces = np.diff(heights)
+    for index in range(shells):
+        in_shell = pieces[shell == index]
+        assert in_shell.size >= 1, index
+        expected = (LEVELS_KM[index + 1] - LEVELS_KM[index]) / in_shell.size
+        np.testing.assert_allclose(in_shell, expected, rtol=1e-9, err_msg=f"shell {index}")
+
+
+def test_the_subdivision_is_bounded_at_an_absurd_load() -> None:
+    """Aod 1000 at 1.5 degrees would need about 500,000 pieces uncapped; the cap holds it to 5,625.
+
+    No shell is cut into more than 128 parts (the literal, not the constant: a test that read the
+    constant would follow it when the cap is removed), the lowest shell needs all 128, and the
+    spectrum is still finite.
+    """
+    atm = Atmosphere(aod_550=1000.0)
+    _, shell = _cuts(1000.0, 1.5)
+    assert np.bincount(shell).max() == 128
+    assert shell.size <= (len(LEVELS_KM) - 1) * 128
+    spectrum = sky_spectrum(atm, 6.0, 1.5, 0.0, quadrature="adaptive")
+    assert np.isfinite(spectrum).all() and (spectrum >= 0.0).all()
+
+
+def _aods_either_side_of_the_trigger(view_deg: float) -> tuple[float, float]:
+    """The aod just under and just over the one where adaptive starts refining this view."""
+    under, over = 0.001, 20.0
+    assert len(_cuts(under, view_deg)[1]) == len(LEVELS_KM) - 1
+    assert len(_cuts(over, view_deg)[1]) > len(LEVELS_KM) - 1
+    for _ in range(50):
+        middle = 0.5 * (under + over)
+        if len(_cuts(middle, view_deg)[1]) > len(LEVELS_KM) - 1:
+            over = middle
+        else:
+            under = middle
+    return under, over
+
+
+@pytest.mark.parametrize("view", [2.0, 3.0, 5.0, 10.0])
+def test_the_jump_across_the_adaptive_trigger_stays_under_five_percent_in_luminance(
+    view: float,
+) -> None:
+    """Two atmospheres either side of the trigger differ by the registered error, no more.
+
+    Just under the trigger adaptive is the registered result; just over, it is refined, and the
+    sky moves by the error of the registered quadrature at that load (mostly the lit edge of
+    Earth's shadow falling inside one piece). For the default aerosol shape luminance moves by at
+    most 4.4 percent (10 degrees, sun -1.0), 2.1 at 3 degrees (sun -1.5) and 0.8 to 1.1 at 2 and
+    5 degrees, and the painting's rows by up to 1.6 dE76; `ADAPTIVE_TRIGGER_DEPTH` documents it.
+    This holds that number to 5 percent. It is a bound on the documented jump, not a detector of
+    the trigger's value (the accuracy tests are that): a trigger of 1.5 or 2.0 breaks it at 10
+    degrees (5.6 and 5.1 percent), one of 3.5 does not.
+    """
+    under, over = _aods_either_side_of_the_trigger(view)
+    for sun in (6.0, 3.0, 0.0, -1.0, -1.5, -2.0, -3.0):
+        before, after = (
+            sky_xyz(Atmosphere(aod_550=aod), sun, [view], 0.0, quadrature="adaptive")[0, 1]
+            for aod in (under, over)
+        )
+        assert before > 0.0, sun
+        assert abs(after / before - 1.0) < 0.05, f"sun {sun}: {after / before - 1.0:+.4f}"
+
+
 # --- the keyword reaches every renderer entry point -------------------------------------
 
 
@@ -304,6 +408,22 @@ def test_render_row_and_render_curve_pass_the_quadrature_down() -> None:
         atm, 5.0, quadrature="adaptive"
     )
     assert len(curve) == 29 * len(VIEW_ELEVATIONS)
+
+
+def test_v1_forwards_the_quadrature_through_render_row_and_render_curve() -> None:
+    """Renderer v1's single-scattering part follows the keyword at every level of the call.
+
+    At aod 1.0 adaptive moves 65 of the 203 rows of v1's curve (by up to 0.16 dE76), so the
+    keyword can be seen through `render_row` and `render_curve` for v1 as for v0.
+    """
+    atm = Atmosphere(aod_550=1.0, ozone_du=300.0)
+    row = render_row(atm, 5.0, 30.0, engine="v1", quadrature="adaptive")
+    assert row != render_row(atm, 5.0, 30.0, engine="v1")
+    curve = render_curve(atm, engine="v1", quadrature="adaptive")
+    assert curve != render_curve(atm, engine="v1")
+    assert [r for r in curve if r["sun_elevation"] == 5.0] == render_row(
+        atm, 5.0, engine="v1", quadrature="adaptive"
+    )
 
 
 def test_adaptive_curve_for_a_heavy_aerosol_day_renders_in_under_ten_seconds() -> None:
@@ -374,3 +494,61 @@ def test_paint_asks_for_adaptive_by_default_and_the_registered_one_for_v1(
         {"engine": "v0", "quadrature": "adaptive"},
         {"engine": "v1", "quadrature": "registered"},
     ]
+
+
+def _quadratures_asked_for(calls: list[dict[str, Any]]) -> set[str]:
+    """The quadrature each recorded call asked for; none given is the default, registered."""
+    return {call.get("quadrature", "registered") for call in calls}
+
+
+def test_g0_stays_on_the_registered_quadrature(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """G0 is registered with the registered integration: at aod 1.0, where adaptive differs, its
+    contrast and its collector's curve still ask for it (by not naming a quadrature)."""
+    xyz_calls: list[dict[str, Any]] = []
+    curve_calls: list[dict[str, Any]] = []
+    real_sky_xyz, real_render_curve = g0_contrast.sky_xyz, g0_collect.render_curve
+
+    def xyz_spy(*args: Any, **keywords: Any) -> Any:
+        xyz_calls.append(dict(keywords))
+        return real_sky_xyz(*args, **keywords)
+
+    def curve_spy(atm: Atmosphere, **keywords: Any) -> Any:
+        curve_calls.append(dict(keywords))
+        return real_render_curve(atm, **keywords)
+
+    monkeypatch.setattr(g0_contrast, "sky_xyz", xyz_spy)
+    monkeypatch.setattr(g0_collect, "render_curve", curve_spy)
+
+    # The contrast of one sun elevation, and it is the registered render's.
+    heavy = Atmosphere(aod_550=1.0, ozone_du=300.0)
+    view = SkyView(
+        camera_id="SYN",
+        azimuth_deg=289.0,
+        scale_px_per_deg=44.0,
+        skyline_elevation_deg=0.7,
+        band_elevations_deg=(1.1, 1.6, 2.1),
+        reference_elevation_deg=3.6,
+    )
+    contrast, _ = g0_contrast.rendered_contrasts(heavy, 6.0, view, 30.0)
+    logs, _ = g0_contrast.log_chromaticity(real_sky_xyz(heavy, 6.0, view.elevations_deg, 30.0))
+    np.testing.assert_allclose(contrast, logs[:-1] - logs[-1], rtol=0, atol=1e-12)
+    assert xyz_calls and _quadratures_asked_for(xyz_calls) == {"registered"}
+
+    # The collector's record of one evening, with the archive's aerosol replaced by aod 1.0.
+    real_reduce = g0_collect.reduce_transect
+
+    def heavy_reduce(*args: Any, **keywords: Any) -> Any:
+        reduction = real_reduce(*args, **keywords)
+        return dataclasses.replace(reduction, atmosphere=Atmosphere(aod_550=1.0, ozone_du=300.0))
+
+    monkeypatch.setattr(g0_collect, "reduce_transect", heavy_reduce)
+    xyz_calls.clear()
+    collector = g0_collect.Collector(
+        transport=combined_transport(), cache_dir=tmp_path / "cache", now_utc=NOW
+    )
+    record = collector.collect(EVENING)
+    assert record.ok and record.atmosphere is not None and record.atmosphere.aod_total == 1.0
+    assert curve_calls and _quadratures_asked_for(curve_calls) == {"registered"}
+    assert xyz_calls and _quadratures_asked_for(xyz_calls) == {"registered"}
