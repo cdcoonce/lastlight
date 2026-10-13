@@ -7,7 +7,7 @@
 2. sample them along the sightline toward the sunset azimuth from the public reference point;
 3. reduce the samples to the renderer's v0 parameters (`lastlight.atmosphere`);
 4. render the curve and the strip (`lastlight.render`, with renderer v0 unless `engine` says
-   "v1");
+   "v1", and the adaptive quadrature for v0: `QUADRATURE_BY_ENGINE`);
 5. put it all in a `Forecast`: every input's source, run and digest, the curve, the v0
    vividness, notes saying what was and was not used, and the SHA-256 of the strip PNG.
 
@@ -42,6 +42,13 @@ MODEL_NAME = "lastlight-v0"
 
 MODEL_NAMES = {"v0": MODEL_NAME, "v1": "lastlight-v1"}
 """The model name of each renderer engine; `model.version` stays the package version."""
+
+QUADRATURE_BY_ENGINE = {"v0": "adaptive", "v1": "registered"}
+"""The single-scattering quadrature each engine paints with (`lastlight.render.QUADRATURES`).
+
+The daily v0 painting uses the adaptive one, which differs from the registered integration only
+where the sightline is optically thick (heavy aerosol, issue #40). Renderer v1 is pre-registered
+for the camera magnitude check, so its painting keeps the registered integration."""
 
 _SHA = re.compile(r"[0-9a-f]{40}")
 _OVERRIDE_VARIABLE = "LASTLIGHT_CODE_SHA"
@@ -130,7 +137,12 @@ def paint(
     samples = hrrr.sample_transect(fields, geometry.transect(evening, lat, lon, distances))
     reduction = reduce_transect(samples, evening)
 
-    curve = tuple(CurvePoint(**row) for row in render_curve(reduction.atmosphere, engine=engine))
+    curve = tuple(
+        CurvePoint(**row)
+        for row in render_curve(
+            reduction.atmosphere, engine=engine, quadrature=QUADRATURE_BY_ENGINE[engine]
+        )
+    )
     strip_png = (
         strip_png_bytes(render_strip([point.model_dump() for point in curve]))
         if with_strip

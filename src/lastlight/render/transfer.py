@@ -14,6 +14,16 @@ in Earth's shadow and receives no direct sunlight. That one test makes twilight.
 
 Units: the result is radiance in W m^-2 sr^-1 nm^-1 for the extraterrestrial sun at mean
 distance, with no ground reflection and no multiple scattering.
+
+Two ways of integrating along the line of sight (`QUADRATURES`). The registered one samples each
+piece of the sightline once, in its middle. That is exact for a piece the light barely dims, and
+reads low for one it dims by a large factor: a view 1.5 degrees up is 1.9 km long inside each 50 m
+shell, so under heavy aerosol (`aod_550` 0.3 and more) the first pieces carry an optical depth of
+one or more and the midpoint of a falling exponential is below its mean (issue #40). The adaptive
+one cuts every piece into parts of at most `ADAPTIVE_PIECE_DEPTH` of optical depth, but only when
+some piece is thicker than `ADAPTIVE_TRIGGER_DEPTH`; otherwise it is the registered integration,
+to the last bit. The registered one is renderer v1's inherited single scattering, which is
+pre-registered, so it is not changed and stays the default everywhere.
 """
 
 from __future__ import annotations
@@ -32,6 +42,37 @@ from lastlight.render.atmosphere import (
 )
 
 _SHELL_RADII_KM = EARTH_RADIUS_KM + LEVELS_KM
+
+QUADRATURES: tuple[str, ...] = ("registered", "adaptive")
+"""How `sky_spectrum` integrates along the line of sight; the first is the default everywhere."""
+
+ADAPTIVE_TRIGGER_DEPTH = 0.7
+"""Adaptive refines only if some piece of the sightline has more optical depth than this, at any
+wavelength. At or below it adaptive returns the registered result exactly, so paintings at
+ordinary aerosol loads do not move.
+
+The result is not continuous across the trigger. Between an atmosphere just under it and one just
+over it the sky jumps by the registered quadrature's own error at that load, which adaptive
+removes on the refined side only. For the default aerosol shape luminance moves by up to 4.4
+percent (10 degree view, sun -1.0; 2.1 percent at 3 degrees, 0.8 to 1.1 at 1.5, 2 and 5) and the
+painting's rows by up to 1.6 dE76 (at the 10 degree view; 0.5 at 5 and 0.3 at 2 degrees). It is
+the lit edge of Earth's shadow falling inside one piece, resolved better on one side. See
+`docs/log/2026-10-12-v0-heavy-aerosol.md`."""
+
+ADAPTIVE_PIECE_DEPTH = 0.1
+"""Once refining, no piece is left with more optical depth than this (the midpoint rule is then
+within 0.05 percent on that piece) unless it would need more than `ADAPTIVE_MAX_PARTS` parts."""
+
+ADAPTIVE_MAX_PARTS = 128
+"""Most parts one shell's piece of the sightline is cut into. It bounds the work for a level view
+(25 km long in the lowest shell) or an absurd aerosol load; `aod_550` 1 at a 1.5 degree view
+needs at most 44."""
+
+
+def check_quadrature(quadrature: str) -> None:
+    """Raise `ValueError` unless `quadrature` is one of `QUADRATURES`."""
+    if quadrature not in QUADRATURES:
+        raise ValueError(f"quadrature must be one of {QUADRATURES}, got {quadrature!r}")
 
 
 # --- phase functions -----------------------------------------------------------------------------
@@ -119,6 +160,33 @@ def scattering_cosine(
     return math.cos(view) * math.cos(azimuth) * math.cos(sun) + math.sin(view) * math.sin(sun)
 
 
+def _sightline_cuts(
+    extinction: np.ndarray, sin_view: float, quadrature: str
+) -> tuple[np.ndarray, np.ndarray]:
+    """Heights where the line of sight is cut, and the shell each resulting piece lies in.
+
+    The registered quadrature cuts at the shell boundaries, one piece per shell. The adaptive one
+    returns exactly that unless some piece has more than `ADAPTIVE_TRIGGER_DEPTH` of optical
+    depth at some wavelength; then every shell's piece is cut into equal parts (equal in height,
+    so equal in optical depth, the shell being uniform) of at most `ADAPTIVE_PIECE_DEPTH`.
+    The parts keep their shell's densities: only the sampling of the integral is finer, not the
+    model. Shell boundaries stay cut points, so the arithmetic of unrefined pieces is unchanged.
+    """
+    shells = np.arange(len(LEVELS_KM) - 1)
+    if quadrature == "registered":
+        return LEVELS_KM, shells
+    chord = np.diff(_distance_to_height(LEVELS_KM, sin_view))
+    depth = (extinction * chord[:, None]).max(axis=1)
+    if depth.max() <= ADAPTIVE_TRIGGER_DEPTH:
+        return LEVELS_KM, shells
+    parts = np.clip(np.ceil(depth / ADAPTIVE_PIECE_DEPTH), 1, ADAPTIVE_MAX_PARTS).astype(int)
+    shell = np.repeat(shells, parts)
+    position = np.arange(shell.size) - (np.cumsum(parts) - parts)[shell]
+    low = LEVELS_KM[shell]
+    heights = low + (LEVELS_KM[shell + 1] - low) * position / parts[shell]
+    return np.append(heights, LEVELS_KM[-1]), shell
+
+
 # --- the integral --------------------------------------------------------------------------------
 
 
@@ -127,6 +195,8 @@ def sky_spectrum(
     sun_elevation_deg: float,
     view_elevation_deg: float,
     rel_azimuth_deg: float = 0.0,
+    *,
+    quadrature: str = "registered",
 ) -> np.ndarray:
     """Spectral radiance of the sky in one direction, at `WAVELENGTHS_NM`.
 
@@ -134,14 +204,21 @@ def sky_spectrum(
     is below the horizon), `view_elevation_deg` the elevation of the line of sight (0 to 90) and
     `rel_azimuth_deg` its azimuth relative to the sun's: 0 looks toward the sun.
 
-    The line of sight is cut at the shell boundaries. For the middle of each piece the sunlight
-    that reaches it (zero in Earth's shadow), the share scattered toward the observer, and the
-    transmittance back to the observer are multiplied and summed.
+    The line of sight is cut into pieces. For the middle of each piece the sunlight that reaches
+    it (zero in Earth's shadow), the share scattered toward the observer, and the transmittance
+    back to the observer are multiplied and summed.
+
+    `quadrature` chooses the pieces (`QUADRATURES`, else `ValueError`). `"registered"` (the
+    default, and what renderer v1 and G0 are registered with) cuts at the shell boundaries.
+    `"adaptive"` cuts a sightline whose pieces are optically thick into thinner ones, which
+    removes the under-reading of a low view through heavy aerosol, and is otherwise bit-for-bit
+    the registered result (see the module docstring).
 
     This is renderer v0 only. Renderer v1 has no spectra: its table stores the multiply
     scattered light as CIE XYZ, so v1 is read through `lastlight.render.curve.sky_xyz` with
     `engine="v1"`, which adds that XYZ to the XYZ of this spectrum.
     """
+    check_quadrature(quadrature)
     if not 0.0 <= view_elevation_deg <= 90.0:
         raise ValueError(f"view_elevation_deg must be in [0, 90], got {view_elevation_deg!r}")
     optics = layer_optics(atm)
@@ -151,12 +228,13 @@ def sky_spectrum(
     view = math.radians(view_elevation_deg)
     cos_theta = scattering_cosine(sun_elevation_deg, view_elevation_deg, rel_azimuth_deg)
 
-    # Along the line of sight: pieces between shell boundaries, and optical depth to each middle.
-    mid_height = 0.5 * (LEVELS_KM[:-1] + LEVELS_KM[1:])
+    # Along the line of sight: the pieces, and the optical depth to each middle.
     sin_view = math.sin(view)
-    chord = np.diff(_distance_to_height(LEVELS_KM, sin_view))
+    heights, shell = _sightline_cuts(extinction, sin_view, quadrature)
+    mid_height = 0.5 * (heights[:-1] + heights[1:])
+    chord = np.diff(_distance_to_height(heights, sin_view))
     distance_to_mid = _distance_to_height(mid_height, sin_view)
-    piece_depth = extinction * chord[:, None]
+    piece_depth = extinction[shell] * chord[:, None]
     depth_to_mid = np.cumsum(piece_depth, axis=0) - 0.5 * piece_depth
 
     # From each middle toward the sun: shadowed or not, and the optical depth if not.
@@ -165,8 +243,8 @@ def sky_spectrum(
     sun_depth = shell_path_lengths(mid_radius, sun_dot, _SHELL_RADII_KM) @ extinction
     lit = sunlit(mid_radius, sun_dot)
 
-    scattered = optics.rayleigh_scattering * rayleigh_phase(cos_theta) + (
-        optics.aerosol_scattering * henyey_greenstein_phase(cos_theta, atm.asymmetry)
+    scattered = optics.rayleigh_scattering[shell] * rayleigh_phase(cos_theta) + (
+        optics.aerosol_scattering[shell] * henyey_greenstein_phase(cos_theta, atm.asymmetry)
     )
     transmittance = np.exp(-(sun_depth + depth_to_mid)) * lit[:, None]
     radiance = (scattered * transmittance * chord[:, None]).sum(axis=0)

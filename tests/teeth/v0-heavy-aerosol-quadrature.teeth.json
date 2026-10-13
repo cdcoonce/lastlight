@@ -1,0 +1,279 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "-k",
+    "not test_shell_integral_agrees_with_brute_force_quadrature",
+    "tests/test_render_quadrature.py",
+    "tests/test_render_physics.py",
+    "tests/test_render_curve.py",
+    "tests/test_render_v1_engine.py",
+    "tests/test_painting.py",
+    "tests/test_render_v1_painting.py",
+    "tests/test_g0_contrast.py",
+    "tests/test_g0_collect.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "-k",
+    "not test_shell_integral_agrees_with_brute_force_quadrature",
+    "tests/test_render_quadrature.py",
+    "tests/test_render_physics.py",
+    "tests/test_render_curve.py",
+    "tests/test_render_v1_engine.py",
+    "tests/test_painting.py",
+    "tests/test_render_v1_painting.py",
+    "tests/test_g0_contrast.py",
+    "tests/test_g0_collect.py"
+  ],
+  "mutants": [
+    {
+      "label": "#1a sky_spectrum's default quadrature is adaptive",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "    quadrature: str = \"registered\",\n) -> np.ndarray:",
+      "replace": "    quadrature: str = \"adaptive\",\n) -> np.ndarray:"
+    },
+    {
+      "label": "#1b sky_xyz's default quadrature is adaptive",
+      "file": "../../src/lastlight/render/curve.py",
+      "oracle": "real",
+      "find": "    quadrature: str = \"registered\",\n) -> np.ndarray:",
+      "replace": "    quadrature: str = \"adaptive\",\n) -> np.ndarray:"
+    },
+    {
+      "label": "#1c render_row's default quadrature is adaptive",
+      "file": "../../src/lastlight/render/curve.py",
+      "oracle": "real",
+      "find": "    quadrature: str = \"registered\",\n) -> Curve:",
+      "replace": "    quadrature: str = \"adaptive\",\n) -> Curve:"
+    },
+    {
+      "label": "#1d render_curve's default quadrature is adaptive",
+      "file": "../../src/lastlight/render/curve.py",
+      "oracle": "real",
+      "find": "def render_curve(atm: Atmosphere, *, engine: str = \"v0\", quadrature: str = \"registered\") -> Curve:",
+      "replace": "def render_curve(atm: Atmosphere, *, engine: str = \"v0\", quadrature: str = \"adaptive\") -> Curve:"
+    },
+    {
+      "label": "#2 registered cuts perturbed by 1e-7 of their height (shell thickness)",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "    if quadrature == \"registered\":\n        return LEVELS_KM, shells",
+      "replace": "    if quadrature == \"registered\":\n        return LEVELS_KM * (1.0 + 1e-7), shells"
+    },
+    {
+      "label": "#3a adaptive trigger raised 100x (never refines in practice)",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "ADAPTIVE_TRIGGER_DEPTH = 0.7",
+      "replace": "ADAPTIVE_TRIGGER_DEPTH = 70.0"
+    },
+    {
+      "label": "#3b adaptive subdivision capped at 1 part per shell",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "ADAPTIVE_MAX_PARTS = 128",
+      "replace": "ADAPTIVE_MAX_PARTS = 1"
+    },
+    {
+      "label": "#4 adaptive trigger raised to 3.5 (refines aod 1.0, misses the thin layer)",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "ADAPTIVE_TRIGGER_DEPTH = 0.7",
+      "replace": "ADAPTIVE_TRIGGER_DEPTH = 3.5"
+    },
+    {
+      "label": "#5a adaptive always refines (trigger 0)",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "ADAPTIVE_TRIGGER_DEPTH = 0.7",
+      "replace": "ADAPTIVE_TRIGGER_DEPTH = 0.0"
+    },
+    {
+      "label": "#5b adaptive's unrefined branch is perturbed by 1e-12 (not bit-for-bit registered)",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "    if depth.max() <= ADAPTIVE_TRIGGER_DEPTH:\n        return LEVELS_KM, shells",
+      "replace": "    if depth.max() <= ADAPTIVE_TRIGGER_DEPTH:\n        return LEVELS_KM * (1.0 + 1e-12), shells"
+    },
+    {
+      "label": "#6a an unknown quadrature is accepted (validation removed)",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "    if quadrature not in QUADRATURES:",
+      "replace": "    if False:"
+    },
+    {
+      "label": "#7a paint hands render_curve 'registered' for v0",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "reduction.atmosphere, engine=engine, quadrature=QUADRATURE_BY_ENGINE[engine]",
+      "replace": "reduction.atmosphere, engine=engine, quadrature=\"registered\""
+    },
+    {
+      "label": "#8a render_curve forwards the quadrature to render_row for v0 only",
+      "file": "../../src/lastlight/render/curve.py",
+      "oracle": "real",
+      "find": "for row in render_row(atm, sun, engine=engine, quadrature=quadrature)",
+      "replace": "for row in render_row(atm, sun, engine=engine, quadrature=\"registered\" if engine == \"v1\" else quadrature)"
+    },
+    {
+      "label": "#8b sky_xyz forwards the quadrature to sky_spectrum for v0 only",
+      "file": "../../src/lastlight/render/curve.py",
+      "oracle": "real",
+      "find": "sky_spectrum(atm, sun_elevation, view, rel_azimuth_deg, quadrature=quadrature)",
+      "replace": "sky_spectrum(atm, sun_elevation, view, rel_azimuth_deg, quadrature=\"registered\" if engine == \"v1\" else quadrature)"
+    },
+    {
+      "label": "#8c render_row forwards the quadrature to sky_xyz for v0 only",
+      "file": "../../src/lastlight/render/curve.py",
+      "oracle": "real",
+      "find": "atm, sun_elevation, VIEW_ELEVATIONS, rel_azimuth_deg, engine=engine, quadrature=quadrature",
+      "replace": "atm, sun_elevation, VIEW_ELEVATIONS, rel_azimuth_deg, engine=engine, quadrature=\"registered\" if engine == \"v1\" else quadrature"
+    },
+    {
+      "label": "#9a [control] membership test written as an equivalent chain of inequalities",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "The membership test `quadrature not in QUADRATURES` becomes `quadrature != 'registered' and quadrature != 'adaptive'`. For every input, str or not (None, a list, bytes, True), `in` on a two-name tuple is the same two equality tests, so the same values are rejected and the message still formats QUADRATURES. Inert over every call; it would matter only if QUADRATURES gained a third name, when the chain would have to grow with it.",
+      "find": "    if quadrature not in QUADRATURES:",
+      "replace": "    if quadrature != \"registered\" and quadrature != \"adaptive\":"
+    },
+    {
+      "label": "#9b the accepted tuple is reordered (adaptive first)",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "QUADRATURES: tuple[str, ...] = (\"registered\", \"adaptive\")",
+      "replace": "QUADRATURES: tuple[str, ...] = (\"adaptive\", \"registered\")"
+    },
+    {
+      "label": "X1 [control] render_curve's own quadrature check removed (render_row repeats it)",
+      "file": "../../src/lastlight/render/curve.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "render_curve checks the quadrature once up front, and its first call to render_row -> sky_xyz checks it again with the same function, the same ValueError and the same message; SUN_ELEVATIONS is never empty. So every caller sees the same exception from the same entry point. Inert while only the quadrature is wrong; with an out-of-domain v1 atmosphere AND a bad quadrature the domain error would now come first, and no test combines the two.",
+      "find": "    check_quadrature(quadrature)\n    if engine == \"v1\":\n        v1.check_domain(atm, max(SUN_ELEVATIONS), VIEW_ELEVATIONS)",
+      "replace": "    if engine == \"v1\":\n        v1.check_domain(atm, max(SUN_ELEVATIONS), VIEW_ELEVATIONS)"
+    },
+    {
+      "label": "X2 sky_xyz does not check the quadrature itself (a call with no views is not refused)",
+      "file": "../../src/lastlight/render/curve.py",
+      "oracle": "real",
+      "find": "    check_quadrature(quadrature)\n    if engine == \"v1\":\n        v1.check_domain(atm, sun_elevation, view_elevations)",
+      "replace": "    if engine == \"v1\":\n        v1.check_domain(atm, sun_elevation, view_elevations)"
+    },
+    {
+      "label": "X3 sky_spectrum does not check the quadrature itself",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "    check_quadrature(quadrature)\n    if not 0.0 <= view_elevation_deg <= 90.0:",
+      "replace": "    if not 0.0 <= view_elevation_deg <= 90.0:"
+    },
+    {
+      "label": "X4 sky_xyz drops the quadrature on its sky_spectrum call",
+      "file": "../../src/lastlight/render/curve.py",
+      "oracle": "real",
+      "find": "sky_spectrum(atm, sun_elevation, view, rel_azimuth_deg, quadrature=quadrature)",
+      "replace": "sky_spectrum(atm, sun_elevation, view, rel_azimuth_deg)"
+    },
+    {
+      "label": "X5 render_row drops the quadrature on its sky_xyz call",
+      "file": "../../src/lastlight/render/curve.py",
+      "oracle": "real",
+      "find": "atm, sun_elevation, VIEW_ELEVATIONS, rel_azimuth_deg, engine=engine, quadrature=quadrature",
+      "replace": "atm, sun_elevation, VIEW_ELEVATIONS, rel_azimuth_deg, engine=engine"
+    },
+    {
+      "label": "X6 render_curve drops the quadrature on its render_row call",
+      "file": "../../src/lastlight/render/curve.py",
+      "oracle": "real",
+      "find": "for row in render_row(atm, sun, engine=engine, quadrature=quadrature)",
+      "replace": "for row in render_row(atm, sun, engine=engine)"
+    },
+    {
+      "label": "X7 the renderer-v1 painting also asks for adaptive",
+      "file": "../../src/lastlight/painting.py",
+      "oracle": "real",
+      "find": "QUADRATURE_BY_ENGINE = {\"v0\": \"adaptive\", \"v1\": \"registered\"}",
+      "replace": "QUADRATURE_BY_ENGINE = {\"v0\": \"adaptive\", \"v1\": \"adaptive\"}"
+    },
+    {
+      "label": "X8 subdivision cap lowered from 128 to 8 parts",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "ADAPTIVE_MAX_PARTS = 128",
+      "replace": "ADAPTIVE_MAX_PARTS = 8"
+    },
+    {
+      "label": "X9 subdivision cap removed",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "ADAPTIVE_MAX_PARTS = 128",
+      "replace": "ADAPTIVE_MAX_PARTS = 10**9"
+    },
+    {
+      "label": "X10 per-piece optical-depth target raised from 0.1 to 0.5",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "ADAPTIVE_PIECE_DEPTH = 0.1",
+      "replace": "ADAPTIVE_PIECE_DEPTH = 0.5"
+    },
+    {
+      "label": "X11 per-piece optical-depth target raised from 0.1 to 0.3",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "ADAPTIVE_PIECE_DEPTH = 0.1",
+      "replace": "ADAPTIVE_PIECE_DEPTH = 0.3"
+    },
+    {
+      "label": "X12 refinement reads the least thick wavelength, not the thickest",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "depth = (extinction * chord[:, None]).max(axis=1)",
+      "replace": "depth = (extinction * chord[:, None]).min(axis=1)"
+    },
+    {
+      "label": "X13 refined parts are not equal: the last part of each shell runs twice as long",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "heights = low + (LEVELS_KM[shell + 1] - low) * position / parts[shell]",
+      "replace": "heights = low + (LEVELS_KM[shell + 1] - low) * position / (parts[shell] + 1)"
+    },
+    {
+      "label": "X14 refined cuts are shifted one part up (off by one in the position)",
+      "file": "../../src/lastlight/render/transfer.py",
+      "oracle": "real",
+      "find": "heights = low + (LEVELS_KM[shell + 1] - low) * position / parts[shell]",
+      "replace": "heights = low + (LEVELS_KM[shell + 1] - low) * (position + 1) / parts[shell]"
+    },
+    {
+      "label": "X15 G0's contrast asks for the adaptive quadrature",
+      "file": "../../src/lastlight/g0/contrast.py",
+      "oracle": "real",
+      "find": "xyz = sky_xyz(atm, sun_elevation_deg, view.elevations_deg, rel_azimuth_deg)",
+      "replace": "xyz = sky_xyz(atm, sun_elevation_deg, view.elevations_deg, rel_azimuth_deg, quadrature=\"adaptive\")"
+    },
+    {
+      "label": "X16 G0's collector renders its curve with the adaptive quadrature",
+      "file": "../../src/lastlight/g0/collect.py",
+      "oracle": "real",
+      "find": "for row in render_curve(atmosphere)]",
+      "replace": "for row in render_curve(atmosphere, quadrature=\"adaptive\")]"
+    }
+  ]
+}
