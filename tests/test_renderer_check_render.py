@@ -136,6 +136,14 @@ def test_the_elevation_is_used_to_the_precision_recorded_not_rounded(views) -> N
     assert a.v1_bg != b.v1_bg and a.v0_bg != b.v0_bg
 
 
+def test_the_third_decimal_of_the_sun_elevation_reaches_the_render(views) -> None:
+    # Both round to 0.40 at two decimals (the precision frames.csv prints), but are other suns.
+    a = render.render_evening(DAY, AOD, OZONE, frames(0.4001), views)[0]
+    b = render.render_evening(DAY, AOD, OZONE, frames(0.4049), views)[0]
+    for name in ("v1_bg", "v0_bg", "v1_rg", "v0_rg"):  # they differ by 1e-4 to 8e-4
+        assert abs(getattr(a, name) - getattr(b, name)) > 1e-5, name
+
+
 def test_pairs_come_in_order_of_falling_sun_elevation_whatever_the_file_order(views) -> None:
     pairs = render.render_evening(DAY, AOD, OZONE, frames(-1.5, 3.0, 0.0, 1.5), views)
     assert [p.sun_elevation_deg for p in pairs] == [3.0, 1.5, 0.0, -1.5]
