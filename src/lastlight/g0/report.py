@@ -33,6 +33,7 @@ from lastlight.g0.figures import FIGURES
 from lastlight.g0.record import DROP_REASONS, RENDER_SCALES
 from lastlight.g0.view import SkyView
 from lastlight.geometry import ELEVATION_SWEEP
+from lastlight.render import v1 as v1_engine
 
 FIGURE_FILES: Final = tuple(FIGURES)
 
@@ -228,6 +229,20 @@ def _caveat(study: Study) -> str:
         f"{stats.THRESHOLD} in these units is not {stats.THRESHOLD} on a webcam. All aerosol "
         f"variation comes from GEFS-Aerosols' modelled optical depth; {smoke}."
     )
+    if study.engine == "v1":
+        first = (
+            f"**Read this {word} in renderer-v1 units.** D(d, s) is computed on the "
+            "multiple-scattering renderer's contrast (v0's single scattering plus a precomputed "
+            f"table of the light scattered more than once), not on camera pixels, and {channels}; "
+            f"{control}. At a sun elevation of 0 the rendered lowest-band {blue} contrast is "
+            f"{_horizon_contrast(study)[1]:+.2f}; the four usable frames of the first camera "
+            f"evening (overcast) read between {low:+.2f} and {high:+.2f} in either "
+            "channel. Whether v1's contrasts are within a factor of two of the camera's is the "
+            "question of the pre-registered camera magnitude check "
+            "(`docs/gates/renderer-v1/criterion.md`), which this report does not answer, and "
+            f"{stats.THRESHOLD} here is a rendered difference, not one measured on a webcam. All "
+            f"aerosol variation comes from GEFS-Aerosols' modelled optical depth; {smoke}."
+        )
     if passed:
         last = (
             f"This PASS says the renderer's output moves from day to day by more than "
@@ -243,6 +258,11 @@ def _caveat(study: Study) -> str:
             "camera cannot see aerosol-driven movement (G1, issue #31, measures that), and it "
             "does not show that the forecast cannot beat climatology or persistence; a "
             "multiple-scattering renderer (issue #32) re-runs this gate."
+        )
+    if study.engine == "v1":
+        last = last.replace(
+            "; a multiple-scattering renderer (issue #32) re-runs this gate.",
+            ". This is that re-run, with renderer v1 (issue #35); the v0 result stands beside it.",
         )
     return f"{first} {last}"
 
@@ -331,7 +351,24 @@ def _inputs_section(study: Study) -> str:
         "values, not NOAA data products, and no endorsement by NOAA is implied."
     )
     bullets = [hrrr, aerosol, ozone, analyses, model, geos, fixed, attribution]
+    if study.engine == "v1":
+        bullets.insert(0, _renderer_v1_bullet())
     return "## Inputs actually used\n\n" + "\n".join(bullets) + "\n"
+
+
+def _renderer_v1_bullet() -> str:
+    """The v1 re-run's own input: the v0 run's atmosphere, and the engine that renders it."""
+    return (
+        "- **This re-run (renderer v1).** No archive is read again. Each date is re-rendered "
+        "from the atmosphere the v0 run recorded for it (`aod_550` and `ozone_du`, every other "
+        "field of `lastlight.render.Atmosphere` at its default, as the v0 run built it), with "
+        "renderer v1: v0's single scattering plus the light scattered more than once, read from "
+        "a committed table (`lastlight.render.v1`, SHA-256 "
+        f"`{v1_engine.TABLE_SHA256}`) that bakes the other atmosphere fields and a ground albedo "
+        "of 0.2, and covers `aod_550` 0 to 1, `ozone_du` 250 to 330 and sun elevations -12 to "
+        "+12. A date outside that table would be dropped with the reason `v1_outside_table`; a "
+        "date the v0 run dropped stays dropped with the same reason."
+    )
 
 
 def _smoke_sentence(study: Study) -> str:
@@ -601,6 +638,11 @@ def _seasonal_section(study: Study) -> str:
 
 
 def _tier_b_section(study: Study) -> str:
+    curve = (
+        "the forecast's own curve"
+        if study.engine == "v0"
+        else "renderer v1's curve, which is not what the daily forecast paints"
+    )
     rows = []
     for index, name in enumerate(stats.DELTA_E_BANDS):
         column = study.delta_e[:, index]
@@ -617,7 +659,7 @@ def _tier_b_section(study: Study) -> str:
         "## Tier B: delta-E 2000 of the absolute curve",
         "",
         "Absolute colour is not scored in tier A. For tier B, delta-E 2000 of each date's "
-        "absolute curve (the forecast's own curve: the solar vertical, seven view elevations "
+        f"absolute curve ({curve}: the solar vertical, seven view elevations "
         "from 2 to 45 degrees, each sun elevation exposed to L* 70) against the period's median "
         "curve, averaged over the sweep elevations inside each band and the views. There is no "
         "pass criterion.",
@@ -666,10 +708,15 @@ def _extremes_section(study: Study) -> str:
 
 def _floor_section(study: Study) -> str:
     nominal, low, high = (study.floor_share[name] for name in RENDER_SCALES)
+    cause = (
+        "Single scattering near the horizon is redder than the sRGB gamut"
+        if study.engine == "v0"
+        else "The sky near the horizon can be redder than the sRGB gamut"
+    )
     lines = [
         "## The channel floor",
         "",
-        "Single scattering near the horizon is redder than the sRGB gamut, so a rendered channel "
+        f"{cause}, so a rendered channel "
         "can be negative, and a logarithm needs a positive number. A channel is raised to the "
         "widest ratio an 8-bit frame can show under `lastlight.observe`'s own pixel rules (code "
         "6 against code 249, linearised; about 0.002 of the pixel's largest channel) before the "
@@ -680,6 +727,29 @@ def _floor_section(study: Study) -> str:
         "",
     ]
     return "\n".join(lines)
+
+
+def _reading_bullets_v1(blue_share: float, at_horizon: tuple[float, float]) -> list[str]:
+    """The reading-section bullets that say something about the renderer, for a v1 re-run."""
+    observed_low, observed_high = OBSERVED_CONTRAST_RANGE
+    return [
+        f"- {CHANNEL_NAMES[1]} carries {blue_share:.0f} percent of the summed D(d, s) over the "
+        "counted bands (see the channel decomposition).",
+        f"- At a sun elevation of 0 the median, over the dates used, of the lowest band's contrast "
+        f"is {at_horizon[0]:+.2f} in log(R/G) and {at_horizon[1]:+.2f} in log(B/G). The four "
+        "usable frames of the first observed evening, an overcast one, read between "
+        f"{observed_low:+.2f} and {observed_high:+.2f} for sun elevations from +5 to -4 "
+        "(`docs/log/2026-10-11-observed-contrasts.md`). Renderer v1 adds the multiple "
+        "scattering that v0 leaves out; whether its magnitude is within a factor of two of "
+        "the camera is the pre-registered camera magnitude check's question "
+        "(`docs/gates/renderer-v1/criterion.md`), not G0's.",
+        "- The geometry is provisional. The sensitivity table shows how much the pixel scale "
+        "matters.",
+        "- The renderer is v1 (v0's single scattering plus a table of the light scattered more "
+        "than once) with fixed aerosol optics, a fixed ground albedo and no cloud, and the "
+        "aerosol column comes from a 25 km model; real variation in aerosol type, humidity and "
+        "cloud is not here.",
+    ]
 
 
 def _reading_section(study: Study) -> str:
@@ -716,6 +786,8 @@ def _reading_section(study: Study) -> str:
         "spread is the calendar.",
         "- Dropped dates are listed above with their reasons; none was filled.",
     ]
+    if study.engine == "v1":
+        bullets[1:5] = _reading_bullets_v1(blue_share, at_horizon)
     return "## Reading the result\n\n" + "\n".join(bullets) + "\n"
 
 
@@ -727,6 +799,15 @@ def render_markdown(study: Study, views: Mapping[str, SkyView]) -> str:
         f"Spread study for issue #10 over the evenings {start.isoformat()} to "
         f"{end.isoformat()}, rendered from archived inputs for WHTM1's frozen geometry.\n"
     )
+    if study.engine == "v1":
+        title = (
+            "# G0 with renderer v1: does the rendered curve vary enough to measure?\n\n"
+            f"The spread study of issue #10 re-run with renderer v1 (issue #35) over the evenings "
+            f"{start.isoformat()} to {end.isoformat()}: each date's archived atmosphere, as the "
+            "v0 run recorded it, re-rendered for WHTM1's frozen geometry. The criterion and its "
+            "verdict rule are G0's and are unchanged. The v0 result is in "
+            "[the v0 report](../report.md).\n"
+        )
     parts = [
         title,
         _verdict_section(study),

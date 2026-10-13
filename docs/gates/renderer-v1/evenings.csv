@@ -1,0 +1,4 @@
+date,status,reason,frames_used,cloud_mean_pct,aod_550,slot,r_e_v1_bg,r_e_v0_bg,r_e_v1_bg_scale_low,r_e_v1_bg_scale_high,r_e_v1_rg,r_e_v0_rg
+2026-10-10,not_counted,cloud,4,99.1176,0.0319,,5.9142,25.4116,9.8098,5.8063,12.7853,16.8820
+2026-10-11,not_counted,cloud,4,31.4118,0.0686,,0.6882,10.7200,1.2393,0.6902,5.7688,11.5571
+2026-10-12,not_counted,cloud,4,49.5294,0.0760,,0.2491,4.9109,0.3951,0.2480,1.1598,2.6777

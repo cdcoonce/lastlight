@@ -22,6 +22,7 @@ import numpy as np
 
 from lastlight.g0 import stats
 from lastlight.g0.record import RENDER_SCALES, DateRecord
+from lastlight.render import ENGINES
 
 NOMINAL = "nominal"
 SEASONAL = "seasonal"
@@ -73,6 +74,7 @@ class Study:
     extremes: tuple[Extreme, ...]
     counted_bands: tuple[str, ...] = stats.COUNTED_BANDS
     bands: tuple[str, ...] = stats.BANDS
+    engine: str = "v0"
 
     @property
     def verdict(self) -> stats.Verdict:
@@ -114,10 +116,18 @@ def _not_collected(day: dt.date) -> DateRecord:
     )
 
 
-def build_study(records: Sequence[DateRecord], start: dt.date, end: dt.date) -> Study:
-    """The study of every date from `start` to `end` inclusive."""
+def build_study(
+    records: Sequence[DateRecord], start: dt.date, end: dt.date, *, engine: str = "v0"
+) -> Study:
+    """The study of every date from `start` to `end` inclusive.
+
+    `engine` names the renderer the records were rendered with, "v0" or "v1"; it labels the
+    study (and so its report) and changes none of the statistics.
+    """
     if end < start:
         raise ValueError(f"the end {end} is before the start {start}")
+    if engine not in ENGINES:
+        raise ValueError(f"engine must be one of {ENGINES}, got {engine!r}")
     by_date = {record.date: record for record in records}
     attempted = tuple(start + dt.timedelta(days=i) for i in range((end - start).days + 1))
     used: list[DateRecord] = []
@@ -170,6 +180,7 @@ def build_study(records: Sequence[DateRecord], start: dt.date, end: dt.date) -> 
         delta_e=delta_e,
         floor_share=floor_share,
         extremes=_extremes(used, outcomes[NOMINAL]),
+        engine=engine,
     )
 
 

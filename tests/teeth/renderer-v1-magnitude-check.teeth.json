@@ -1,0 +1,641 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_renderer_check_command.py",
+    "tests/test_renderer_check_fetch.py",
+    "tests/test_renderer_check_guards.py",
+    "tests/test_renderer_check_observed.py",
+    "tests/test_renderer_check_render.py",
+    "tests/test_renderer_check_rules.py",
+    "tests/test_renderer_check_store.py",
+    "tests/test_g0_collect.py",
+    "tests/test_g0_command.py",
+    "tests/test_g0_contrast.py",
+    "tests/test_g0_engine.py",
+    "tests/test_g0_figures.py",
+    "tests/test_g0_record.py",
+    "tests/test_g0_report.py",
+    "tests/test_g0_stats.py",
+    "tests/test_g0_study.py",
+    "tests/test_g0_transport.py",
+    "tests/test_g0_view.py"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "tests/test_renderer_check_command.py",
+    "tests/test_renderer_check_fetch.py",
+    "tests/test_renderer_check_guards.py",
+    "tests/test_renderer_check_observed.py",
+    "tests/test_renderer_check_render.py",
+    "tests/test_renderer_check_rules.py",
+    "tests/test_renderer_check_store.py",
+    "tests/test_g0_collect.py",
+    "tests/test_g0_command.py",
+    "tests/test_g0_contrast.py",
+    "tests/test_g0_engine.py",
+    "tests/test_g0_figures.py",
+    "tests/test_g0_record.py",
+    "tests/test_g0_report.py",
+    "tests/test_g0_stats.py",
+    "tests/test_g0_study.py",
+    "tests/test_g0_transport.py",
+    "tests/test_g0_view.py"
+  ],
+  "mutants": [
+    {
+      "label": "#1 minimum used frames raised to 4 (3 is no longer enough)",
+      "file": "../../src/lastlight/renderer_check/rules.py",
+      "oracle": "real",
+      "find": "MIN_USED_FRAMES: Final = 3",
+      "replace": "MIN_USED_FRAMES: Final = 4"
+    },
+    {
+      "label": "#1b evaluate: an evening with exactly 3 used frames is not considered (<= for <)",
+      "file": "../../src/lastlight/renderer_check/evaluate.py",
+      "oracle": "real",
+      "find": "if used < rules.MIN_USED_FRAMES:",
+      "replace": "if used <= rules.MIN_USED_FRAMES:"
+    },
+    {
+      "label": "#1c run: an evening with exactly 3 used frames is never fetched (> for >=)",
+      "file": "../../src/lastlight/renderer_check/run.py",
+      "oracle": "real",
+      "find": "len(evening.frames) >= rules.MIN_USED_FRAMES",
+      "replace": "len(evening.frames) > rules.MIN_USED_FRAMES"
+    },
+    {
+      "label": "#2 a frame flagged light_dome_excluded is dropped",
+      "file": "../../src/lastlight/renderer_check/observed.py",
+      "oracle": "real",
+      "find": "    if log_bg is None:\n        return None\n",
+      "replace": "    if log_bg is None or raw.get(\"light_dome_excluded\") is True:\n        return None\n"
+    },
+    {
+      "label": "#2b a frame whose log_rg is null is dropped",
+      "file": "../../src/lastlight/renderer_check/observed.py",
+      "oracle": "real",
+      "find": "    if log_bg is None:\n        return None\n",
+      "replace": "    if log_bg is None or band.get(\"log_rg\") is None:\n        return None\n"
+    },
+    {
+      "label": "#3 cloud filter exclusive at 10 percent (< for <=)",
+      "file": "../../src/lastlight/renderer_check/rules.py",
+      "oracle": "real",
+      "find": "return mean_cloud_pct <= CLOUD_LIMIT_PCT",
+      "replace": "return mean_cloud_pct < CLOUD_LIMIT_PCT"
+    },
+    {
+      "label": "#4 analysis readiness dropped: a not-yet-published analysis is used",
+      "file": "../../src/lastlight/renderer_check/fetch.py",
+      "oracle": "real",
+      "find": "return plan if cycle + ANALYSIS_READY_AFTER <= now_utc else None",
+      "replace": "return plan"
+    },
+    {
+      "label": "#4b analysis readiness: exactly two hours old is still pending (< for <=)",
+      "file": "../../src/lastlight/renderer_check/fetch.py",
+      "oracle": "real",
+      "find": "return plan if cycle + ANALYSIS_READY_AFTER <= now_utc else None",
+      "replace": "return plan if cycle + ANALYSIS_READY_AFTER < now_utc else None"
+    },
+    {
+      "label": "#4c the cloud is requested at forecast hour 1, not the analysis",
+      "file": "../../src/lastlight/renderer_check/fetch.py",
+      "oracle": "double",
+      "find": "                plan.cycle_hour,\n                0,\n                (hrrr.field_spec(_TCDC),),",
+      "replace": "                plan.cycle_hour,\n                1,\n                (hrrr.field_spec(_TCDC),),"
+    },
+    {
+      "label": "#4d analysis readiness waits one hour, not two",
+      "file": "../../src/lastlight/renderer_check/fetch.py",
+      "oracle": "real",
+      "find": "ANALYSIS_READY_AFTER: Final = dt.timedelta(hours=2)",
+      "replace": "ANALYSIS_READY_AFTER: Final = dt.timedelta(hours=1)"
+    },
+    {
+      "label": "#5 tcdc_missing: points without a value are skipped and the mean taken over the rest",
+      "file": "../../src/lastlight/renderer_check/fetch.py",
+      "oracle": "real",
+      "find": "if not values or any(value is None for value in values):",
+      "replace": "if not values or all(value is None for value in values):"
+    },
+    {
+      "label": "#5b the cloud mean also averages samples of other fields",
+      "file": "../../src/lastlight/renderer_check/fetch.py",
+      "oracle": "real",
+      "find": "values = [sample.value for sample in samples if sample.field == _TCDC]",
+      "replace": "values = [sample.value for sample in samples]"
+    },
+    {
+      "label": "#5c the cloud is sampled at 16 transect points, not 17",
+      "file": "../../src/lastlight/renderer_check/fetch.py",
+      "oracle": "real",
+      "find": "distances = [float(km) for km in hrrr.TRANSECT_DISTANCES_KM]",
+      "replace": "distances = [float(km) for km in hrrr.TRANSECT_DISTANCES_KM[:-1]]"
+    },
+    {
+      "label": "#5d any fetch error is recorded as a missing run (a transient fault is kept as a drop)",
+      "file": "../../src/lastlight/renderer_check/fetch.py",
+      "oracle": "double",
+      "find": "if is_not_found(error):",
+      "replace": "if True:"
+    },
+    {
+      "label": "#6 r_e is the median of per-frame ratios, not a ratio of medians",
+      "file": "../../src/lastlight/renderer_check/rules.py",
+      "oracle": "real",
+      "find": "    return _median_absolute(rendered) / denominator",
+      "replace": "    return statistics.median(\n        abs(r) / abs(o) if o else math.inf for r, o in zip(rendered, observed, strict=True)\n    )"
+    },
+    {
+      "label": "#7 a zero observed median gives NaN instead of +infinity",
+      "file": "../../src/lastlight/renderer_check/rules.py",
+      "oracle": "real",
+      "find": "    if denominator == 0.0:\n        return math.inf",
+      "replace": "    if denominator == 0.0:\n        return math.nan"
+    },
+    {
+      "label": "#7b an evening with an infinite ratio is left out of the verdict median",
+      "file": "../../src/lastlight/renderer_check/evaluate.py",
+      "oracle": "real",
+      "find": "verdict = rules.decide([slot.ratios.v1_bg for slot in slotted if slot.ratios is not None])",
+      "replace": "verdict = rules.decide(\n        [\n            slot.ratios.v1_bg\n            for slot in slotted\n            if slot.ratios is not None and slot.ratios.v1_bg < float(\"inf\")\n        ]\n    )"
+    },
+    {
+      "label": "#8 the verdict takes the last 5 counted evenings, not the first 5",
+      "file": "../../src/lastlight/renderer_check/rules.py",
+      "oracle": "real",
+      "find": "first = list(ratios_in_date_order)[:COUNTED_NEEDED]",
+      "replace": "first = list(ratios_in_date_order)[-COUNTED_NEEDED:]"
+    },
+    {
+      "label": "#8b evaluate: every counted evening takes a slot (no cap at 5)",
+      "file": "../../src/lastlight/renderer_check/evaluate.py",
+      "oracle": "real",
+      "find": "elif len(slotted) < rules.COUNTED_NEEDED:",
+      "replace": "elif True:"
+    },
+    {
+      "label": "#8c evaluate: slot numbers start at 0",
+      "file": "../../src/lastlight/renderer_check/evaluate.py",
+      "oracle": "real",
+      "find": "numbered = replace(result, slot=len(slotted) + 1)",
+      "replace": "numbered = replace(result, slot=len(slotted))"
+    },
+    {
+      "label": "#9a lower bound exclusive: a median of exactly 0.5 does not adopt",
+      "file": "../../src/lastlight/renderer_check/rules.py",
+      "oracle": "real",
+      "find": "return ADOPT if RATIO_LOW <= median <= RATIO_HIGH else KEEP_V0",
+      "replace": "return ADOPT if RATIO_LOW < median <= RATIO_HIGH else KEEP_V0"
+    },
+    {
+      "label": "#9b upper bound exclusive: a median of exactly 2.0 does not adopt",
+      "file": "../../src/lastlight/renderer_check/rules.py",
+      "oracle": "real",
+      "find": "return ADOPT if RATIO_LOW <= median <= RATIO_HIGH else KEEP_V0",
+      "replace": "return ADOPT if RATIO_LOW <= median < RATIO_HIGH else KEEP_V0"
+    },
+    {
+      "label": "#10 four counted evenings are enough to decide",
+      "file": "../../src/lastlight/renderer_check/rules.py",
+      "oracle": "real",
+      "find": "if len(first) < COUNTED_NEEDED:",
+      "replace": "if len(first) < COUNTED_NEEDED - 1:"
+    },
+    {
+      "label": "#10b the report treats four slots as a decided verdict",
+      "file": "../../src/lastlight/renderer_check/evaluate.py",
+      "oracle": "real",
+      "find": "return len(self.slots) >= rules.COUNTED_NEEDED",
+      "replace": "return len(self.slots) >= rules.COUNTED_NEEDED - 1"
+    },
+    {
+      "label": "#11 a dropped evening takes a first-5 slot",
+      "file": "../../src/lastlight/renderer_check/evaluate.py",
+      "oracle": "real",
+      "find": "if result.status != COUNTED:",
+      "replace": "if result.status not in (COUNTED, DROPPED):"
+    },
+    {
+      "label": "#11b a not-counted (cloudy) evening takes a first-5 slot",
+      "file": "../../src/lastlight/renderer_check/evaluate.py",
+      "oracle": "real",
+      "find": "if result.status != COUNTED:",
+      "replace": "if result.status not in (COUNTED, NOT_COUNTED):"
+    },
+    {
+      "label": "#12 the table digest is compared with v1.TABLE_SHA256, not the check's own constant",
+      "file": "../../src/lastlight/renderer_check/guards.py",
+      "oracle": "real",
+      "find": "    if digest != REGISTERED_TABLE_SHA256:",
+      "replace": "    if digest != v1_engine.TABLE_SHA256:"
+    },
+    {
+      "label": "#12b the table digest is never compared",
+      "file": "../../src/lastlight/renderer_check/guards.py",
+      "oracle": "real",
+      "find": "    if digest != REGISTERED_TABLE_SHA256:",
+      "replace": "    if False:"
+    },
+    {
+      "label": "#13 fingerprint tolerance widened from 1e-6 to 1e-2",
+      "file": "../../src/lastlight/renderer_check/guards.py",
+      "oracle": "real",
+      "find": "RELATIVE_TOLERANCE: Final = 1e-6",
+      "replace": "RELATIVE_TOLERANCE: Final = 1e-2"
+    },
+    {
+      "label": "#13b fingerprint absolute floor widened from 1e-12 to 1e-3",
+      "file": "../../src/lastlight/renderer_check/guards.py",
+      "oracle": "real",
+      "find": "ABSOLUTE_FLOOR: Final = 1e-12",
+      "replace": "ABSOLUTE_FLOOR: Final = 1e-3"
+    },
+    {
+      "label": "#13c fingerprint: a NaN component is not a difference",
+      "file": "../../src/lastlight/renderer_check/guards.py",
+      "oracle": "real",
+      "find": "off = ~(np.abs(got - want) <= allowed)  # also true for a NaN",
+      "replace": "off = np.abs(got - want) > allowed"
+    },
+    {
+      "label": "#14 the report file is written to --out before the refusal check",
+      "file": "../../src/lastlight/renderer_check/run.py",
+      "oracle": "real",
+      "find": "    writes_report = stage in (\"report\", \"all\")\n    if writes_report:\n        try:\n            guards.check_registered()",
+      "replace": "    writes_report = stage in (\"report\", \"all\")\n    if writes_report:\n        out_dir.mkdir(parents=True, exist_ok=True)\n        (out_dir / \"report.md\").write_text(\"stale\\n\", encoding=\"utf-8\")\n        try:\n            guards.check_registered()"
+    },
+    {
+      "label": "#14b only the --out directory is created before the refusal check",
+      "file": "../../src/lastlight/renderer_check/run.py",
+      "oracle": "real",
+      "find": "    writes_report = stage in (\"report\", \"all\")\n    if writes_report:\n        try:\n            guards.check_registered()",
+      "replace": "    writes_report = stage in (\"report\", \"all\")\n    if writes_report:\n        out_dir.mkdir(parents=True, exist_ok=True)\n        try:\n            guards.check_registered()"
+    },
+    {
+      "label": "#14c the all stage skips the refusal check (only the report stage refuses)",
+      "file": "../../src/lastlight/renderer_check/run.py",
+      "oracle": "real",
+      "find": "    if writes_report:\n        try:\n            guards.check_registered()",
+      "replace": "    if stage == \"report\":\n        try:\n            guards.check_registered()"
+    },
+    {
+      "label": "#15 the sun elevation is rounded to 0.1 degree before rendering",
+      "file": "../../src/lastlight/renderer_check/render.py",
+      "oracle": "real",
+      "find": "        sun = frame.sun_elevation_deg\n",
+      "replace": "        sun = round(frame.sun_elevation_deg, 1)\n"
+    },
+    {
+      "label": "#15b the sun elevation is rounded to 0.01 degree before rendering",
+      "file": "../../src/lastlight/renderer_check/render.py",
+      "oracle": "real",
+      "find": "        sun = frame.sun_elevation_deg\n",
+      "replace": "        sun = round(frame.sun_elevation_deg, 2)\n"
+    },
+    {
+      "label": "#15c the sun's azimuth is searched at the half-degree-snapped elevation",
+      "file": "../../src/lastlight/renderer_check/render.py",
+      "oracle": "real",
+      "find": "azimuth = relative_azimuth(nominal.azimuth_deg, sun_azimuth_at(evening, sun))",
+      "replace": "azimuth = relative_azimuth(nominal.azimuth_deg, sun_azimuth_at(evening, round(sun * 2) / 2))"
+    },
+    {
+      "label": "#16 rendered_contrasts ignores the engine keyword (always v0)",
+      "file": "../../src/lastlight/g0/contrast.py",
+      "oracle": "real",
+      "find": "    xyz = sky_xyz(atm, sun_elevation_deg, view.elevations_deg, rel_azimuth_deg, engine=engine)",
+      "replace": "    xyz = sky_xyz(atm, sun_elevation_deg, view.elevations_deg, rel_azimuth_deg)"
+    },
+    {
+      "label": "#16b day_contrasts does not pass the engine on to rendered_contrasts",
+      "file": "../../src/lastlight/g0/contrast.py",
+      "oracle": "real",
+      "find": "contrast, count = rendered_contrasts(atm, elevation, view, azimuth, engine=engine)",
+      "replace": "contrast, count = rendered_contrasts(atm, elevation, view, azimuth)"
+    },
+    {
+      "label": "#16c the check renders its v1 numbers with the v0 engine",
+      "file": "../../src/lastlight/renderer_check/render.py",
+      "oracle": "real",
+      "find": "        v1, _ = rendered_contrasts(atmosphere, sun, nominal, azimuth, engine=\"v1\")",
+      "replace": "        v1, _ = rendered_contrasts(atmosphere, sun, nominal, azimuth, engine=\"v0\")"
+    },
+    {
+      "label": "#16d the pixel-scale ends are rendered with the v0 engine",
+      "file": "../../src/lastlight/renderer_check/render.py",
+      "oracle": "real",
+      "find": "                end, _ = rendered_contrasts(atmosphere, sun, views[name], azimuth, engine=\"v1\")",
+      "replace": "                end, _ = rendered_contrasts(atmosphere, sun, views[name], azimuth, engine=\"v0\")"
+    },
+    {
+      "label": "#17 g0 --engine v1 saves into the v0 store <cache>/g0/records",
+      "file": "../../src/lastlight/commands/g0.py",
+      "oracle": "real",
+      "find": "    store = RecordStore(args.cache_dir / \"g0-v1\" / \"records\")",
+      "replace": "    store = RecordStore(args.cache_dir / \"g0\" / \"records\")"
+    },
+    {
+      "label": "#17b the v1 report stage reads the v0 store",
+      "file": "../../src/lastlight/commands/g0.py",
+      "oracle": "real",
+      "find": "records = [record for day in days if (record := store.load(day)) is not None]\n        try:\n            study = build_study(records, args.start, args.end, engine=\"v1\")",
+      "replace": "records = [record for day in days if (record := source.load(day)) is not None]\n        try:\n            study = build_study(records, args.start, args.end, engine=\"v1\")"
+    },
+    {
+      "label": "#17c a dropped v0 record is carried into the v1 store with another reason",
+      "file": "../../src/lastlight/g0/collect.py",
+      "oracle": "real",
+      "find": "drop_reason=record.drop_reason,",
+      "replace": "drop_reason=\"not_collected\","
+    },
+    {
+      "label": "#17d g0 --engine defaults to v1",
+      "file": "../../src/lastlight/commands/g0.py",
+      "oracle": "real",
+      "find": "        choices=ENGINES,\n        default=\"v0\",",
+      "replace": "        choices=ENGINES,\n        default=\"v1\","
+    },
+    {
+      "label": "#17e the v1 study is not labelled v1 (Study.engine stays v0)",
+      "file": "../../src/lastlight/g0/analysis.py",
+      "oracle": "real",
+      "find": "        extremes=_extremes(used, outcomes[NOMINAL]),\n        engine=engine,\n",
+      "replace": "        extremes=_extremes(used, outcomes[NOMINAL]),\n"
+    },
+    {
+      "label": "#17f the v1 re-render never skips a date already in the v1 store",
+      "file": "../../src/lastlight/g0/collect.py",
+      "oracle": "real",
+      "find": "if not refresh and target.path(day).is_file():",
+      "replace": "if False:"
+    },
+    {
+      "label": "#17g the v1 re-render draws the curve with the v0 engine",
+      "file": "../../src/lastlight/g0/collect.py",
+      "oracle": "real",
+      "find": "[[row[\"L\"], row[\"a\"], row[\"b\"]] for row in render_curve(atmosphere, engine=\"v1\")]",
+      "replace": "[[row[\"L\"], row[\"a\"], row[\"b\"]] for row in render_curve(atmosphere)]"
+    },
+    {
+      "label": "#17h the v1 re-render computes day contrasts with the v0 engine",
+      "file": "../../src/lastlight/g0/collect.py",
+      "oracle": "real",
+      "find": "            atmosphere, views[name], azimuths, engine=\"v1\"\n",
+      "replace": "            atmosphere, views[name], azimuths, engine=\"v0\"\n"
+    },
+    {
+      "label": "[control] r_e cloud mean divides by float(len) instead of len",
+      "file": "../../src/lastlight/renderer_check/rules.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "`float / int` converts the int operand to a float before the one IEEE division, so `fsum(values) / len(values)` and `fsum(values) / float(len(values))` divide the same two doubles (a count of 17 is exactly representable) and return the identical number on every path; it would differ only for a count above 2**53 or a non-float fsum, which a 17-point transect never reaches.",
+      "find": "    return math.fsum(values) / len(values)",
+      "replace": "    return math.fsum(values) / float(len(values))"
+    },
+    {
+      "label": "D1a retry window: a missing-run record is never fetched again",
+      "file": "../../src/lastlight/renderer_check/fetch.py",
+      "oracle": "real",
+      "find": "    return recent and record.drop_reason in RETRIED_REASONS",
+      "replace": "    return False"
+    },
+    {
+      "label": "D1b retry window: a missing-run record is retried at any age",
+      "file": "../../src/lastlight/renderer_check/fetch.py",
+      "oracle": "real",
+      "find": "    return recent and record.drop_reason in RETRIED_REASONS",
+      "replace": "    return record.drop_reason in RETRIED_REASONS"
+    },
+    {
+      "label": "D1c retry window boundary: an evening two days old is still retried (<= for <)",
+      "file": "../../src/lastlight/renderer_check/fetch.py",
+      "oracle": "real",
+      "find": "recent = (now_utc.date() - evening).days < RETRY_WINDOW_DAYS",
+      "replace": "recent = (now_utc.date() - evening).days <= RETRY_WINDOW_DAYS"
+    },
+    {
+      "label": "D1d retry window: aerosol_run_missing is not retried",
+      "file": "../../src/lastlight/renderer_check/fetch.py",
+      "oracle": "real",
+      "find": "RETRIED_REASONS: Final = frozenset({\"hrrr_run_missing\", \"aerosol_run_missing\"})",
+      "replace": "RETRIED_REASONS: Final = frozenset({\"hrrr_run_missing\"})"
+    },
+    {
+      "label": "D1e retry window: hrrr_unreadable is retried too",
+      "file": "../../src/lastlight/renderer_check/fetch.py",
+      "oracle": "real",
+      "find": "RETRIED_REASONS: Final = frozenset({\"hrrr_run_missing\", \"aerosol_run_missing\"})",
+      "replace": "RETRIED_REASONS: Final = frozenset({\"hrrr_run_missing\", \"aerosol_run_missing\", \"hrrr_unreadable\"})"
+    },
+    {
+      "label": "D2a no hold: a counted evening after the earliest pending one takes a slot",
+      "file": "../../src/lastlight/renderer_check/evaluate.py",
+      "oracle": "real",
+      "find": "if earliest_pending is not None and result.date > earliest_pending:",
+      "replace": "if False:"
+    },
+    {
+      "label": "D2b the hold starts after the LATEST pending evening, not the earliest",
+      "file": "../../src/lastlight/renderer_check/evaluate.py",
+      "oracle": "real",
+      "find": "earliest_pending = min((r.date for r in results if r.status == PENDING), default=None)",
+      "replace": "earliest_pending = max((r.date for r in results if r.status == PENDING), default=None)"
+    },
+    {
+      "label": "D2c a held evening is not flagged held (the report cannot say it is waiting)",
+      "file": "../../src/lastlight/renderer_check/evaluate.py",
+      "oracle": "real",
+      "find": "placed.append(replace(result, held=True))",
+      "replace": "placed.append(replace(result, held=False))"
+    },
+    {
+      "label": "E1 the first evening moves back a day: 2026-10-09 is considered",
+      "file": "../../src/lastlight/renderer_check/rules.py",
+      "oracle": "real",
+      "find": "FIRST_EVENING: Final = dt.date(2026, 10, 10)",
+      "replace": "FIRST_EVENING: Final = dt.date(2026, 10, 9)"
+    },
+    {
+      "label": "E1b evaluate: the first evening itself is not considered (<= for <)",
+      "file": "../../src/lastlight/renderer_check/evaluate.py",
+      "oracle": "real",
+      "find": "if evening.date < rules.FIRST_EVENING:",
+      "replace": "if evening.date <= rules.FIRST_EVENING:"
+    },
+    {
+      "label": "E2 log(R/G) ratios use all frames, not the frames that have both values",
+      "file": "../../src/lastlight/renderer_check/evaluate.py",
+      "oracle": "real",
+      "find": "r is not None and o is not None",
+      "replace": "r is not None"
+    },
+    {
+      "label": "E3 a pixel-scale end outside v1's table is rendered anyway (crash) instead of n/a",
+      "file": "../../src/lastlight/renderer_check/render.py",
+      "oracle": "real",
+      "find": "    try:\n        v1_engine.check_domain(atmosphere, sun, view.elevations_deg)\n    except ValueError:\n        return False\n    return True",
+      "replace": "    return True"
+    },
+    {
+      "label": "E4 observed: a file name that only starts like a date is read (match for fullmatch)",
+      "file": "../../src/lastlight/renderer_check/observed.py",
+      "oracle": "real",
+      "find": "match = _FILE_NAME.fullmatch(path.name)",
+      "replace": "match = _FILE_NAME.match(path.name)"
+    },
+    {
+      "label": "E5 observed: a boolean is accepted as a number",
+      "file": "../../src/lastlight/renderer_check/observed.py",
+      "oracle": "real",
+      "find": "    if isinstance(value, bool) or not isinstance(value, int | float):",
+      "replace": "    if not isinstance(value, int | float):"
+    },
+    {
+      "label": "E6 observed: a non-finite number is accepted",
+      "file": "../../src/lastlight/renderer_check/observed.py",
+      "oracle": "real",
+      "find": "    if not math.isfinite(number):",
+      "replace": "    if False:"
+    },
+    {
+      "label": "E7 frames.csv prints the sun elevation to 6 decimals, not 2",
+      "file": "../../src/lastlight/renderer_check/report.py",
+      "oracle": "real",
+      "find": "f\"{pair.sun_elevation_deg:.2f}\"",
+      "replace": "f\"{pair.sun_elevation_deg:.6f}\""
+    },
+    {
+      "label": "E8 a pending evening in the report stage still exits 0",
+      "file": "../../src/lastlight/renderer_check/run.py",
+      "oracle": "real",
+      "find": "                    f\"{PROG}: no input record yet for {waiting}: a network fault or an HRRR \"\n                    \"analysis not published yet; run again later to collect it\",\n                    file=sys.stderr,\n                )\n                code = 1",
+      "replace": "                    f\"{PROG}: no input record yet for {waiting}: a network fault or an HRRR \"\n                    \"analysis not published yet; run again later to collect it\",\n                    file=sys.stderr,\n                )\n                code = 0"
+    },
+    {
+      "label": "X1 an HRRR error is always unreadable (a missing TCDC message is not told apart)",
+      "file": "../../src/lastlight/renderer_check/fetch.py",
+      "oracle": "real",
+      "find": "reason = \"hrrr_field_missing\" if _FIELD_MISSING in str(error) else \"hrrr_unreadable\"",
+      "replace": "reason = \"hrrr_unreadable\""
+    },
+    {
+      "label": "X2 a TCDC file absent from the archive is recorded as an aerosol run missing",
+      "file": "../../src/lastlight/renderer_check/fetch.py",
+      "oracle": "real",
+      "find": "\"hrrr_run_missing\", \"HRRR: the file is not in the archive\"",
+      "replace": "\"aerosol_run_missing\", \"HRRR: the file is not in the archive\""
+    },
+    {
+      "label": "X3 the fetch stage exits 0 although an evening has no record",
+      "file": "../../src/lastlight/renderer_check/run.py",
+      "oracle": "real",
+      "find": "                    f\"{', '.join(day.isoformat() for day in missing)}: a network fault or an HRRR \"\n                    \"analysis not published yet; run again later to collect it\",\n                    file=sys.stderr,\n                )\n                code = 1",
+      "replace": "                    f\"{', '.join(day.isoformat() for day in missing)}: a network fault or an HRRR \"\n                    \"analysis not published yet; run again later to collect it\",\n                    file=sys.stderr,\n                )\n                code = 0"
+    },
+    {
+      "label": "X4 the fingerprint is checked before the digest",
+      "file": "../../src/lastlight/renderer_check/guards.py",
+      "oracle": "real",
+      "find": "    check_table()\n    check_fingerprint()",
+      "replace": "    check_fingerprint()\n    check_table()"
+    },
+    {
+      "label": "X5 r_e takes the median of the signed contrasts, not of their absolute values",
+      "file": "../../src/lastlight/renderer_check/rules.py",
+      "oracle": "real",
+      "find": "statistics.median(abs(value) for value in values)",
+      "replace": "statistics.median(values)"
+    },
+    {
+      "label": "X6 the median of an even number of frames is the lower middle one",
+      "file": "../../src/lastlight/renderer_check/rules.py",
+      "oracle": "real",
+      "find": "statistics.median(abs(value) for value in values)",
+      "replace": "statistics.median_low(abs(value) for value in values)"
+    },
+    {
+      "label": "X7 the per-frame pairs run from the lowest sun to the highest",
+      "file": "../../src/lastlight/renderer_check/render.py",
+      "oracle": "real",
+      "find": "key=lambda frame: -frame.sun_elevation_deg",
+      "replace": "key=lambda frame: frame.sun_elevation_deg"
+    },
+    {
+      "label": "X8 the v1 g0 fetch exits 0 although a date has no v0 record",
+      "file": "../../src/lastlight/commands/g0.py",
+      "oracle": "real",
+      "find": "\"collect them with the v0 run first\",\n                file=sys.stderr,\n            )\n            code = 1",
+      "replace": "\"collect them with the v0 run first\",\n                file=sys.stderr,\n            )\n            code = 0"
+    },
+    {
+      "label": "X9 the verdict is rendered at the low pixel scale, not the nominal one",
+      "file": "../../src/lastlight/renderer_check/render.py",
+      "oracle": "real",
+      "find": "nominal = views[\"nominal\"]",
+      "replace": "nominal = views[\"low\"]"
+    },
+    {
+      "label": "Y1 the evening's cloud is the median of the transect values, not their mean",
+      "file": "../../src/lastlight/renderer_check/rules.py",
+      "oracle": "real",
+      "find": "    return math.fsum(values) / len(values)",
+      "replace": "    return statistics.median(values)"
+    },
+    {
+      "label": "Y2 every evening is rendered with the sun's azimuth of the first registered evening",
+      "file": "../../src/lastlight/renderer_check/evaluate.py",
+      "oracle": "real",
+      "find": "pairs = render_evening(evening.date, inputs.aod_550, inputs.ozone_du, evening.frames, views)",
+      "replace": "pairs = render_evening(rules.FIRST_EVENING, inputs.aod_550, inputs.ozone_du, evening.frames, views)"
+    },
+    {
+      "label": "Y3 the evening's ozone is dropped from the atmosphere handed to the renderer",
+      "file": "../../src/lastlight/renderer_check/render.py",
+      "oracle": "real",
+      "find": "atmosphere = Atmosphere(aod_550=aod_550, ozone_du=ozone_du)",
+      "replace": "atmosphere = Atmosphere(aod_550=aod_550)"
+    },
+    {
+      "label": "S1 fixer: a missing-run drop is stored while its retry window is open",
+      "file": "../../src/lastlight/renderer_check/fetch.py",
+      "oracle": "real",
+      "find": "        if record.drop_reason in RETRIED_REASONS and retry_window_open(day, now_utc):",
+      "replace": "        if False:"
+    },
+    {
+      "label": "S2 fixer: the window that holds a drop back lasts a day too long (<= for <)",
+      "file": "../../src/lastlight/renderer_check/fetch.py",
+      "oracle": "real",
+      "find": "    return (now_utc.date() - evening).days < RETRY_WINDOW_DAYS",
+      "replace": "    return (now_utc.date() - evening).days <= RETRY_WINDOW_DAYS"
+    },
+    {
+      "label": "S3 fixer: every drop reason is held back while the window is open, not only a missing run",
+      "file": "../../src/lastlight/renderer_check/fetch.py",
+      "oracle": "real",
+      "find": "        if record.drop_reason in RETRIED_REASONS and retry_window_open(day, now_utc):",
+      "replace": "        if record.drop_reason is not None and retry_window_open(day, now_utc):"
+    },
+    {
+      "label": "S4 fixer: the window never closes, so a missing-run drop is never stored",
+      "file": "../../src/lastlight/renderer_check/fetch.py",
+      "oracle": "real",
+      "find": "        if record.drop_reason in RETRIED_REASONS and retry_window_open(day, now_utc):",
+      "replace": "        if record.drop_reason in RETRIED_REASONS:"
+    }
+  ]
+}
