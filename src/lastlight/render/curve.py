@@ -25,7 +25,7 @@ from PIL import Image
 from lastlight.render import v1
 from lastlight.render.atmosphere import Atmosphere
 from lastlight.render.colorimetry import lab_to_srgb, spectrum_to_xyz, xyz_to_lab
-from lastlight.render.transfer import sky_spectrum
+from lastlight.render.transfer import check_quadrature, sky_spectrum
 
 ENGINES: tuple[str, ...] = ("v0", "v1")
 """The renderers: v0 is single scattering; v1 adds multiple scattering from the Bruneton table."""
@@ -57,6 +57,7 @@ def sky_xyz(
     rel_azimuth_deg: float = 0.0,
     *,
     engine: str = "v0",
+    quadrature: str = "registered",
 ) -> np.ndarray:
     """CIE XYZ of the sky at each of `view_elevations`, shape (views, 3), before any exposure.
 
@@ -68,11 +69,19 @@ def sky_xyz(
     `engine="v0"` (the default) is single scattering. `engine="v1"` adds the multiply scattered
     light of the Bruneton table (`lastlight.render.v1`) to exactly the v0 result; it raises
     `ValueError` outside the table's domain.
+
+    `quadrature` ("registered", the default, or "adaptive") is how the single scattering is
+    integrated along each line of sight, for either engine; see `lastlight.render.transfer`.
+    The table's multiple scattering does not depend on it.
     """
     check_engine(engine)
+    check_quadrature(quadrature)
     if engine == "v1":
         v1.check_domain(atm, sun_elevation, view_elevations)
-    spectra = [sky_spectrum(atm, sun_elevation, view, rel_azimuth_deg) for view in view_elevations]
+    spectra = [
+        sky_spectrum(atm, sun_elevation, view, rel_azimuth_deg, quadrature=quadrature)
+        for view in view_elevations
+    ]
     xyz = np.array([spectrum_to_xyz(spectrum) for spectrum in spectra])
     if engine == "v1":
         xyz = xyz + v1.multiple_scattering_xyz(atm, sun_elevation, view_elevations, rel_azimuth_deg)
@@ -80,15 +89,23 @@ def sky_xyz(
 
 
 def render_row(
-    atm: Atmosphere, sun_elevation: float, rel_azimuth_deg: float = 0.0, *, engine: str = "v0"
+    atm: Atmosphere,
+    sun_elevation: float,
+    rel_azimuth_deg: float = 0.0,
+    *,
+    engine: str = "v0",
+    quadrature: str = "registered",
 ) -> Curve:
     """The sky's colour at every view elevation for one sun elevation, exposed for L* = 70.
 
     `rel_azimuth_deg` is the view's azimuth minus the sun's: 0 (the default, and what the sealed
     forecast uses) is the solar vertical, and plus and minus the same angle are the same sky.
-    `engine` is "v0" (the default) or "v1", as for `sky_xyz`.
+    `engine` is "v0" (the default) or "v1", and `quadrature` "registered" (the default) or
+    "adaptive", as for `sky_xyz`.
     """
-    xyz = sky_xyz(atm, sun_elevation, VIEW_ELEVATIONS, rel_azimuth_deg, engine=engine)
+    xyz = sky_xyz(
+        atm, sun_elevation, VIEW_ELEVATIONS, rel_azimuth_deg, engine=engine, quadrature=quadrature
+    )
     brightest = xyz[:, 1].max()
     exposure = _PEAK_LUMINANCE / brightest if brightest > 0.0 else 0.0
     lab = xyz_to_lab(xyz * exposure)
@@ -104,15 +121,23 @@ def render_row(
     ]
 
 
-def render_curve(atm: Atmosphere, *, engine: str = "v0") -> Curve:
+def render_curve(atm: Atmosphere, *, engine: str = "v0", quadrature: str = "registered") -> Curve:
     """One row per (sun elevation, view elevation): sun elevation descending, view ascending.
 
-    `engine` is "v0" (the default, what the daily forecast paints) or "v1".
+    `engine` is "v0" (the default, what the daily forecast paints) or "v1". `quadrature` is
+    "registered" (the default, the integration G0 and renderer v1 are registered with) or
+    "adaptive" (what the daily forecast's v0 painting asks for: it differs only under heavy
+    aerosol; see `lastlight.render.transfer`).
     """
     check_engine(engine)
+    check_quadrature(quadrature)
     if engine == "v1":
         v1.check_domain(atm, max(SUN_ELEVATIONS), VIEW_ELEVATIONS)
-    return [row for sun in SUN_ELEVATIONS for row in render_row(atm, sun, engine=engine)]
+    return [
+        row
+        for sun in SUN_ELEVATIONS
+        for row in render_row(atm, sun, engine=engine, quadrature=quadrature)
+    ]
 
 
 def render_strip(
