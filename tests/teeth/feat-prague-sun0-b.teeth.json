@@ -1,0 +1,84 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "env",
+    "PYTHONDONTWRITEBYTECODE=1",
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-x",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_prague_sun0.py",
+    "tests/test_prague_control.py",
+    "-m",
+    "not network"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_prague_sun0.py",
+    "tests/test_prague_control.py",
+    "-m",
+    "not network"
+  ],
+  "mutants": [
+    {
+      "label": "7 e_i evaluated at the +10 constant instead of the fixture's sun",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    e = predicted_if_monte_carlo(data[\"sun_elevation_deg\"], views, azimuths)",
+      "replace": "    e = predicted_if_monte_carlo(SUN_ELEVATION_DEG, views, azimuths)"
+    },
+    {
+      "label": "8 rule B fit: a tie in r goes to the first (smallest) k",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "key=lambda k: (r_by_k[k], abs(k - V1_ASYMMETRY_K), k)",
+      "replace": "key=lambda k: r_by_k[k]"
+    },
+    {
+      "label": "9 rule B lobe: all counted conditions must halve becomes any",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if all(h for c, h in zip(counted, halved, strict=True) if c):",
+      "replace": "    if any(h for c, h in zip(counted, halved, strict=True) if c):  # mutant"
+    },
+    {
+      "label": "10 rule B: an uncounted condition is also required to halve",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if all(h for c, h in zip(counted, halved, strict=True) if c):",
+      "replace": "    if all(halved):"
+    },
+    {
+      "label": "11 rule B lobe factor 0.5 becomes 0.7",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "LOBE_FACTOR = 0.5\n",
+      "replace": "LOBE_FACTOR = 0.70\n"
+    },
+    {
+      "label": "12 lobe engine drops v1's multiple-scattering term",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    return single + multiple\n",
+      "replace": "    return single\n"
+    },
+    {
+      "label": "13 rule B fit: g*(0.1) used for both loads",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    k_star = {a: best_asymmetry_k(pilot_curves[a].r_by_k()) for a in loads}",
+      "replace": "    k_star = {a: best_asymmetry_k(pilot_curves[loads[-1]].r_by_k()) for a in loads}"
+    }
+  ]
+}

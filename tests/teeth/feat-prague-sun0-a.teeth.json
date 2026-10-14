@@ -1,0 +1,86 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "env",
+    "PYTHONDONTWRITEBYTECODE=1",
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-x",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_prague_sun0.py",
+    "tests/test_prague_control.py",
+    "-m",
+    "not network"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_prague_sun0.py",
+    "tests/test_prague_control.py",
+    "-m",
+    "not network"
+  ],
+  "mutants": [
+    {
+      "label": "16 [control] s via sqrt(var) instead of std",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "np.std is defined as the square root of np.var at the same ddof, so the two forms return the same float bit for bit; inert on every input rule_a can be given (finite 1-D arrays of at least two points, checked above it), and not inert only if numpy changed how std is computed.",
+      "find": "    s = float(np.std(d_all, ddof=STD_DDOF))",
+      "replace": "    s = float(np.sqrt(np.var(d_all, ddof=STD_DDOF)))"
+    },
+    {
+      "label": "1 rule A branch 1 bar 2U weakened to U",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if E <= UNCERTAINTY_BAR_FACTOR * U:\n        return CANNOT_TELL, 1",
+      "replace": "    if E <= U:\n        return CANNOT_TELL, 1"
+    },
+    {
+      "label": "2 rule A U = max(s, m) drops the mapping term m",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    U = max(s, m)\n",
+      "replace": "    U = s\n"
+    },
+    {
+      "label": "3 rule A s uses ddof 0",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    s = float(np.std(d_all, ddof=STD_DDOF))",
+      "replace": "    s = float(np.std(d_all, ddof=0))"
+    },
+    {
+      "label": "4 rule A branch 4 removed (anything not port is Monte Carlo)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if abs(D - E) <= U:\n        return MONTE_CARLO, 3\n    return CANNOT_TELL, 4\n",
+      "replace": "    return MONTE_CARLO, 3\n"
+    },
+    {
+      "label": "5 rule A rule set P includes azimuth 0",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "RULE_A_AZIMUTHS_DEG = (90.0, 180.0)",
+      "replace": "RULE_A_AZIMUTHS_DEG = (0.0, 90.0, 180.0)"
+    },
+    {
+      "label": "6 rule A |D| <= U inclusive becomes strict",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if abs(D) <= U:\n        return PORT, 2",
+      "replace": "    if abs(D) < U:\n        return PORT, 2"
+    }
+  ]
+}

@@ -1,0 +1,175 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "env",
+    "PYTHONDONTWRITEBYTECODE=1",
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-x",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_prague_sun0.py",
+    "tests/test_prague_control.py",
+    "-m",
+    "not network"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_prague_sun0.py",
+    "tests/test_prague_control.py",
+    "-m",
+    "not network"
+  ],
+  "mutants": [
+    {
+      "label": "14 port bound drops the / 1.066",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    port = multiple * MONTE_CARLO_EXCESS / (1.0 + MONTE_CARLO_EXCESS)\n",
+      "replace": "    port = multiple * MONTE_CARLO_EXCESS\n"
+    },
+    {
+      "label": "15 fixture builder not given the spec's sun (evaluates at +10)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "double",
+      "find": "    sun = spec.sun_elevation_deg\n",
+      "replace": "    sun = SUN_ELEVATION_DEG\n"
+    },
+    {
+      "label": "17 rule B floor removed (every condition counts)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    counted = tuple(bool(r >= EXCESS_FLOOR) for r in base)",
+      "replace": "    counted = tuple(True for _ in base)"
+    },
+    {
+      "label": "18 rule A m also ranges over xyz_binned and xyz_altitude_0",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "RULE_A_ALTERNATIVE_READINGS = (\"xyz_inverse_visibility\", \"xyz_matched_aerosol_depth\")",
+      "replace": "RULE_A_ALTERNATIVE_READINGS = (\"xyz_inverse_visibility\", \"xyz_matched_aerosol_depth\", \"xyz_binned\", \"xyz_altitude_0\")"
+    },
+    {
+      "label": "19 Prague luminance guard removed from xyz_block",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "            if not (math.isfinite(triple[1]) and triple[1] > 0.0):",
+      "replace": "            if False:"
+    },
+    {
+      "label": "20 rule B r over all eight views, not the six nominal",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    index = nominal_indices(views)\n    prague = _fixture_xyz(data[\"atmospheres\"][f\"{aod:g}\"], TOWARD_SUN_AZIMUTH_DEG)\n    return [views[i] for i in index], prague[index, 1]",
+      "replace": "    index = list(range(len(views)))\n    prague = _fixture_xyz(data[\"atmospheres\"][f\"{aod:g}\"], TOWARD_SUN_AZIMUTH_DEG)\n    return [views[i] for i in index], prague[index, 1]"
+    },
+    {
+      "label": "E1 [reviewer extra] the #34 report's sd uses ddof 0 (sun-10 report text changes)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "{d[mask].std(ddof=1):.4f}",
+      "replace": "{d[mask].std(ddof=0):.4f}"
+    },
+    {
+      "label": "E2 [reviewer extra] the builder does not refuse an out-of-axis sun",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "double",
+      "find": "    check_sun_elevation(sun, axes)\n",
+      "replace": "    pass\n"
+    },
+    {
+      "label": "21 [fixer] fixture builder not given the spec's relative azimuths (builds sun10's 0, 90, 180)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "double",
+      "find": "    azimuths = spec.rel_azimuths_deg\n",
+      "replace": "    azimuths = REL_AZIMUTHS_DEG\n"
+    },
+    {
+      "label": "22 [fixer] build_fixture's default spec is the sun-0 one, not #34's sun +10",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "double",
+      "find": "def build_fixture(cache: Path, spec: FixtureSpec = SUN10) -> dict:",
+      "replace": "def build_fixture(cache: Path, spec: FixtureSpec = SUN0) -> dict:"
+    },
+    {
+      "label": "23 [fixer] the #34 rule's spread of d uses ddof 0 (sentence number moves)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    spread = float(np.std(d, ddof=1))\n",
+      "replace": "    spread = float(np.std(d, ddof=0))\n"
+    },
+    {
+      "label": "24 [fixer] the #34 rule's reading shift is the largest, not the mean, |d - d in 1 / V|",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    reading_shift = float(np.mean(np.abs(d - readings[\"visibility read in 1 / V\"])))\n",
+      "replace": "    reading_shift = float(np.max(np.abs(d - readings[\"visibility read in 1 / V\"])))\n"
+    },
+    {
+      "label": "25 [fixer] the #34 rule tells the models apart on the smaller of spread and shift (verdict flips)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if predicted <= max(spread, reading_shift):\n",
+      "replace": "    if predicted <= min(spread, reading_shift):\n"
+    },
+    {
+      "label": "26 [fixer] the #34 totals table prints v1 in the v0 / Prague column",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "| {v0[i, 1] / prague[i, 1]:.3f} ",
+      "replace": "| {v1[i, 1] / prague[i, 1]:.3f} "
+    },
+    {
+      "label": "27 [fixer] the #34 control table's v0 u'v' distance is measured on v1",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "u0 = np.linalg.norm(_uv(v0[NOMINAL_VIEWS - 1]) - _uv(prague[NOMINAL_VIEWS - 1]))",
+      "replace": "u0 = np.linalg.norm(_uv(v1[NOMINAL_VIEWS - 1]) - _uv(prague[NOMINAL_VIEWS - 1]))"
+    },
+    {
+      "label": "28 [fixer] rule B under a reading refits g*(a) from the primary reading's Prague, not the reading's",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "                _toward_sun_reading_y(pilot, a, reading),\n",
+      "replace": "                _toward_sun_reading_y(pilot, a, \"xyz\"),\n"
+    },
+    {
+      "label": "29 [fixer] rule B under a reading takes sun-0 Prague from the primary reading, not the reading's",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "                _toward_sun_reading_y(sun0, a, reading),\n",
+      "replace": "                _toward_sun_reading_y(sun0, a, \"xyz\"),\n"
+    },
+    {
+      "label": "30 [fixer] the reading sweep evaluates the lobe diagnostic at sun +10 instead of the fixture's sun",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "                    data[\"sun_elevation_deg\"],\n",
+      "replace": "                    SUN_ELEVATION_DEG,\n"
+    },
+    {
+      "label": "31 [fixer] the report's reading table prints the registered verdict on every row",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        gives = f\"{row.result.verdict} (branch {row.result.branch})\"\n",
+      "replace": "        gives = \"aerosol lobe (branch 2)\"\n"
+    },
+    {
+      "label": "32 [fixer] the reading sweep hands rule B its two arrays the wrong way round",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "            rule_b(base, fit),\n",
+      "replace": "            rule_b(fit, base),\n"
+    }
+  ]
+}
