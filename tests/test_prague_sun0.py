@@ -204,7 +204,7 @@ def test_rule_a_s_is_the_sample_standard_deviation_ddof_1() -> None:
     result = tool.rule_a(
         d=np.array([0.0, 1.0]),
         e=np.array([5.0, 5.0]),
-        d_alternatives=alternatives(a=0.5, b=0.5),
+        d_alternatives={"a": np.full(2, 0.5), "b": np.full(2, 0.5)},
     )
     # ddof = 1: sqrt(0.5); the population value (ddof = 0) would be 0.5.
     assert result.s == pytest.approx(math.sqrt(0.5), rel=1e-12, abs=0)

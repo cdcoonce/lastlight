@@ -757,6 +757,213 @@ def cmd_fixture(cache: Path, *, check: bool) -> int:
 MONTE_CARLO_EXCESS = 0.066
 
 
+# --- the sun-0 decision rules (#45) ---------------------------------------------------------------
+#
+# Registered in `docs/renderer/prague-sun0-criterion.md`, in the commit that landed that file and
+# before any Prague number at sun 0 existed. The functions below take arrays and numbers and return
+# the verdict and the branch that produced it; they read no fixture and run no model. A
+# disagreement between that file and this code is a defect in this code.
+
+UNCERTAINTY_BAR_FACTOR = 2.0
+"""Rule A: the two predictions are separated only if E exceeds this many U (the 2U bar)."""
+STD_DDOF = 1
+"""Rule A: s is the sample standard deviation (ddof = 1)."""
+RULE_A_AZIMUTHS_DEG = (90.0, 180.0)
+"""Rule A's point set P: these relative azimuths, all eight views: 16 points."""
+RULE_A_ALTERNATIVE_READINGS = ("xyz_inverse_visibility", "xyz_matched_aerosol_depth")
+"""The two ways of setting Prague's aerosol that make up m. `xyz_binned` (a spectral reading) and
+`xyz_altitude_0` (an observer altitude) are deliberately not among them."""
+RULE_A_REPORTED_READINGS = ("xyz_binned", "xyz_altitude_0")
+"""Reported beside rule A's verdict, never part of m."""
+
+V1_ASYMMETRY_K = 70
+"""v1's Henyey-Greenstein asymmetry, 0.7, in integer hundredths: the k that g = 0.7 means."""
+ASYMMETRY_GRID_K = tuple(range(30, 91))
+"""Rule B's grid: g = k / 100 for the 61 integers k from 30 to 90. Bounds are compared on k."""
+LOBE_FACTOR = 0.5
+"""Rule B: the fitted asymmetry must cut the excess to at most this share of v1's own."""
+EXCESS_FLOOR = 0.05
+"""Rule B: a sun-0 condition counts only if v1's own r there is at least this (5 percent rms)."""
+
+CANNOT_TELL = "cannot tell"
+PORT = "port"
+MONTE_CARLO = "Monte Carlo"
+NO_EXCESS = "no excess at sun 0"
+AEROSOL_LOBE = "aerosol lobe"
+NEITHER = "neither"
+
+
+def asymmetry_of(k: int) -> float:
+    """The Henyey-Greenstein asymmetry of grid index `k` (integer hundredths)."""
+    return k / 100
+
+
+def rule_a_verdict(D: float, E: float, U: float) -> tuple[str, int]:
+    """Rule A's verdict and the branch (1 to 4) that produced it, in the registered order.
+
+    1. E <= 2U: cannot tell (the predictions are not separated by twice the uncertainty).
+    2. else |D| <= U: port.
+    3. else |D - E| <= U: Monte Carlo.
+    4. else: cannot tell (neither prediction lies within U of D).
+
+    Every bound is inclusive on the side that is the less decisive for the rule's claim: E exactly
+    2U is "cannot tell", D exactly U from either prediction is a call. `2.0 * U` is exact.
+    """
+    if E <= UNCERTAINTY_BAR_FACTOR * U:
+        return CANNOT_TELL, 1
+    if abs(D) <= U:
+        return PORT, 2
+    if abs(D - E) <= U:
+        return MONTE_CARLO, 3
+    return CANNOT_TELL, 4
+
+
+@dataclass(frozen=True)
+class RuleA:
+    """Rule A's statistics and verdict. `D_alternatives` is D under each alternative reading."""
+
+    D: float
+    E: float
+    s: float
+    m: float
+    U: float
+    verdict: str
+    branch: int
+    D_alternatives: dict[str, float]
+
+
+def _vector(name: str, values: Sequence[float]) -> np.ndarray:
+    array = np.asarray(values, dtype=float)
+    if array.ndim != 1:
+        raise ValueError(f"{name} must be one-dimensional, got shape {array.shape}")
+    return array
+
+
+def rule_a(
+    d: Sequence[float], e: Sequence[float], d_alternatives: dict[str, Sequence[float]]
+) -> RuleA:
+    """Rule A on the rule set's points: D, E, s, m, U, the verdict and the branch.
+
+    `d` and `e` are d_i and e_i at the points of P (primary reading); `d_alternatives` maps each
+    alternative reading to its own d_i at the same points. D and E are the means of d and e;
+    s the sample standard deviation of d (ddof = 1); m the largest |D_r - D| over the
+    alternative readings; U = max(s, m). All comparisons use these unrounded values.
+    """
+    d_all = _vector("d", d)
+    e_all = _vector("e", e)
+    others = {name: _vector(f"d under {name}", values) for name, values in d_alternatives.items()}
+    if not others:
+        raise ValueError("rule A needs at least one alternative reading to set m")
+    if e_all.size != d_all.size or any(v.size != d_all.size for v in others.values()):
+        raise ValueError("d, e and every alternative reading need the same number of points")
+    for name, values in (("d", d_all), ("e", e_all), *others.items()):
+        if not np.isfinite(values).all():
+            raise ValueError(f"{name} must be finite at every point")
+    if d_all.size < 2:
+        raise ValueError("rule A needs at least two points (s has ddof = 1)")
+    D = float(np.mean(d_all))
+    E = float(np.mean(e_all))
+    s = float(np.std(d_all, ddof=STD_DDOF))
+    shifts = {name: float(np.mean(values)) for name, values in others.items()}
+    m = max(abs(shift - D) for shift in shifts.values())
+    U = max(s, m)
+    verdict, branch = rule_a_verdict(D, E, U)
+    return RuleA(D, E, s, m, U, verdict, branch, shifts)
+
+
+def best_asymmetry_k(r_by_k: dict[int, float]) -> int:
+    """g*'s grid index: the k that minimises r on the grid.
+
+    If two grid values give exactly the same r, the one nearer k = 70 wins, and at equal distance
+    the lower one. `r_by_k` must hold r for every k of the grid and nothing else.
+    """
+    if set(r_by_k) != set(ASYMMETRY_GRID_K):
+        raise ValueError("r must be given for exactly the grid k = 30 to 90, nothing else")
+    if not all(math.isfinite(r) for r in r_by_k.values()):
+        raise ValueError("r must be finite at every grid value")
+    return min(ASYMMETRY_GRID_K, key=lambda k: (r_by_k[k], abs(k - V1_ASYMMETRY_K), k))
+
+
+def excess(model_y: Sequence[float], prague_y: Sequence[float]) -> tuple[float, float]:
+    """(r, signed mean) of ln(model / Prague) over the given views, in luminance.
+
+    r is the root mean square of the logarithms: unsigned. The signed mean is their arithmetic
+    mean. Both refuse a luminance that is not finite and above 0.
+    """
+    model = _vector("model luminance", model_y)
+    prague = _vector("Prague luminance", prague_y)
+    if model.size != prague.size or model.size == 0:
+        raise ValueError("model and Prague luminance need the same, non-zero number of views")
+    for name, values in (("model", model), ("Prague", prague)):
+        if not (np.isfinite(values).all() and (values > 0.0).all()):
+            raise ValueError(f"{name} luminance must be finite and above 0 at every view")
+    logs = np.log(model / prague)
+    return float(np.sqrt(np.mean(logs**2))), float(np.mean(logs))
+
+
+@dataclass(frozen=True)
+class RuleB:
+    """Rule B's verdict and branch (1 to 3), with the per-condition tests behind it."""
+
+    verdict: str
+    branch: int
+    counted: tuple[bool, ...]
+    halved: tuple[bool, ...]
+
+
+def rule_b(r_base: Sequence[float], r_fit: Sequence[float]) -> RuleB:
+    """Rule B on the sun-0 conditions: `r_base` is v1's own r (g = 0.7), `r_fit` r at g*(a).
+
+    A condition counts only if r_base >= 0.05. Then, in order:
+
+    1. no condition counts: no excess at sun 0.
+    2. aerosol lobe, if for every counted condition r_fit <= 0.5 * r_base.
+    3. else neither (not the port either: see `port_bound`).
+
+    With one counted condition the lobe test is made on that one alone, deliberately.
+    """
+    base = _vector("r_base", r_base)
+    fit = _vector("r_fit", r_fit)
+    if base.size != fit.size:
+        raise ValueError("r_base and r_fit need the same number of conditions")
+    for name, values in (("r_base", base), ("r_fit", fit)):
+        if not np.isfinite(values).all():
+            raise ValueError(f"{name} must be finite")
+        if (values < 0.0).any():
+            raise ValueError(f"{name} is a root mean square and cannot be negative")
+    counted = tuple(bool(r >= EXCESS_FLOOR) for r in base)
+    halved = tuple(bool(f <= LOBE_FACTOR * r) for r, f in zip(base, fit, strict=True))
+    if not any(counted):
+        return RuleB(NO_EXCESS, 1, counted, halved)
+    if all(h for c, h in zip(counted, halved, strict=True) if c):
+        return RuleB(AEROSOL_LOBE, 2, counted, halved)
+    return RuleB(NEITHER, 3, counted, halved)
+
+
+def port_bound(total_y: Sequence[float], multiple_y: Sequence[float]) -> np.ndarray:
+    """b = ln(T / (T - M * 0.066 / 1.066)) at each view: the most the port adds to ln(v1 / Prague).
+
+    T and M are v1's total and multiple-scattering luminance: 6.6 percent of the multiple
+    scattering, the gap at `aod_550` 0.1, charged at every load. It is never negative: the port can
+    only make v1 too bright.
+    """
+    total = _vector("total luminance", total_y)
+    multiple = _vector("multiple-scattering luminance", multiple_y)
+    if total.size != multiple.size:
+        raise ValueError("total and multiple-scattering luminance need the same number of views")
+    if not (np.isfinite(total).all() and np.isfinite(multiple).all()):
+        raise ValueError("luminance must be finite")
+    if (multiple < 0.0).any() or (multiple >= total).any():
+        raise ValueError("multiple-scattering luminance must be in [0, total)")
+    port = multiple * MONTE_CARLO_EXCESS / (1.0 + MONTE_CARLO_EXCESS)
+    return np.log(total / (total - port))
+
+
+def port_bound_rms(total_y: Sequence[float], multiple_y: Sequence[float]) -> float:
+    """B: the root mean square of `port_bound` over the views."""
+    return float(np.sqrt(np.mean(port_bound(total_y, multiple_y) ** 2)))
+
+
 def _fixture_xyz(entry: dict, azimuth: float, variant: str = "xyz") -> np.ndarray:
     block = entry["xyz"] if variant == "xyz" else entry["diagnostics"][variant]
     return np.array(block[f"{azimuth:g}"], dtype=float)
