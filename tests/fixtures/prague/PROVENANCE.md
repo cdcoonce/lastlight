@@ -1,9 +1,17 @@
-# Provenance of `sun10.json`
+# Provenance of `sun10.json` and `sun0.json`
 
-`sun10.json` holds CIE XYZ of the clear daytime sky as the Prague Sky Model gives it, for the
-control of issue #34: renderer v1 against an independent daylight model at sun +10 degrees.
-`tests/test_prague_control.py` reads it; nothing in CI needs the model, the datasets or the
-network. The model's licence notice is in `NOTICE`.
+Two fixtures hold CIE XYZ of the clear daytime sky as the Prague Sky Model gives it, for renderer
+v1's daylight controls. They are made by the same tool from the same model, datasets and
+configuration; only the sun and the relative azimuths differ.
+
+| fixture | sun elevation | relative azimuths | made for | read by |
+| --- | --- | --- | --- | --- |
+| `sun10.json` | +10 degrees | 0, 90, 180 | the control of issue #34: renderer v1 against an independent daylight model | `tests/test_prague_control.py`, `tests/test_prague_sun0.py` |
+| `sun0.json` | 0 degrees | 0, 30, 90, 180 | the sun-0 rules of issue #45 (`docs/renderer/prague-sun0-criterion.md`); azimuth 30 is where the port's 6.6 percent excess over the Monte Carlo was measured | `tests/test_prague_sun0.py` |
+
+Each records its own sun elevation, its azimuths and the command that remakes it
+(`provenance.command`). `sun10.json` is also the sun +10 fit of #45's rule B. Nothing in CI needs
+the model, the datasets or the network. The model's licence notice is in `NOTICE`.
 
 ## What was used
 
@@ -17,10 +25,11 @@ network. The model's licence notice is in `NOTICE`.
 
 The axes of the full dataset (read from its header): visibility 20, 27.6, 40, 59.4, 90, 131.8 km;
 ground albedo 0, 1/3, 2/3, 1; 22 observer altitudes from 0 to 15000 m (the two around 340 m are
-234.375 and 405); 30 sun elevations (the two around +10 degrees are 8.05 and 11.25); 11 spectral
-channels of 40 nm from 320 to 760 nm, centred at 340, 380, ..., 740 nm. The model interpolates
-linearly between neighbouring nodes of each axis, and clamps a value outside an axis to its end
-without a word.
+234.375 and 405); 30 sun elevations from -4.2 to 90 degrees (0 is a node, between -0.5 and 1.0, so
+`sun0.json` needs no interpolation in the sun; `sun10.json` interpolates between the nodes 8.05 and
+11.25); 11 spectral channels of 40 nm from 320 to 760 nm, centred at 340, 380, ..., 740 nm. The
+model interpolates linearly between neighbouring nodes of each axis, and clamps a value outside an
+axis to its end without a word.
 
 ## Why the full dataset, not the ground-level one
 
@@ -33,22 +42,28 @@ diagnostic `xyz_altitude_0` is that altitude 0 reading.
 
 ## The configuration
 
-- Sun elevation +10 degrees (the model's "ground level solar elevation at origin"), sun azimuth 0;
-  the view is at the relative azimuths 0, 90 and 180 degrees.
+- Sun elevation +10 degrees for `sun10.json` and 0 degrees for `sun0.json` (the model's "ground
+  level solar elevation at origin"), sun azimuth 0; the view is at the relative azimuths 0, 90 and
+  180 degrees for `sun10.json`, and 0, 30, 90 and 180 degrees for `sun0.json`.
 - Observer altitude 0.34 km. `PragueSkyModel::computeParameters` lifts the viewpoint by 50 m, so the
-  driver gives it a viewpoint 290 m up; the driver prints the altitude the model ends up with and
-  the tool refuses any that is not 340 m (and any sun elevation that is not 10 degrees).
+  driver gives it a viewpoint 290 m up; the driver prints the altitude and the sun elevation the
+  model ends up with and the tool refuses any altitude that is not 340 m and any sun elevation that
+  is not the one asked for. A sun elevation outside the dataset's sun axis (-4.2 to 90 degrees) is
+  refused before the model is asked, because the model would clamp it without a word.
 - Ground albedo 0.2, v1's fixed albedo (the nodes around it are 0 and 1/3).
-- View elevations: WHTM1's five bands and its reference elevation at the nominal pixel scale,
-  `lastlight.g0.collect.build_views()["nominal"].elevations_deg` (1.5066, 1.9589, 2.4113, 2.8636,
-  3.3159 and 3.9944 degrees), then 30 and 60 degrees as diagnostics. `test_the_fixture_views_are_the_cameras_nominal_views`
-  fails if a refit of the camera moves them.
+- View elevations, the same in both fixtures: WHTM1's five bands and its reference elevation at the
+  nominal pixel scale, `lastlight.g0.collect.build_views()["nominal"].elevations_deg` (1.5066,
+  1.9589, 2.4113, 2.8636, 3.3159 and 3.9944 degrees), then 30 and 60 degrees as diagnostics.
+  `test_the_fixture_views_are_the_cameras_nominal_views` and
+  `test_the_sun_0_fixture_views_are_the_cameras_nominal_views` fail if a refit of the camera moves
+  them.
 - Two atmospheres, v1's `Atmosphere(aod_550=...)` with its defaults (Angstrom 1.3, aerosol scale
   height 1.5 km, ozone 280 DU, 970 hPa): `aod_550` 0.03 and 0.1.
 
 ## The mapping from `aod_550` to Prague's visibility
 
-Prague takes the horizontal visibility at the ground. Computed, not tuned, from
+The mapping does not involve the sun: both fixtures record the same two visibilities. Prague takes
+the horizontal visibility at the ground. Computed, not tuned, from
 `lastlight.render.atmosphere` (`tools/prague_reference.py: visibility_km`): Koschmieder at 550 nm,
 V = 3.912 / beta, with beta the extinction at the ground: v1's Rayleigh vertical optical depth at its
 970 hPa (0.0927566) over its 8 km Rayleigh scale height = 0.0115946 per km, plus `aod_550` over its
@@ -74,7 +89,12 @@ own colour-matching functions and white-card normalisation,
 `lastlight.render.colorimetry.spectrum_to_xyz`. XYZ is therefore on v1's scale: a white card lit by
 the extraterrestrial sun has Y = 1.
 
-## Diagnostics (other readings of the same model; finite-only in the tests)
+## Diagnostics (other readings of the same model)
+
+Both fixtures hold every reading below at every azimuth they have. #34's tests only require them
+to be finite. At sun 0 they are used: rule A's `m` ranges over `xyz_inverse_visibility` and
+`xyz_matched_aerosol_depth`, `xyz_binned` and `xyz_altitude_0` are reported beside it, and
+`report --sun 0` runs rule B under each of the four (reported, not ruled).
 
 - `xyz_binned`: piecewise-constant channels, the model's own lookup (a wavelength takes the value of
   the 40 nm bin that holds it, zero outside 320 to 760 nm).
@@ -93,10 +113,19 @@ the extraterrestrial sun has Y = 1.
 ```
 uv run python tools/prague_reference.py fetch build fixture    # about 4 minutes after the downloads
 uv run python tools/prague_reference.py fixture --check        # re-evaluate and compare, write nothing
-uv run python tools/prague_reference.py report                 # the results tables, from the fixture
+uv run python tools/prague_reference.py report                 # #34's results tables, from sun10.json
+uv run python tools/prague_reference.py fixture --sun 0        # about 30 seconds once the model is built
+uv run python tools/prague_reference.py fixture --sun 0 --check
+uv run python tools/prague_reference.py report --sun 0         # rules A and B at sun 0, from both fixtures
 ```
+
+`--sun` takes the sun elevation of a registered fixture (10 or 0); any other is an error, and
+`--output PATH` writes or checks a registered fixture at another path (the recorded command is the
+registered one either way). With no `--sun` the tool does what it did before there were two
+fixtures: `fixture` regenerates `sun10.json` byte for byte.
 
 `fetch` clones the model at the pinned commit and downloads both datasets, verifying size and SHA-256
 (2.5 GB); `build` compiles `PragueSkyModel.cpp` and lastlight's driver with the system C++17
 compiler (no CMake needed); `fixture` runs the driver. `pytest -m network
-tests/test_prague_control.py` runs the `--check` against the built model.
+tests/test_prague_control.py tests/test_prague_sun0.py` runs both `--check`s against the built
+model.
