@@ -1461,6 +1461,66 @@ def test_rule_b_says_neither_when_prague_is_brighter_than_v1_uniformly() -> None
     assert (result.verdict, result.branch) == ("neither", 3)
 
 
+# --- rule B under the other readings of Prague: reported, not ruled -------------------------------
+#
+# The registered verdict is defined on Prague's primary reading, and rule B has no term for the
+# reading (rule A has m). The same rule is run end to end under each of the fixture's four other
+# readings: g*(a) refitted at sun +10 under the reading, then r at 0.7, r at g*(a), their ratio and
+# the count at sun 0 under the reading. The ratios below are the reviewer's, from a script of its
+# own written from the criterion; the full-precision pins are further down.
+
+OTHER_READINGS = (
+    "xyz_inverse_visibility",
+    "xyz_matched_aerosol_depth",
+    "xyz_binned",
+    "xyz_altitude_0",
+)
+
+
+@cache
+def rule_b_readings() -> dict:
+    return load_tool().evaluate_rule_b_readings(fixture_sun10(), fixture_sun0())
+
+
+def test_rule_b_run_under_the_registered_reading_is_the_ruling() -> None:
+    """Positive control: the sweep's code path, given the primary reading, is rule B itself."""
+    here, ruled = rule_b_readings()["xyz"], rule_b()
+    assert here.k_star == ruled.k_star
+    for aod in LOADS:
+        assert here.r_base[aod] == pytest.approx(ruled.sun0[aod].r_at(70), rel=1e-12, abs=0)
+        assert here.r_fit[aod] == pytest.approx(
+            ruled.sun0[aod].r_at(ruled.k_star[aod]), rel=1e-12, abs=0
+        )
+    assert here.result == ruled.result
+
+
+def test_rule_b_readings_are_the_registered_one_then_the_four_others_in_order() -> None:
+    assert list(rule_b_readings()) == ["xyz", *OTHER_READINGS]
+    assert load_tool().RULE_B_OTHER_READINGS == OTHER_READINGS
+
+
+REVIEWER_RATIO_AT_0_03 = {  # r(g*) / r(0.7) at sun 0, aod 0.03, g* refitted at sun +10 per reading
+    "xyz_inverse_visibility": 0.501,
+    "xyz_matched_aerosol_depth": 0.964,
+    "xyz_binned": 0.659,
+    "xyz_altitude_0": 0.702,
+}
+
+
+def test_the_lobe_verdict_holds_under_the_registered_reading_and_not_under_the_others_at_0_03() -> (
+    None
+):
+    readings = rule_b_readings()
+    assert (readings["xyz"].result.verdict, readings["xyz"].result.branch) == ("aerosol lobe", 2)
+    for name, ratio in REVIEWER_RATIO_AT_0_03.items():
+        here = readings[name]
+        assert here.r_fit[0.03] / here.r_base[0.03] == pytest.approx(ratio, abs=5e-4), name
+        assert here.r_fit[0.03] > 0.5 * here.r_base[0.03], name  # not halved: the 0.5 bar fails
+        assert here.r_fit[0.1] <= 0.5 * here.r_base[0.1], name  # at 0.1 every reading halves
+        assert here.result.counted == (True, True), name
+        assert (here.result.verdict, here.result.branch) == ("neither", 3), name
+
+
 # --- selection by value, end to end ---------------------------------------------------------------
 
 
