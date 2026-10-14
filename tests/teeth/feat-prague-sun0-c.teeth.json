@@ -135,6 +135,41 @@
       "oracle": "real",
       "find": "u0 = np.linalg.norm(_uv(v0[NOMINAL_VIEWS - 1]) - _uv(prague[NOMINAL_VIEWS - 1]))",
       "replace": "u0 = np.linalg.norm(_uv(v1[NOMINAL_VIEWS - 1]) - _uv(prague[NOMINAL_VIEWS - 1]))"
+    },
+    {
+      "label": "28 [fixer] rule B under a reading refits g*(a) from the primary reading's Prague, not the reading's",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "                _toward_sun_reading_y(pilot, a, reading),\n",
+      "replace": "                _toward_sun_reading_y(pilot, a, \"xyz\"),\n"
+    },
+    {
+      "label": "29 [fixer] rule B under a reading takes sun-0 Prague from the primary reading, not the reading's",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "                _toward_sun_reading_y(sun0, a, reading),\n",
+      "replace": "                _toward_sun_reading_y(sun0, a, \"xyz\"),\n"
+    },
+    {
+      "label": "30 [fixer] the reading sweep evaluates the lobe diagnostic at sun +10 instead of the fixture's sun",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "                    data[\"sun_elevation_deg\"],\n",
+      "replace": "                    SUN_ELEVATION_DEG,\n"
+    },
+    {
+      "label": "31 [fixer] the report's reading table prints the registered verdict on every row",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        gives = f\"{row.result.verdict} (branch {row.result.branch})\"\n",
+      "replace": "        gives = \"aerosol lobe (branch 2)\"\n"
+    },
+    {
+      "label": "32 [fixer] the reading sweep hands rule B its two arrays the wrong way round",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "            rule_b(base, fit),\n",
+      "replace": "            rule_b(fit, base),\n"
     }
   ]
 }

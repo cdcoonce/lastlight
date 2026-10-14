@@ -1619,6 +1619,109 @@ def evaluate_rule_b(pilot: dict, sun0: dict) -> RuleBReport:
     return RuleBReport(pilot_curves, sun0_curves, k_star, k_best, bounds, result)
 
 
+RULE_B_OTHER_READINGS = (
+    "xyz_inverse_visibility",
+    "xyz_matched_aerosol_depth",
+    "xyz_binned",
+    "xyz_altitude_0",
+)
+"""The fixture's other readings of Prague, over which rule B is run and reported, never ruled.
+
+Rule A has a term for the reading (m, over two of these); rule B, as registered, has none, and its
+verdict is defined on the primary reading alone."""
+
+
+@dataclass(frozen=True)
+class RuleBReading:
+    """Rule B run end to end under one reading of Prague: a report, not a ruling."""
+
+    reading: str
+    k_star: dict[float, int]  # g*(a), refitted at sun +10 under this reading
+    r_base: dict[float, float]  # at sun 0, g = 0.7, under this reading
+    r_fit: dict[float, float]  # at sun 0, at this reading's own g*(a)
+    result: RuleB  # rule B's logic on those two, over the loads in order
+
+
+def _toward_sun_reading_y(data: dict, aod: float, reading: str) -> np.ndarray:
+    """Prague's luminance under `reading` at the six nominal views (relative azimuth 0)."""
+    index = nominal_indices(data["view_elevations_deg"])
+    entry = data["atmospheres"][f"{aod:g}"]
+    return _fixture_xyz(entry, TOWARD_SUN_AZIMUTH_DEG, reading)[index, 1]
+
+
+def _curve_against(
+    aod: float, sun_elevation_deg: float, model_y: Sequence[np.ndarray], prague_y: np.ndarray
+) -> LobeCurve:
+    """`lobe_curve`, from the lobe diagnostic's luminance already computed for every k."""
+    pairs = [excess(y, prague_y) for y in model_y]
+    r = tuple(r for r, _ in pairs)
+    return LobeCurve(sun_elevation_deg, aod, ASYMMETRY_GRID_K, r, tuple(m for _, m in pairs))
+
+
+def evaluate_rule_b_readings(
+    pilot: dict, sun0: dict, readings: Sequence[str] = ("xyz", *RULE_B_OTHER_READINGS)
+) -> dict[str, RuleBReading]:
+    """Rule B under each given reading of Prague (by default: the registered one, then the others).
+
+    For each reading, g*(a) is refitted at the pilot fixture (sun +10) from Prague's luminance
+    under that reading; r at g = 0.7 and at g*(a) is taken at sun 0 under the same reading; and
+    `rule_b` is applied unchanged. Only Prague's reading varies. The lobe diagnostic does not
+    depend on it, so it is computed once per condition and shared. Under "xyz" this is
+    `evaluate_rule_b`.
+    """
+    if pilot["sun_elevation_deg"] != SUN_ELEVATION_DEG:
+        raise PragueError("rule B fits g*(a) at sun +10: the pilot fixture is not at that sun")
+    if sun0["sun_elevation_deg"] != 0.0:
+        raise PragueError("rule B rules at sun 0: the second fixture is not at that sun")
+    loads = AEROSOL_OPTICAL_DEPTHS
+    views = {}
+    model = {}
+    for name, data in (("pilot", pilot), ("sun0", sun0)):
+        views[name] = _toward_sun(data, loads[0])[0]
+        for aod in loads:
+            model[name, aod] = [
+                lobe_xyz(
+                    aod,
+                    asymmetry_of(k),
+                    data["sun_elevation_deg"],
+                    views[name],
+                    TOWARD_SUN_AZIMUTH_DEG,
+                )[:, 1]
+                for k in ASYMMETRY_GRID_K
+            ]
+    out = {}
+    for reading in readings:
+        pilot_curves = {
+            a: _curve_against(
+                a,
+                pilot["sun_elevation_deg"],
+                model["pilot", a],
+                _toward_sun_reading_y(pilot, a, reading),
+            )
+            for a in loads
+        }
+        sun0_curves = {
+            a: _curve_against(
+                a,
+                sun0["sun_elevation_deg"],
+                model["sun0", a],
+                _toward_sun_reading_y(sun0, a, reading),
+            )
+            for a in loads
+        }
+        fitted = {a: best_asymmetry_k(curve.r_by_k()) for a, curve in pilot_curves.items()}
+        base = [sun0_curves[a].r_at(V1_ASYMMETRY_K) for a in loads]
+        fit = [sun0_curves[a].r_at(fitted[a]) for a in loads]
+        out[reading] = RuleBReading(
+            reading,
+            fitted,
+            dict(zip(loads, base, strict=True)),
+            dict(zip(loads, fit, strict=True)),
+            rule_b(base, fit),
+        )
+    return out
+
+
 def _stats_row(label: str, d: np.ndarray, e: np.ndarray) -> str:
     sd = f"{d.std(ddof=STD_DDOF):.4f}" if d.size > 1 else "n/a"
     return (
@@ -1639,7 +1742,9 @@ def _gap_mask(a: RuleAReport) -> np.ndarray:
     return mask
 
 
-def _exploratory_sun0(sun0: dict, a: RuleAReport, b: RuleBReport) -> list[str]:
+def _exploratory_sun0(
+    sun0: dict, a: RuleAReport, b: RuleBReport, by_reading: dict[str, RuleBReading]
+) -> list[str]:
     """What the numbers say beyond the two rules: chosen after the first look, so not evidence.
 
     Every figure the build log quotes beyond the rulings is printed here, so that it can be
@@ -1703,6 +1808,30 @@ def _exploratory_sun0(sun0: dict, a: RuleAReport, b: RuleBReport) -> list[str]:
             y = lobe_xyz(aod, asymmetry_of(k), 0.0, nominal, TOWARD_SUN_AZIMUTH_DEG)[:, 1]
             logs = " ".join(f"{x:+.3f}" for x in np.log(y / prague))
             out(f"| (sun 0, {aod:g}) | {asymmetry_of(k):.2f} ({label}) | {logs} |")
+    out("")
+    out(
+        "Rule B under the other readings of Prague (not the registered reading; reported, not "
+        "ruled). The registered verdict above is defined on the primary reading, and rule B, "
+        "unlike rule A, has no term for the reading. Each row runs the same rule end to end under "
+        "one reading of the same model: g*(a) refitted at sun +10 under that reading, then r at "
+        "0.7, r at g*(a), their ratio and the count at sun 0 under the same reading. The last "
+        "column applies rule B's branches to those numbers; it is not a ruling."
+    )
+    out("")
+    out(
+        "| reading of Prague | `aod_550` | g*(a), refitted at sun +10 | r at 0.7 | r at g*(a) "
+        "| r(g*) / r(0.7) | counts (r at 0.7 >= 0.05) | rule B's logic would give (not a ruling) |"
+    )
+    out("| --- | --- | --- | --- | --- | --- | --- | --- |")
+    for reading, row in by_reading.items():
+        name = "`xyz` (the registered reading)" if reading == "xyz" else f"`{reading}`"
+        gives = f"{row.result.verdict} (branch {row.result.branch})"
+        for i, aod in enumerate(loads):
+            out(
+                f"| {name} | {aod:g} | {asymmetry_of(row.k_star[aod]):.2f} | {row.r_base[aod]:.4f} "
+                f"| {row.r_fit[aod]:.4f} | {row.r_fit[aod] / row.r_base[aod]:.3f} "
+                f"| {'yes' if row.result.counted[i] else 'no'} | {gives} |"
+            )
     out("")
     r = a.result
     bar = r.E / UNCERTAINTY_BAR_FACTOR
@@ -1919,7 +2048,7 @@ def report_sun0(pilot: dict, sun0: dict) -> str:
             f"| {row.lobe_contrast[0]:+.3f}, {row.lobe_contrast[1]:+.3f} | {row.v1_distance:.4f} "
             f"| {row.lobe_distance:.4f} | {'yes' if within else 'no'} |"
         )
-    lines.extend(_exploratory_sun0(sun0, a, b))
+    lines.extend(_exploratory_sun0(sun0, a, b, evaluate_rule_b_readings(pilot, sun0)))
     return "\n".join(lines) + "\n"
 
 

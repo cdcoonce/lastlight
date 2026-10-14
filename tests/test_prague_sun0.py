@@ -1507,18 +1507,97 @@ REVIEWER_RATIO_AT_0_03 = {  # r(g*) / r(0.7) at sun 0, aod 0.03, g* refitted at 
 }
 
 
-def test_the_lobe_verdict_holds_under_the_registered_reading_and_not_under_the_others_at_0_03() -> (
-    None
-):
+def test_the_lobe_verdict_holds_under_the_registered_reading_and_not_under_the_others() -> None:
+    """At 0.03 no other reading halves the excess (the 0.5 bar); at 0.1 only altitude 0 fails."""
     readings = rule_b_readings()
     assert (readings["xyz"].result.verdict, readings["xyz"].result.branch) == ("aerosol lobe", 2)
+    assert readings["xyz"].result.halved == (True, True)
     for name, ratio in REVIEWER_RATIO_AT_0_03.items():
         here = readings[name]
         assert here.r_fit[0.03] / here.r_base[0.03] == pytest.approx(ratio, abs=5e-4), name
         assert here.r_fit[0.03] > 0.5 * here.r_base[0.03], name  # not halved: the 0.5 bar fails
-        assert here.r_fit[0.1] <= 0.5 * here.r_base[0.1], name  # at 0.1 every reading halves
         assert here.result.counted == (True, True), name
         assert (here.result.verdict, here.result.branch) == ("neither", 3), name
+    assert readings["xyz_altitude_0"].result.halved == (False, False)  # 0.573 at 0.1
+    for name in ("xyz_inverse_visibility", "xyz_matched_aerosol_depth", "xyz_binned"):
+        assert readings[name].result.halved == (False, True), name
+
+
+# Under each reading, per load: g*(a) as k (refitted at sun +10), r at 0.7 and r at g*(a) at sun 0,
+# and their ratio. Reported, not ruled: the numbers of `report --sun 0`'s exploratory section.
+READING_PINS = {
+    "xyz_inverse_visibility": {
+        0.03: (67, 0.11066595506357443, 0.055413673084209816, 0.5007291813672619),
+        0.1: (61, 0.37565174588332634, 0.14159435706790577, 0.3769298522357555),
+    },
+    "xyz_matched_aerosol_depth": {
+        0.03: (67, 0.07509672806507964, 0.07239702434539154, 0.9640503149837832),
+        0.1: (61, 0.27392145225113007, 0.04964839568629658, 0.18125048359038026),
+    },
+    "xyz_binned": {
+        0.03: (67, 0.09392388706941689, 0.06187828860565563, 0.6588131149206259),
+        0.1: (61, 0.40202446258985824, 0.1677418268192174, 0.4172428357682953),
+    },
+    "xyz_altitude_0": {
+        0.03: (68, 0.23615270328677943, 0.16580580241829987, 0.7021126589304735),
+        0.1: (58, 0.6834596535908716, 0.3913800610411638, 0.572645450224995),
+    },
+}
+
+
+def test_rule_b_under_each_other_reading_is_pinned_by_value() -> None:
+    readings = rule_b_readings()
+    for name, loads in READING_PINS.items():
+        for aod, (k, r_base, r_fit, ratio) in loads.items():
+            here = readings[name]
+            assert here.k_star[aod] == k, (name, aod)
+            assert here.r_base[aod] == pinned(r_base), (name, aod)
+            assert here.r_fit[aod] == pinned(r_fit), (name, aod)
+            assert here.r_fit[aod] / here.r_base[aod] == pinned(ratio), (name, aod)
+    # The same rule on the same fixtures under the registered reading is the ruling (pinned above).
+    assert readings["xyz"].r_base[0.03] == pinned(0.1253466303)
+    assert readings["xyz"].r_fit[0.03] == pinned(0.05601825059)
+    assert readings["xyz"].r_base[0.1] == pinned(0.4322458811)
+    assert readings["xyz"].r_fit[0.1] == pinned(0.1785046002)
+
+
+def test_the_g_star_refit_follows_the_reading_it_is_made_under() -> None:
+    """g*(0.1) is 0.60 under the registered reading and 0.61 under three of the others."""
+    readings = rule_b_readings()
+    assert readings["xyz"].k_star == {0.03: 67, 0.1: 60}
+    assert readings["xyz_altitude_0"].k_star == {0.03: 68, 0.1: 58}
+    assert readings["xyz_binned"].k_star[0.1] == 61 != readings["xyz"].k_star[0.1]
+
+
+def test_the_sweep_refuses_fixtures_at_the_wrong_suns() -> None:
+    tool = load_tool()
+    with pytest.raises(tool.PragueError, match="rules at sun 0"):
+        tool.evaluate_rule_b_readings(fixture_sun10(), fixture_sun10())
+    with pytest.raises(tool.PragueError, match="fits g.*at sun .10"):
+        tool.evaluate_rule_b_readings(fixture_sun0(), fixture_sun0())
+
+
+def test_the_report_prints_rule_b_under_each_reading_labelled_not_ruled() -> None:
+    text = sun0_report()
+    lines = text.splitlines()
+    assert "(not the registered reading; reported, not ruled)" in text
+    assert "rule B's logic would give (not a ruling)" in text
+    assert "rule B, unlike rule A, has no term for the reading" in text
+    for name, loads in READING_PINS.items():
+        for aod, (k, r_base, r_fit, ratio) in loads.items():
+            row = (
+                f"| `{name}` | {aod:g} | {k / 100:.2f} | {r_base:.4f} | {r_fit:.4f} | {ratio:.3f} "
+                "| yes | neither (branch 3) |"
+            )
+            assert row in lines, row
+    for row in (
+        "| `xyz` (the registered reading) | 0.03 | 0.67 | 0.1253 | 0.0560 | 0.447 | yes "
+        "| aerosol lobe (branch 2) |",
+        "| `xyz` (the registered reading) | 0.1 | 0.60 | 0.4322 | 0.1785 | 0.413 | yes "
+        "| aerosol lobe (branch 2) |",
+    ):
+        assert row in lines, row
+    assert text.count("Verdict:") == 2  # the table adds no ruling
 
 
 # --- selection by value, end to end ---------------------------------------------------------------
