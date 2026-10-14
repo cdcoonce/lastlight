@@ -759,3 +759,122 @@ def test_the_excess_curve_at_v1_itself_is_zero_at_k_70() -> None:
     curve = tool.lobe_curve(0.03, 10.0, views, v1_y, ks=(60, 70, 80))
     assert curve.r_at(70) == 0.0
     assert curve.r_at(60) > 0.0 and curve.r_at(80) > 0.0
+
+
+# --- the fixture builder: sun, azimuths and path are parameters -----------------------------------
+
+DATASET_SUN_AXIS = (-4.2, -4.0, 0.0, 10.0, 90.0)
+
+
+def synthetic_axes() -> object:
+    tool = load_tool()
+    return tool.Axes(
+        visibilities_km=(20.0, 131.8),
+        albedos=(0.0, 1.0),
+        altitudes_m=(0.0, 405.0),
+        elevations_deg=DATASET_SUN_AXIS,
+        channels=11,
+        channel_start_nm=320.0,
+        channel_width_nm=40.0,
+    )
+
+
+def test_the_default_spec_is_the_sun_10_fixture_exactly() -> None:
+    tool = load_tool()
+    spec = tool.SUN10
+    assert spec.sun_elevation_deg == 10.0 == tool.SUN_ELEVATION_DEG
+    assert spec.rel_azimuths_deg == (0.0, 90.0, 180.0) == tool.REL_AZIMUTHS_DEG
+    assert spec.path == ROOT / "tests" / "fixtures" / "prague" / "sun10.json" == tool.FIXTURE
+    assert spec.command == "uv run python tools/prague_reference.py fixture"
+    assert tool.fixture_spec(10.0) is spec
+
+
+def test_the_sun_0_spec_has_the_azimuth_30_the_gap_was_measured_at() -> None:
+    tool = load_tool()
+    spec = tool.SUN0
+    assert spec.sun_elevation_deg == 0.0
+    assert spec.rel_azimuths_deg == (0.0, 30.0, 90.0, 180.0)
+    assert spec.path == ROOT / "tests" / "fixtures" / "prague" / "sun0.json" == tool.FIXTURE_SUN0
+    assert spec.command == "uv run python tools/prague_reference.py fixture --sun 0"
+    assert tool.fixture_spec(0.0) is spec
+    assert tool.fixture_spec(0) is spec  # the command line says `--sun 0`
+
+
+def test_an_unregistered_sun_has_no_fixture_and_an_output_path_moves_a_registered_one() -> None:
+    tool = load_tool()
+    with pytest.raises(tool.PragueError, match=r"no fixture is registered for sun elevation 5"):
+        tool.fixture_spec(5.0)
+    moved = tool.fixture_spec(0.0, ROOT / "elsewhere.json")
+    assert moved.path == ROOT / "elsewhere.json"
+    assert (moved.sun_elevation_deg, moved.rel_azimuths_deg) == (0.0, tool.SUN0.rel_azimuths_deg)
+    assert moved.command == tool.SUN0.command  # how to remake it is the same either way
+
+
+def test_the_command_line_defaults_to_the_sun_10_fixture() -> None:
+    tool = load_tool()
+    parser = tool.build_parser()
+    assert parser.parse_args(["fixture"]).sun == 10.0
+    assert parser.parse_args(["fixture", "--sun", "0"]).sun == 0.0
+    assert parser.parse_args(["fixture", "--sun", "0", "--check"]).check is True
+    assert parser.parse_args(["report"]).output is None
+
+
+def test_an_unregistered_sun_on_the_command_line_is_an_error_not_a_traceback(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    tool = load_tool()
+    assert tool.main(["fixture", "--sun", "5"]) == 1
+    assert "no fixture is registered" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("sun", [-4.2, -1.0, 0.0, 10.0, 90.0])
+def test_a_sun_inside_the_datasets_axis_is_accepted_including_the_ends(sun: float) -> None:
+    tool = load_tool()
+    tool.check_sun_elevation(sun, synthetic_axes())
+
+
+@pytest.mark.parametrize("sun", [-4.2000001, -10.0, 90.0000001, 120.0, math.nan, math.inf])
+def test_a_sun_outside_the_datasets_axis_is_refused(sun: float) -> None:
+    tool = load_tool()
+    with pytest.raises(tool.PragueError, match=r"outside the dataset's sun axis, -4.2 to 90"):
+        tool.check_sun_elevation(sun, synthetic_axes())
+
+
+def channel_rows(count: int, value: float = 1.0) -> np.ndarray:
+    return np.full((count, 11), value)
+
+
+def test_xyz_block_lays_out_rows_azimuth_major_keyed_by_the_azimuth() -> None:
+    tool = load_tool()
+    channels = np.vstack([channel_rows(2, 1.0), channel_rows(2, 2.0), channel_rows(2, 3.0)])
+    block = tool.xyz_block(channels, 320.0, 40.0, [1.5, 3.0], [0.0, 30.0, 180.0], where="test")
+    assert list(block) == ["0", "30", "180"]
+    assert all(len(rows) == 2 and all(len(row) == 3 for row in rows) for rows in block.values())
+    # Y scales with the radiance: the second azimuth is twice, the third three times the first.
+    first = block["0"][0][1]
+    assert block["30"][0][1] == pytest.approx(2 * first, rel=1e-8)
+    assert block["180"][1][1] == pytest.approx(3 * first, rel=1e-8)
+
+
+@pytest.mark.parametrize("bad", [math.nan, math.inf, -math.inf, 0.0, -1.0])
+def test_a_luminance_that_is_not_finite_and_above_zero_is_refused_naming_the_point(
+    bad: float,
+) -> None:
+    tool = load_tool()
+    channels = channel_rows(4)
+    channels[3] = bad  # the second view of the second azimuth (30 degrees, view 3)
+    with pytest.raises(tool.PragueError) as error:
+        tool.xyz_block(
+            channels, 320.0, 40.0, [1.5, 3.0], [0.0, 30.0], where="aod_550 0.03, reading xyz"
+        )
+    message = str(error.value)
+    assert "aod_550 0.03, reading xyz" in message
+    assert "relative azimuth 30, view 3 degrees" in message
+    assert "not finite and above 0" in message
+
+
+def test_the_binned_reading_is_refused_too_when_it_leaves_no_light() -> None:
+    """Binned Prague holds zero outside its channels: a spectrum of zeros is no luminance."""
+    tool = load_tool()
+    with pytest.raises(tool.PragueError, match="relative azimuth 0, view 1.5 degrees"):
+        tool.xyz_block(channel_rows(1, 0.0), 320.0, 40.0, [1.5], [0.0], binned=True, where="x")

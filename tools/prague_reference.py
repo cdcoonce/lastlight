@@ -7,6 +7,8 @@ Usage (fetch needs the network; build needs a C++17 compiler, `c++` on the path)
     uv run python tools/prague_reference.py fixture          # write the sun10.json fixture
     uv run python tools/prague_reference.py fixture --check  # re-evaluate, compare, write nothing
     uv run python tools/prague_reference.py report           # the results tables, from the fixture
+    uv run python tools/prague_reference.py fixture --sun 0  # the sun0.json fixture (#45)
+    uv run python tools/prague_reference.py report --sun 0   # rules A and B at sun 0, from fixtures
 
 Everything the model needs lives outside the repository, in `~/.cache/lastlight/prague/`
 (`--cache DIR` overrides it): the reference implementation of Wilkie et al. (2021) and Vevoda
@@ -78,7 +80,9 @@ from lastlight.render.curve import sky_xyz
 from lastlight.render.v1 import multiple_scattering_xyz
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-FIXTURE = REPO_ROOT / "tests" / "fixtures" / "prague" / "sun10.json"
+FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures" / "prague"
+FIXTURE = FIXTURE_DIR / "sun10.json"
+FIXTURE_SUN0 = FIXTURE_DIR / "sun0.json"
 DEFAULT_CACHE = Path.home() / ".cache" / "lastlight" / "prague"
 
 MODEL_URL = "https://github.com/PetrVevoda/pragueskymodel.git"
@@ -124,6 +128,34 @@ KOSCHMIEDER = 3.912
 US_STANDARD_OZONE_DU = 345.0
 """Prague's atmosphere carries the U.S. Standard ozone profile; its column is about 345 DU."""
 NOMINAL_VIEWS = 6
+
+
+@dataclass(frozen=True)
+class FixtureSpec:
+    """One fixture: the sun, the relative azimuths, where it is written, how to remake it."""
+
+    sun_elevation_deg: float
+    rel_azimuths_deg: tuple[float, ...]
+    path: Path
+    command: str
+
+
+SUN10 = FixtureSpec(
+    SUN_ELEVATION_DEG,
+    REL_AZIMUTHS_DEG,
+    FIXTURE,
+    "uv run python tools/prague_reference.py fixture",
+)
+"""#34's fixture. Its spec is what the tool did before there were specs: nothing here may change
+a byte of `sun10.json`."""
+SUN0 = FixtureSpec(
+    0.0,
+    (0.0, 30.0, 90.0, 180.0),
+    FIXTURE_SUN0,
+    "uv run python tools/prague_reference.py fixture --sun 0",
+)
+"""#45's fixture: the same eight views and two loads at sun 0, and relative azimuth 30 as well."""
+FIXTURE_SPECS = {spec.sun_elevation_deg: spec for spec in (SUN10, SUN0)}
 
 DRIVER = r"""// lastlight's evaluation driver for the Prague Sky Model reference implementation.
 // This file is lastlight's own code; it only calls the model's public API.
@@ -430,9 +462,10 @@ def evaluate(
     visibility: float,
     altitude_m: float,
     queries: Sequence[tuple[float, float]],
+    sun_elevation_deg: float,
     mode: str = "sky",
 ) -> Evaluation:
-    """Run the driver: sun +10, ground albedo 0.2, the model's own interpolation everywhere.
+    """Run the driver at `sun_elevation_deg`, ground albedo 0.2, the model's own interpolation.
 
     Only the one or two dataset visibilities around `visibility` are loaded, which does not change
     the result. The model raises the viewpoint by `SAFETY_ALTITUDE_M`; the driver reports the
@@ -448,7 +481,7 @@ def evaluate(
         repr(visibility),
         repr(GROUND_ALBEDO),
         repr(altitude_m - SAFETY_ALTITUDE_M),
-        repr(SUN_ELEVATION_DEG),
+        repr(sun_elevation_deg),
         "1",
         mode,
     ]
@@ -469,8 +502,8 @@ def evaluate(
     table = np.array(rows)
     if not np.allclose(table[:, 2], altitude_m, atol=1e-6):
         raise PragueError(f"the model evaluated at altitude {table[:, 2]}, not {altitude_m} m")
-    if not np.allclose(table[:, 3], SUN_ELEVATION_DEG, atol=1e-9):
-        raise PragueError(f"the model's sun elevation is {table[:, 3]}")
+    if not np.allclose(table[:, 3], sun_elevation_deg, atol=1e-9):
+        raise PragueError(f"the model's sun elevation is {table[:, 3]}, not {sun_elevation_deg}")
     return Evaluation(table[:, 5:], start, width)
 
 
@@ -486,21 +519,47 @@ def view_elevations() -> list[float]:
     return [*nominal, *DIAGNOSTIC_ELEVATIONS_DEG]
 
 
-def _queries(views: Sequence[float]) -> list[tuple[float, float]]:
-    return [(azimuth, view) for azimuth in REL_AZIMUTHS_DEG for view in views]
+def _queries(views: Sequence[float], azimuths: Sequence[float]) -> list[tuple[float, float]]:
+    return [(azimuth, view) for azimuth in azimuths for view in views]
 
 
-def _xyz_block(
-    channels: np.ndarray, start: float, width: float, views: int, *, binned: bool = False
+def check_sun_elevation(sun_elevation_deg: float, axes: Axes) -> None:
+    """Refuse a sun elevation outside the dataset's sun axis (the model would clamp it silently)."""
+    low, high = axes.elevations_deg[0], axes.elevations_deg[-1]
+    if not (math.isfinite(sun_elevation_deg) and low <= sun_elevation_deg <= high):
+        raise PragueError(
+            f"sun elevation {sun_elevation_deg!r} is outside the dataset's sun axis, {low:g} to "
+            f"{high:g} degrees: the model would clamp it without a word, so no fixture is made"
+        )
+
+
+def xyz_block(
+    channels: np.ndarray,
+    start: float,
+    width: float,
+    views: Sequence[float],
+    azimuths: Sequence[float],
+    *,
+    binned: bool = False,
+    where: str = "",
 ) -> dict[str, list[list[float]]]:
-    """Rows ordered azimuth-major, as `_queries`, become {azimuth: [[X, Y, Z] per view]}."""
+    """Rows ordered azimuth-major, as `_queries`, become {azimuth: [[X, Y, Z] per view]}.
+
+    Prague's output is untrusted: a luminance (Y) that is not finite and above 0 is refused with
+    an error that names the point (`where` says which reading and load it belongs to).
+    """
+    count = len(views)
     block: dict[str, list[list[float]]] = {}
-    for i, azimuth in enumerate(REL_AZIMUTHS_DEG):
-        rows = channels[i * views : (i + 1) * views]
-        block[f"{azimuth:g}"] = [
-            [significant(v) for v in channels_to_xyz(row, start, width, binned=binned)]
-            for row in rows
-        ]
+    for i, azimuth in enumerate(azimuths):
+        rows = channels[i * count : (i + 1) * count]
+        xyz = [channels_to_xyz(row, start, width, binned=binned) for row in rows]
+        for view, triple in zip(views, xyz, strict=True):
+            if not (math.isfinite(triple[1]) and triple[1] > 0.0):
+                raise PragueError(
+                    f"Prague's luminance {float(triple[1])!r} is not finite and above 0 at "
+                    f"{where}, relative azimuth {azimuth:g}, view {view:g} degrees"
+                )
+        block[f"{azimuth:g}"] = [[significant(v) for v in triple] for triple in xyz]
     return block
 
 
@@ -528,7 +587,13 @@ def aerosol_depth_from_transmittance(
 
 
 def matched_visibility_km(
-    cache: Path, dataset: Dataset, aod: float, low: float, high: float, centres: Sequence[float]
+    cache: Path,
+    dataset: Dataset,
+    aod: float,
+    low: float,
+    high: float,
+    centres: Sequence[float],
+    sun_elevation_deg: float,
 ) -> tuple[float, float, bool]:
     """The visibility at which Prague's own aerosol optical depth equals `aod`, by bisection.
 
@@ -545,6 +610,7 @@ def matched_visibility_km(
             visibility=visibility,
             altitude_m=OBSERVER_ALTITUDE_KM * 1000.0,
             queries=[(0.0, 90.0)],
+            sun_elevation_deg=sun_elevation_deg,
             mode="transmittance",
         )
         return aerosol_depth_from_transmittance(zenith.channels[0], centres)
@@ -563,8 +629,11 @@ def matched_visibility_km(
     return visibility, depth(visibility), False
 
 
-def build_fixture(cache: Path) -> dict:
-    """Evaluate Prague for both atmospheres and every variant: the whole fixture, as a dict."""
+def build_fixture(cache: Path, spec: FixtureSpec = SUN10) -> dict:
+    """Evaluate Prague for both atmospheres and every variant: the whole fixture, as a dict.
+
+    The sun elevation and the relative azimuths come from `spec`; the default is #34's fixture.
+    """
     fetch_model(cache)
     paths = {key: cache / "dl" / dataset.name for key, dataset in DATASETS.items()}
     for key, dataset in DATASETS.items():
@@ -574,8 +643,11 @@ def build_fixture(cache: Path) -> dict:
             raise PragueError(f"{paths[key]} does not have its pinned SHA-256")
     axes = read_axes(paths["full"])
     ground_axes = read_axes(paths["ground"])
+    sun = spec.sun_elevation_deg
+    azimuths = spec.rel_azimuths_deg
+    check_sun_elevation(sun, axes)
     views = view_elevations()
-    queries = _queries(views)
+    queries = _queries(views, azimuths)
     low, high = axes.visibilities_km[0], axes.visibilities_km[-1]
     full, ground = DATASETS["full"], DATASETS["ground"]
     altitude_m = OBSERVER_ALTITUDE_KM * 1000.0
@@ -591,9 +663,13 @@ def build_fixture(cache: Path) -> dict:
                 f"range {low} to {high} km: no comparison is made for it"
             )
         primary = evaluate(
-            cache, full, visibility=visibility, altitude_m=altitude_m, queries=queries
+            cache,
+            full,
+            visibility=visibility,
+            altitude_m=altitude_m,
+            queries=queries,
+            sun_elevation_deg=sun,
         )
-        n = len(views)
 
         # Visibility interpolated in 1 / V (extinction) between the bracketing dataset nodes.
         below, above = _bracket(axes.visibilities_km, visibility)
@@ -601,14 +677,40 @@ def build_fixture(cache: Path) -> dict:
             blended = primary.channels
         else:
             weight = (1.0 / below - 1.0 / visibility) / (1.0 / below - 1.0 / above)
-            lower = evaluate(cache, full, visibility=below, altitude_m=altitude_m, queries=queries)
-            upper = evaluate(cache, full, visibility=above, altitude_m=altitude_m, queries=queries)
+            lower = evaluate(
+                cache,
+                full,
+                visibility=below,
+                altitude_m=altitude_m,
+                queries=queries,
+                sun_elevation_deg=sun,
+            )
+            upper = evaluate(
+                cache,
+                full,
+                visibility=above,
+                altitude_m=altitude_m,
+                queries=queries,
+                sun_elevation_deg=sun,
+            )
             blended = (1.0 - weight) * lower.channels + weight * upper.channels
 
         # Observer at altitude 0, from the full dataset and from the ground-level one.
-        at_zero = evaluate(cache, full, visibility=visibility, altitude_m=0.0, queries=queries)
+        at_zero = evaluate(
+            cache,
+            full,
+            visibility=visibility,
+            altitude_m=0.0,
+            queries=queries,
+            sun_elevation_deg=sun,
+        )
         at_zero_ground = evaluate(
-            cache, ground, visibility=visibility, altitude_m=0.0, queries=queries
+            cache,
+            ground,
+            visibility=visibility,
+            altitude_m=0.0,
+            queries=queries,
+            sun_elevation_deg=sun,
         )
         ground_check = ground_check and np.array_equal(at_zero.channels, at_zero_ground.channels)
 
@@ -618,36 +720,69 @@ def build_fixture(cache: Path) -> dict:
             visibility=visibility,
             altitude_m=altitude_m,
             queries=[(0.0, 90.0)],
+            sun_elevation_deg=sun,
             mode="transmittance",
         )
         centres = [
             axes.channel_start_nm + (i + 0.5) * axes.channel_width_nm for i in range(axes.channels)
         ]
         matched_v, matched_depth, clamped = matched_visibility_km(
-            cache, full, aod, low, high, centres
+            cache, full, aod, low, high, centres, sun
         )
         matched = evaluate(
-            cache, full, visibility=matched_v, altitude_m=altitude_m, queries=queries
+            cache,
+            full,
+            visibility=matched_v,
+            altitude_m=altitude_m,
+            queries=queries,
+            sun_elevation_deg=sun,
         )
+
+        def block(
+            reading: str,
+            channels: np.ndarray,
+            start: float,
+            width: float,
+            *,
+            binned: bool = False,
+            _aod: float = aod,
+        ) -> dict[str, list[list[float]]]:
+            return xyz_block(
+                channels,
+                start,
+                width,
+                views,
+                azimuths,
+                binned=binned,
+                where=f"aod_550 {_aod:g}, reading {reading}",
+            )
+
         atmospheres[f"{aod:g}"] = {
             "aod_550": aod,
             "ground_extinction_per_km": significant(ground_extinction_per_km(atm), 12),
             "visibility_km": significant(visibility, 12),
             "bracketing_visibility_nodes_km": [below, above],
-            "xyz": _xyz_block(primary.channels, primary.start_nm, primary.width_nm, n),
+            "xyz": block("xyz", primary.channels, primary.start_nm, primary.width_nm),
             "diagnostics": {
-                "xyz_binned": _xyz_block(
-                    primary.channels, primary.start_nm, primary.width_nm, n, binned=True
+                "xyz_binned": block(
+                    "xyz_binned",
+                    primary.channels,
+                    primary.start_nm,
+                    primary.width_nm,
+                    binned=True,
                 ),
-                "xyz_inverse_visibility": _xyz_block(
-                    blended, primary.start_nm, primary.width_nm, n
+                "xyz_inverse_visibility": block(
+                    "xyz_inverse_visibility", blended, primary.start_nm, primary.width_nm
                 ),
-                "xyz_altitude_0": _xyz_block(
-                    at_zero.channels, at_zero.start_nm, at_zero.width_nm, n
+                "xyz_altitude_0": block(
+                    "xyz_altitude_0", at_zero.channels, at_zero.start_nm, at_zero.width_nm
                 ),
                 "zenith_transmittance": [significant(t) for t in zenith.channels[0]],
-                "xyz_matched_aerosol_depth": _xyz_block(
-                    matched.channels, matched.start_nm, matched.width_nm, n
+                "xyz_matched_aerosol_depth": block(
+                    "xyz_matched_aerosol_depth",
+                    matched.channels,
+                    matched.start_nm,
+                    matched.width_nm,
                 ),
                 "matched_aerosol_depth": {
                     "visibility_km": significant(matched_v, 9),
@@ -660,12 +795,12 @@ def build_fixture(cache: Path) -> dict:
     return {
         "format": "lastlight-prague-control",
         "version": 1,
-        "sun_elevation_deg": SUN_ELEVATION_DEG,
+        "sun_elevation_deg": sun,
         "observer_altitude_km": OBSERVER_ALTITUDE_KM,
         "ground_albedo": GROUND_ALBEDO,
         "view_elevations_deg": views,
         "nominal_view_count": NOMINAL_VIEWS,
-        "rel_azimuths_deg": list(REL_AZIMUTHS_DEG),
+        "rel_azimuths_deg": list(azimuths),
         "prague_visibility_range_km": [low, high],
         "xyz_convention": (
             "CIE 1931 XYZ on the scale of lastlight.render.colorimetry: a white card lit by the "
@@ -699,7 +834,7 @@ def build_fixture(cache: Path) -> dict:
                 "elevations_deg": list(axes.elevations_deg),
                 "ground_level_altitudes_m": list(ground_axes.altitudes_m),
             },
-            "command": "uv run python tools/prague_reference.py fixture",
+            "command": spec.command,
         },
     }
 
@@ -729,14 +864,34 @@ def _compare(left: object, right: object, path: str, problems: list[str]) -> Non
         problems.append(f"{path}: {left!r} against {right!r}")
 
 
-def cmd_fixture(cache: Path, *, check: bool) -> int:
-    fresh = build_fixture(cache)
+def fixture_spec(sun_elevation_deg: float, output: Path | None = None) -> FixtureSpec:
+    """The registered fixture for a sun elevation; `output` moves where it is written or read."""
+    base = FIXTURE_SPECS.get(sun_elevation_deg)
+    if base is None:
+        known = ", ".join(f"{sun:g}" for sun in FIXTURE_SPECS)
+        raise PragueError(
+            f"no fixture is registered for sun elevation {sun_elevation_deg:g} "
+            f"(registered: {known})"
+        )
+    if output is None:
+        return base
+    return FixtureSpec(base.sun_elevation_deg, base.rel_azimuths_deg, output, base.command)
+
+
+def _shown(path: Path) -> Path:
+    return path.relative_to(REPO_ROOT) if path.is_relative_to(REPO_ROOT) else path
+
+
+def cmd_fixture(cache: Path, spec: FixtureSpec = SUN10, *, check: bool) -> int:
+    if check and not spec.path.exists():
+        raise PragueError(f"{spec.path} does not exist: nothing to check")
+    fresh = build_fixture(cache, spec)
     if not check:
-        FIXTURE.parent.mkdir(parents=True, exist_ok=True)
-        FIXTURE.write_text(dump(fresh))
-        print(f"wrote {FIXTURE.relative_to(REPO_ROOT)} ({FIXTURE.stat().st_size} bytes)")
+        spec.path.parent.mkdir(parents=True, exist_ok=True)
+        spec.path.write_text(dump(fresh))
+        print(f"wrote {_shown(spec.path)} ({spec.path.stat().st_size} bytes)")
         return 0
-    committed = json.loads(FIXTURE.read_text())
+    committed = json.loads(spec.path.read_text())
     problems: list[str] = []
     _compare(committed, fresh, "", problems)
     for problem in problems[:20]:
@@ -1314,19 +1469,32 @@ def report(data: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def cmd_report() -> None:
-    sys.stdout.write(report(json.loads(FIXTURE.read_text())))
+def cmd_report(spec: FixtureSpec = SUN10) -> None:
+    sys.stdout.write(report(json.loads(spec.path.read_text())))
 
 
 # --- command line ---------------------------------------------------------------------------------
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("command", choices=["fetch", "build", "fixture", "report"], nargs="+")
     parser.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
     parser.add_argument("--check", action="store_true", help="fixture: compare, write nothing")
-    args = parser.parse_args(argv)
+    parser.add_argument(
+        "--sun",
+        type=float,
+        default=SUN_ELEVATION_DEG,
+        help="fixture, report: the sun elevation in degrees of a registered fixture (10 or 0)",
+    )
+    parser.add_argument(
+        "--output", type=Path, default=None, help="fixture: write or check this file instead"
+    )
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     status = 0
     for command in args.command:
         try:
@@ -1335,9 +1503,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             elif command == "build":
                 cmd_build(args.cache)
             elif command == "fixture":
-                status = max(status, cmd_fixture(args.cache, check=args.check))
+                spec = fixture_spec(args.sun, args.output)
+                status = max(status, cmd_fixture(args.cache, spec, check=args.check))
             else:
-                cmd_report()
+                cmd_report(fixture_spec(args.sun))
         except (PragueError, urllib.error.URLError, subprocess.CalledProcessError) as error:
             print(f"error: {error}", file=sys.stderr)
             return 1
