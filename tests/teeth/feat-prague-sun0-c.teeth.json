@@ -1,0 +1,91 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "env",
+    "PYTHONDONTWRITEBYTECODE=1",
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-x",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_prague_sun0.py",
+    "tests/test_prague_control.py",
+    "-m",
+    "not network"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_prague_sun0.py",
+    "tests/test_prague_control.py",
+    "-m",
+    "not network"
+  ],
+  "mutants": [
+    {
+      "label": "14 port bound drops the / 1.066",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    port = multiple * MONTE_CARLO_EXCESS / (1.0 + MONTE_CARLO_EXCESS)\n",
+      "replace": "    port = multiple * MONTE_CARLO_EXCESS\n"
+    },
+    {
+      "label": "15 fixture builder not given the spec's sun (evaluates at +10)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "double",
+      "find": "    sun = spec.sun_elevation_deg\n",
+      "replace": "    sun = SUN_ELEVATION_DEG\n"
+    },
+    {
+      "label": "17 rule B floor removed (every condition counts)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    counted = tuple(bool(r >= EXCESS_FLOOR) for r in base)",
+      "replace": "    counted = tuple(True for _ in base)"
+    },
+    {
+      "label": "18 rule A m also ranges over xyz_binned and xyz_altitude_0",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "RULE_A_ALTERNATIVE_READINGS = (\"xyz_inverse_visibility\", \"xyz_matched_aerosol_depth\")",
+      "replace": "RULE_A_ALTERNATIVE_READINGS = (\"xyz_inverse_visibility\", \"xyz_matched_aerosol_depth\", \"xyz_binned\", \"xyz_altitude_0\")"
+    },
+    {
+      "label": "19 Prague luminance guard removed from xyz_block",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "            if not (math.isfinite(triple[1]) and triple[1] > 0.0):",
+      "replace": "            if False:"
+    },
+    {
+      "label": "20 rule B r over all eight views, not the six nominal",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    index = nominal_indices(views)\n    prague = _fixture_xyz(data[\"atmospheres\"][f\"{aod:g}\"], TOWARD_SUN_AZIMUTH_DEG)\n    return [views[i] for i in index], prague[index, 1]",
+      "replace": "    index = list(range(len(views)))\n    prague = _fixture_xyz(data[\"atmospheres\"][f\"{aod:g}\"], TOWARD_SUN_AZIMUTH_DEG)\n    return [views[i] for i in index], prague[index, 1]"
+    },
+    {
+      "label": "E1 [reviewer extra] the #34 report's sd uses ddof 0 (sun-10 report text changes)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "{d[mask].std(ddof=1):.4f}",
+      "replace": "{d[mask].std(ddof=0):.4f}"
+    },
+    {
+      "label": "E2 [reviewer extra] the builder does not refuse an out-of-axis sun",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "double",
+      "find": "    check_sun_elevation(sun, axes)\n",
+      "replace": "    pass\n"
+    }
+  ]
+}
