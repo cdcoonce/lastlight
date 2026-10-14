@@ -1469,8 +1469,390 @@ def report(data: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+# --- the sun-0 rules, run on the fixtures (#45) ---------------------------------------------------
+
+CONTRAST_TOLERANCE = 0.10
+"""#34's tolerance on the lowest band's log ratio against the reference band (reported only)."""
+CHROMATICITY_TOLERANCE = 0.02
+"""#34's tolerance on the reference band's u'v' distance (reported only)."""
+GAP_AZIMUTH_DEG = 30.0
+GAP_VIEW_DEG = 1.51
+"""Where the port's 6.6 percent excess over the Monte Carlo was measured (sun 0, aod 0.1)."""
+GAP_VIEW_TOL_DEG = 0.005
+"""A fixture view is the gap's when it rounds to 1.51 degrees (the lowest band is 1.5066)."""
+
+
+@dataclass(frozen=True)
+class RuleAReport:
+    """Rule A run on one fixture: the ruling over P, and every point for the reported items."""
+
+    result: RuleA
+    azimuth: np.ndarray  # relative azimuth of every point of the fixture, flat, azimuth-major
+    view: np.ndarray
+    in_p: np.ndarray  # the rule set P, selected by value
+    d: np.ndarray  # d_i under the primary reading, every point
+    e: np.ndarray  # e_i, every point
+    d_readings: dict[str, np.ndarray]  # d_i under each other reading, every point
+    D_reported: dict[str, float]  # D under the readings that are not part of m
+
+
+def evaluate_rule_a(data: dict) -> RuleAReport:
+    """Rule A on a fixture: v1 at the fixture's sun and views, Prague's readings from the file."""
+    views = data["view_elevations_deg"]
+    azimuths = data["rel_azimuths_deg"]
+    azimuth, view = point_table(azimuths, views)
+    in_p = mask_points(azimuth, view, azimuths=RULE_A_AZIMUTHS_DEG)
+    if int(in_p.sum()) != len(RULE_A_AZIMUTHS_DEG) * len(views):
+        raise PragueError("the fixture lacks rule A's relative azimuths 90 and 180")
+    d = _ratio_of_ratios(data) - 1.0
+    e = predicted_if_monte_carlo(data["sun_elevation_deg"], views, azimuths)
+    names = (*RULE_A_ALTERNATIVE_READINGS, *RULE_A_REPORTED_READINGS)
+    readings = {name: _ratio_of_ratios(data, name) - 1.0 for name in names}
+    result = rule_a(
+        d[in_p], e[in_p], {name: readings[name][in_p] for name in RULE_A_ALTERNATIVE_READINGS}
+    )
+    reported = {name: float(np.mean(readings[name][in_p])) for name in RULE_A_REPORTED_READINGS}
+    return RuleAReport(result, azimuth, view, in_p, d, e, readings, reported)
+
+
+def _toward_sun(data: dict, aod: float) -> tuple[list[float], np.ndarray]:
+    """The six nominal views at relative azimuth 0 (by value) and Prague's primary Y at them."""
+    views = data["view_elevations_deg"]
+    index = nominal_indices(views)
+    prague = _fixture_xyz(data["atmospheres"][f"{aod:g}"], TOWARD_SUN_AZIMUTH_DEG)
+    return [views[i] for i in index], prague[index, 1]
+
+
+def condition_curve(data: dict, aod: float) -> LobeCurve:
+    """r and the signed mean over the whole grid for one condition (the fixture's sun, `aod`)."""
+    views, prague_y = _toward_sun(data, aod)
+    return lobe_curve(aod, data["sun_elevation_deg"], views, prague_y)
+
+
+def condition_port_bound(data: dict, aod: float) -> float:
+    """B for one condition: the port's most, rms over the six nominal views at azimuth 0."""
+    views, _ = _toward_sun(data, aod)
+    sun = data["sun_elevation_deg"]
+    total = engine_xyz(aod, sun, views, TOWARD_SUN_AZIMUTH_DEG, "v1")[:, 1]
+    multiple = multiple_scattering_xyz(Atmosphere(aod_550=aod), sun, views, TOWARD_SUN_AZIMUTH_DEG)[
+        :, 1
+    ]
+    return port_bound_rms(total, multiple)
+
+
+def side_and_back_r(data: dict, aod: float, k: int) -> float:
+    """rms of ln(Y_g / Y_Prague) over every view at azimuths 90 and 180 together (not ruled)."""
+    sun = data["sun_elevation_deg"]
+    views = data["view_elevations_deg"]
+    entry = data["atmospheres"][f"{aod:g}"]
+    model, prague = [], []
+    for azimuth in RULE_A_AZIMUTHS_DEG:
+        model.append(lobe_xyz(aod, asymmetry_of(k), sun, views, azimuth)[:, 1])
+        prague.append(_fixture_xyz(entry, azimuth)[:, 1])
+    return excess(np.concatenate(model), np.concatenate(prague))[0]
+
+
+@dataclass(frozen=True)
+class ControlRow:
+    """#34's control at one azimuth: v1 and XYZ_g against Prague (contrast deviations, u'v')."""
+
+    azimuth: float
+    v1_contrast: tuple[float, float]
+    lobe_contrast: tuple[float, float]
+    v1_distance: float
+    lobe_distance: float
+
+
+def control_with_lobe(pilot: dict, k: int) -> list[ControlRow]:
+    """#34's control at the pilot fixture's `aod_550` 0.03 with XYZ_g in place of v1 (reported)."""
+    aod = AEROSOL_OPTICAL_DEPTHS[0]
+    views = pilot["view_elevations_deg"]
+    sun = pilot["sun_elevation_deg"]
+    index = nominal_indices(views)
+    nominal = [views[i] for i in index]
+    rows = []
+    for azimuth in pilot["rel_azimuths_deg"]:
+        prague = _fixture_xyz(pilot["atmospheres"][f"{aod:g}"], azimuth)[index]
+        v1 = engine_xyz(aod, sun, nominal, azimuth, "v1")
+        lobe = lobe_xyz(aod, asymmetry_of(k), sun, nominal, azimuth)
+        p = _contrast(prague)
+        d1, dg = _contrast(v1) - p, _contrast(lobe) - p
+        reference = NOMINAL_VIEWS - 1
+        u1 = float(np.linalg.norm(_uv(v1[reference]) - _uv(prague[reference])))
+        ug = float(np.linalg.norm(_uv(lobe[reference]) - _uv(prague[reference])))
+        rows.append(ControlRow(float(azimuth), (d1[0], d1[1]), (dg[0], dg[1]), u1, ug))
+    return rows
+
+
+@dataclass(frozen=True)
+class RuleBReport:
+    """Rule B run on the pilot fixture (sun +10, the fit) and the sun-0 fixture (the ruling)."""
+
+    pilot: dict[float, LobeCurve]  # per load, at sun +10
+    sun0: dict[float, LobeCurve]  # per load, at sun 0
+    k_star: dict[float, int]  # g*(a) as k, fitted at sun +10
+    k_best_sun0: dict[float, int]  # the grid value that minimises r at each sun-0 condition alone
+    port_bound: dict[tuple[float, float], float]  # B per (sun, load), all four conditions
+    result: RuleB  # over the two sun-0 conditions, in the order of AEROSOL_OPTICAL_DEPTHS
+
+
+def evaluate_rule_b(pilot: dict, sun0: dict) -> RuleBReport:
+    """Fit g*(a) at the pilot fixture (sun +10), then rule on the sun-0 fixture alone."""
+    if pilot["sun_elevation_deg"] != SUN_ELEVATION_DEG:
+        raise PragueError("rule B fits g*(a) at sun +10: the pilot fixture is not at that sun")
+    if sun0["sun_elevation_deg"] != 0.0:
+        raise PragueError("rule B rules at sun 0: the second fixture is not at that sun")
+    loads = AEROSOL_OPTICAL_DEPTHS
+    pilot_curves = {a: condition_curve(pilot, a) for a in loads}
+    sun0_curves = {a: condition_curve(sun0, a) for a in loads}
+    k_star = {a: best_asymmetry_k(pilot_curves[a].r_by_k()) for a in loads}
+    k_best = {a: best_asymmetry_k(sun0_curves[a].r_by_k()) for a in loads}
+    bounds = {
+        (data["sun_elevation_deg"], a): condition_port_bound(data, a)
+        for data in (pilot, sun0)
+        for a in loads
+    }
+    result = rule_b(
+        [sun0_curves[a].r_at(V1_ASYMMETRY_K) for a in loads],
+        [sun0_curves[a].r_at(k_star[a]) for a in loads],
+    )
+    return RuleBReport(pilot_curves, sun0_curves, k_star, k_best, bounds, result)
+
+
+def _stats_row(label: str, d: np.ndarray, e: np.ndarray) -> str:
+    sd = f"{d.std(ddof=STD_DDOF):.4f}" if d.size > 1 else "n/a"
+    return (
+        f"| {label} | {d.size} | {d.mean():+.4f} | {sd} "
+        f"| {d.min():+.4f} to {d.max():+.4f} | {e.mean():+.4f} |"
+    )
+
+
+def _gap_mask(a: RuleAReport) -> np.ndarray:
+    """The gap's own point: azimuth 30 and the view that rounds to 1.51, by value."""
+    mask = mask_points(a.azimuth, a.view, azimuths=(GAP_AZIMUTH_DEG,))
+    mask &= mask_points(a.azimuth, a.view, views=(GAP_VIEW_DEG,), tol=GAP_VIEW_TOL_DEG)
+    if int(mask.sum()) != 1:
+        raise PragueError(
+            f"expected one point at azimuth {GAP_AZIMUTH_DEG:g}, view {GAP_VIEW_DEG:g}, "
+            f"found {int(mask.sum())}"
+        )
+    return mask
+
+
+def report_sun0(pilot: dict, sun0: dict) -> str:
+    """Rules A and B at sun 0 from the two committed fixtures: every quantity the criterion lists.
+
+    Prints no verdict but the two rules' (#34's aod 0.1 rule is not applied here). Everything
+    after each ruling is reported, not ruled.
+    """
+    if sun0["sun_elevation_deg"] != 0.0:
+        raise PragueError("report_sun0 needs the sun-0 fixture")
+    a = evaluate_rule_a(sun0)
+    b = evaluate_rule_b(pilot, sun0)
+    a_pilot = evaluate_rule_a(pilot)
+    loads = AEROSOL_OPTICAL_DEPTHS
+    lines: list[str] = []
+    out = lines.append
+    r = a.result
+
+    # --- rule A -------------------------------------------------------------------------------
+    out("### Rule A at sun 0: which side of the `aod_550` 0.1 gap is Prague on?")
+    out("")
+    out(
+        "d = (v1 / Prague in luminance at 0.1) divided by (v1 / Prague at 0.03), minus 1. If "
+        "Prague sides with the port, d is 0; with the Monte Carlo, d is e (6.6 percent of v1's "
+        "multiply scattered share, at sun 0). P is relative azimuths 90 and 180, all eight views: "
+        f"{int(a.in_p.sum())} points. Every value is unrounded in the comparison."
+    )
+    out("")
+    out("| quantity | value |")
+    out("| --- | --- |")
+    out(f"| D, mean of d over P | {r.D:+.4f} |")
+    out(f"| E, mean of e over P | {r.E:+.4f} |")
+    out(f"| s, sd of d over P (ddof 1) | {r.s:.4f} |")
+    for name in RULE_A_ALTERNATIVE_READINGS:
+        out(f"| D under `{name}` (part of m) | {r.D_alternatives[name]:+.4f} |")
+    out(f"| m, largest shift of D over those two readings | {r.m:.4f} |")
+    out(f"| U, the larger of s and m | {r.U:.4f} |")
+    out(f"| 2U, the bar E must exceed | {UNCERTAINTY_BAR_FACTOR * r.U:.4f} |")
+    for name in RULE_A_REPORTED_READINGS:
+        out(f"| D under `{name}` (reported, not part of m) | {a.D_reported[name]:+.4f} |")
+    out("")
+    out(f"Verdict: **{r.verdict}** (branch {r.branch}).")
+    if r.verdict == CANNOT_TELL:
+        out("")
+        if r.branch == 1:
+            out(
+                f"Branch 1 fired: E ({r.E:.4f}) is not above 2U "
+                f"({UNCERTAINTY_BAR_FACTOR * r.U:.4f}). This says the comparison lacks power, "
+                "not anything about either model."
+            )
+        else:
+            out(
+                f"Branch 4 fired: E ({r.E:.4f}) is above 2U, but D ({r.D:+.4f}) is farther than U "
+                f"({r.U:.4f}) from both 0 and E: neither prediction fits."
+            )
+        out(
+            "What would tell: a reference with v1's own aerosol (the same vertical profile and "
+            "phase function, the one thing Prague cannot offer), from libRadtran, run offline "
+            "(GPL, never vendored or imported)."
+        )
+    out("")
+    out("Reported, not ruled: d and e at every point of the fixture, by group.")
+    out("")
+    out("| points | n | mean d | sd of d | min to max of d | mean e |")
+    out("| --- | --- | --- | --- | --- | --- |")
+    everything = np.ones_like(a.in_p)
+    out(_stats_row(f"all {a.d.size}", a.d[everything], a.e[everything]))
+    for azimuth in sun0["rel_azimuths_deg"]:
+        mask = mask_points(a.azimuth, a.view, azimuths=(azimuth,))
+        out(_stats_row(f"azimuth {azimuth:g} alone", a.d[mask], a.e[mask]))
+    gap = _gap_mask(a)
+    out(
+        f"| the gap's own point (azimuth {GAP_AZIMUTH_DEG:g}, view {GAP_VIEW_DEG:g}) | 1 "
+        f"| {a.d[gap][0]:+.4f} | n/a | n/a | {a.e[gap][0]:+.4f} |"
+    )
+    out("")
+    p = a_pilot.result
+    out(
+        "The sun +10 pilot over the same P (the numbers the criterion quotes; not a ruling): "
+        f"D {p.D:+.4f}, E {p.E:+.4f}, s {p.s:.4f}, m {p.m:.4f}, U {p.U:.4f}."
+    )
+    out("")
+
+    # --- rule B -------------------------------------------------------------------------------
+    out("### Rule B: what is the toward-sun luminance excess made of?")
+    out("")
+    out(
+        "r is the root mean square of ln(Y_g / Y_Prague) over the six nominal views at relative "
+        "azimuth 0 (unsigned); the signed mean of the same logarithms is beside it. g*(a) is "
+        "fitted per load at sun +10 on the grid k = 30 to 90 (g = k / 100) and ruled on at sun 0."
+    )
+    out("")
+    out("#### The fit at sun +10 (the pilot)")
+    out("")
+    out("| `aod_550` | g*(a) | r at g = 0.7 | r at g*(a) | signed mean at 0.7 | at g*(a) |")
+    out("| --- | --- | --- | --- | --- | --- |")
+    for aod in loads:
+        c = b.pilot[aod]
+        k = b.k_star[aod]
+        out(
+            f"| {aod:g} | {asymmetry_of(k):.2f} | {c.r_at(V1_ASYMMETRY_K):.4f} | {c.r_at(k):.4f} "
+            f"| {c.signed_mean_at(V1_ASYMMETRY_K):+.4f} | {c.signed_mean_at(k):+.4f} |"
+        )
+    out("")
+    low, high = loads
+    if b.k_star[low] != b.k_star[high]:
+        out(
+            f"g*({low:g}) = {asymmetry_of(b.k_star[low]):.2f} and g*({high:g}) = "
+            f"{asymmetry_of(b.k_star[high]):.2f} differ: the asymmetry that fits depends on the "
+            "aerosol load, which is itself evidence against a pure phase-function error "
+            "(whatever the sun-0 verdict below)."
+        )
+    else:
+        out(
+            f"g*({low:g}) and g*({high:g}) are both {asymmetry_of(b.k_star[low]):.2f}: the fitted "
+            "asymmetry does not depend on the load here."
+        )
+    out("")
+    out("#### The ruled conditions: sun 0")
+    out("")
+    out(
+        "| `aod_550` | r at 0.7 | r at g*(a) | r(g*) / r(0.7) | signed mean at 0.7 | at g*(a) "
+        "| B | 2B | counts (r at 0.7 >= 0.05) |"
+    )
+    out("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+    for i, aod in enumerate(loads):
+        c = b.sun0[aod]
+        k = b.k_star[aod]
+        bound = b.port_bound[(0.0, aod)]
+        out(
+            f"| {aod:g} | {c.r_at(V1_ASYMMETRY_K):.4f} | {c.r_at(k):.4f} "
+            f"| {c.r_at(k) / c.r_at(V1_ASYMMETRY_K):.3f} "
+            f"| {c.signed_mean_at(V1_ASYMMETRY_K):+.4f} | {c.signed_mean_at(k):+.4f} "
+            f"| {bound:.4f} | {2 * bound:.4f} | {'yes' if b.result.counted[i] else 'no'} |"
+        )
+    out("")
+    out(f"Verdict: **{b.result.verdict}** (branch {b.result.branch}).")
+    if b.result.verdict == AEROSOL_LOBE:
+        out("")
+        out(
+            "Renderer v1 is unchanged by this. A physics change to its aerosol lobe would be a new "
+            "renderer with its own registration, which the conductor files."
+        )
+    out("")
+    out("Reported, not ruled:")
+    out("")
+    out("- The sun +10 cross-load pilot (r at sun +10 with the other load's g*):")
+    for fitted, applied in ((high, low), (low, high)):
+        k = b.k_star[fitted]
+        c = b.pilot[applied]
+        out(
+            f"  - g*({fitted:g}) = {asymmetry_of(k):.2f} applied at (sun +10, {applied:g}): r "
+            f"{c.r_at(k):.4f} against {c.r_at(V1_ASYMMETRY_K):.4f} at 0.7 and "
+            f"{c.r_at(b.k_star[applied]):.4f} at its own g*({applied:g})."
+        )
+    out("- The grid value that minimises r at each sun-0 condition alone:")
+    for aod in loads:
+        k = b.k_best_sun0[aod]
+        c = b.sun0[aod]
+        out(
+            f"  - (sun 0, {aod:g}): g = {asymmetry_of(k):.2f}, r {c.r_at(k):.4f} "
+            f"(r at 0.7 {c.r_at(V1_ASYMMETRY_K):.4f}, at g*({aod:g}) {c.r_at(b.k_star[aod]):.4f})."
+        )
+    out(
+        "- The port bound at sun +10 (B, 2B): "
+        + "; ".join(
+            f"{aod:g}: {b.port_bound[(10.0, aod)]:.4f}, {2 * b.port_bound[(10.0, aod)]:.4f}"
+            for aod in loads
+        )
+        + "."
+    )
+    out("")
+    out("Whether fixing the lobe costs the side and back sky: rms of ln(Y_g / Y_Prague) over the")
+    out("eight views at azimuths 90 and 180 together (16 points).")
+    out("")
+    out("| condition | r at g = 0.7 | r at g*(a) |")
+    out("| --- | --- | --- |")
+    for label, data in (("sun +10", pilot), ("sun 0", sun0)):
+        for aod in loads:
+            out(
+                f"| ({label}, {aod:g}) | {side_and_back_r(data, aod, V1_ASYMMETRY_K):.4f} "
+                f"| {side_and_back_r(data, aod, b.k_star[aod]):.4f} |"
+            )
+    out("")
+    k = b.k_star[low]
+    out(
+        f"#34's control at sun +10, `aod_550` {low:g}, recomputed with XYZ at g*({low:g}) = "
+        f"{asymmetry_of(k):.2f} in place of v1 (lowest band against the reference band; tolerances "
+        f"{CONTRAST_TOLERANCE:g} per log ratio, {CHROMATICITY_TOLERANCE:g} in u'v'):"
+    )
+    out("")
+    out(
+        "| rel. azimuth | v1 minus Prague | XYZ_g* minus Prague | v1 u'v' distance "
+        "| XYZ_g* u'v' distance | XYZ_g* within both |"
+    )
+    out("| --- | --- | --- | --- | --- | --- |")
+    for row in control_with_lobe(pilot, k):
+        within = (
+            max(abs(row.lobe_contrast[0]), abs(row.lobe_contrast[1])) <= CONTRAST_TOLERANCE
+            and row.lobe_distance <= CHROMATICITY_TOLERANCE
+        )
+        out(
+            f"| {row.azimuth:g} | {row.v1_contrast[0]:+.3f}, {row.v1_contrast[1]:+.3f} "
+            f"| {row.lobe_contrast[0]:+.3f}, {row.lobe_contrast[1]:+.3f} | {row.v1_distance:.4f} "
+            f"| {row.lobe_distance:.4f} | {'yes' if within else 'no'} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
 def cmd_report(spec: FixtureSpec = SUN10) -> None:
-    sys.stdout.write(report(json.loads(spec.path.read_text())))
+    data = json.loads(spec.path.read_text())
+    if spec.sun_elevation_deg == SUN_ELEVATION_DEG:
+        sys.stdout.write(report(data))
+    else:
+        # Rules A and B at sun 0: the pilot fit is the sun +10 fixture's, the ruling this one's.
+        sys.stdout.write(report_sun0(json.loads(SUN10.path.read_text()), data))
 
 
 # --- command line ---------------------------------------------------------------------------------

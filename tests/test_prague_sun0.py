@@ -15,6 +15,7 @@ The rules live in `tools/prague_reference.py` (the tool only, never `lastlight.r
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 import json
 import math
@@ -1020,3 +1021,499 @@ def test_the_sun_0_fixture_matches_a_fresh_evaluation_of_the_built_model() -> No
         timeout=900,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+# --- the rules run on the fixtures, pinned by value -----------------------------------------------
+#
+# Every pin is `pytest.approx(x, rel=1e-6, abs=0)`: a relative bar. (pytest's default absolute
+# tolerance of 1e-12 would void a relative bar on a value this small, so abs is always 0.) The
+# numbers were first computed after the rules and the fixture were committed, and are reproduced by
+# `uv run python tools/prague_reference.py report --sun 0`. A pin that moves means the physics, the
+# fixture or the rule moved: it is not a number to be updated until the reason is known.
+
+
+def pinned(value: float) -> object:
+    return pytest.approx(value, rel=1e-6, abs=0)
+
+
+@cache
+def rule_a_sun0() -> object:
+    return load_tool().evaluate_rule_a(fixture_sun0())
+
+
+@cache
+def rule_a_sun10() -> object:
+    return load_tool().evaluate_rule_a(fixture_sun10())
+
+
+@cache
+def rule_b() -> object:
+    return load_tool().evaluate_rule_b(fixture_sun10(), fixture_sun0())
+
+
+def test_rule_a_at_sun_0_statistics_verdict_and_branch() -> None:
+    a = rule_a_sun0()
+    r = a.result
+    assert int(a.in_p.sum()) == 16
+    assert pinned(-0.03370715339) == r.D
+    assert pinned(0.04452681248) == r.E
+    assert r.s == pinned(0.02687968216)
+    assert r.m == pinned(0.02473118902)
+    assert pinned(0.02687968216) == r.U
+    assert r.s == r.U  # s is the larger of the two here
+    assert r.D_alternatives["xyz_inverse_visibility"] == pinned(-0.04412763309)
+    assert r.D_alternatives["xyz_matched_aerosol_depth"] == pinned(-0.05843834241)
+    assert a.D_reported["xyz_binned"] == pinned(-0.02431444962)
+    assert a.D_reported["xyz_altitude_0"] == pinned(-0.006056026403)
+    assert r.verdict == "cannot tell"
+    assert r.branch == 1
+    assert r.E <= 2 * r.U  # branch 1: the comparison lacks the power to separate the predictions
+
+
+def test_rule_a_reported_not_ruled_items_at_sun_0() -> None:
+    tool = load_tool()
+    a = rule_a_sun0()
+    assert a.d.shape == (32,)
+    assert float(a.d.mean()) == pinned(0.08478889701)
+    assert float(a.d.std(ddof=1)) == pinned(0.1628234777)
+    assert float(a.d.min()) == pinned(-0.0761619868)
+    assert float(a.d.max()) == pinned(0.4118543606)
+    assert float(a.e.mean()) == pinned(0.03631939902)
+    groups = {
+        0.0: (0.2942464439, 0.1686403943, 0.02242686327),
+        30.0: (0.1123234509, 0.06572154008, 0.03379710783),
+        90.0: (-0.0141346633, 0.01205125974, 0.04408326721),
+        180.0: (-0.05327964347, 0.02296522768, 0.04497035775),
+    }
+    for azimuth, (mean_d, sd_d, mean_e) in groups.items():
+        mask = tool.mask_points(a.azimuth, a.view, azimuths=(azimuth,))
+        assert int(mask.sum()) == 8
+        assert float(a.d[mask].mean()) == pinned(mean_d)
+        assert float(a.d[mask].std(ddof=1)) == pinned(sd_d)
+        assert float(a.e[mask].mean()) == pinned(mean_e)
+    gap = tool._gap_mask(a)
+    assert a.azimuth[gap][0] == 30.0 and a.view[gap][0] == pytest.approx(1.51, abs=0.005)
+    assert a.d[gap][0] == pinned(0.1109421706)
+    assert a.e[gap][0] == pinned(0.04846668752)
+
+
+def test_rule_a_at_sun_10_reproduces_the_pilot_numbers_the_criterion_quotes() -> None:
+    """The same code over sun10.json gives #34's log: s 0.019, m 0.025, E 0.034, U 0.025."""
+    r = rule_a_sun10().result
+    assert r.s == pytest.approx(0.019, abs=5e-4)
+    assert r.m == pytest.approx(0.025, abs=5e-4)
+    assert pytest.approx(0.034, abs=5e-4) == r.E
+    assert pytest.approx(0.025, abs=5e-4) == r.U
+    assert pytest.approx(0.0326, abs=5e-5) == r.D  # the log's "mean d +0.0326" (azimuths 90, 180)
+    assert r.D_alternatives["xyz_inverse_visibility"] == pytest.approx(0.0228, abs=5e-5)
+    assert r.D_alternatives["xyz_matched_aerosol_depth"] == pytest.approx(0.0076, abs=5e-5)
+    assert pinned(0.03257880062) == r.D
+    assert pinned(0.03413468513) == r.E
+    assert r.s == pinned(0.01877069571)
+    assert r.m == pinned(0.02498906954)
+    assert pinned(0.02498906954) == r.U
+
+
+def test_rule_a_at_sun_0_e_is_the_criterions_0_0445_from_v1_alone() -> None:
+    assert pytest.approx(0.044527, rel=1e-4, abs=0) == rule_a_sun0().result.E
+
+
+def test_rule_b_fits_g_star_at_sun_10_the_pilot_values_the_criterion_quotes() -> None:
+    b = rule_b()
+    assert b.k_star == {0.03: 67, 0.1: 60}
+    low, high = b.pilot[0.03], b.pilot[0.1]
+    assert low.r_at(70) == pytest.approx(0.122, abs=5e-4)  # "r at 0.7 is 0.122" at 0.03
+    assert high.r_at(70) == pytest.approx(0.409, abs=5e-4)  # "falls from 0.409 ..."
+    assert high.r_at(60) == pytest.approx(0.035, abs=5e-4)  # "... to 0.035"
+    assert low.r_at(60) == pytest.approx(0.284, abs=5e-4)  # "0.60 applied at 0.03 ... r 0.284"
+    assert low.r_at(70) == pinned(0.1220474098)
+    assert low.r_at(67) == pinned(0.04283475751)
+    assert high.r_at(70) == pinned(0.4088037393)
+    assert high.r_at(60) == pinned(0.0352887899)
+    assert low.signed_mean_at(70) == pinned(0.1162912794)
+    assert low.signed_mean_at(67) == pinned(-0.01562037652)
+    assert high.signed_mean_at(70) == pinned(0.4083876742)
+    assert high.signed_mean_at(60) == pinned(-0.01326411714)
+
+
+def test_the_fitted_asymmetry_depends_on_the_load() -> None:
+    """One g cannot serve both loads: the criterion calls that evidence against a phase error."""
+    b = rule_b()
+    assert b.k_star[0.03] != b.k_star[0.1]
+    cross_low = b.pilot[0.03].r_at(b.k_star[0.1])  # 0.60 applied at 0.03: worse than v1's own
+    cross_high = b.pilot[0.1].r_at(b.k_star[0.03])
+    assert cross_low > b.pilot[0.03].r_at(70)
+    assert cross_low == pinned(0.2839919473)
+    assert cross_high == pinned(0.2705908726)
+    assert cross_high < b.pilot[0.1].r_at(70)  # but 0.67 applied at 0.1 still helps
+
+
+def test_rule_b_at_sun_0_conditions_and_verdict() -> None:
+    b = rule_b()
+    low, high = b.sun0[0.03], b.sun0[0.1]
+    assert low.r_at(70) == pinned(0.1253466303)
+    assert low.r_at(67) == pinned(0.05601825059)
+    assert high.r_at(70) == pinned(0.4322458811)
+    assert high.r_at(60) == pinned(0.1785046002)
+    assert low.signed_mean_at(70) == pinned(0.1061068562)
+    assert low.signed_mean_at(67) == pinned(-0.001170362906)
+    assert high.signed_mean_at(70) == pinned(0.4298290092)
+    assert high.signed_mean_at(60) == pinned(0.1701009294)
+    assert b.port_bound[(0.0, 0.03)] == pinned(0.0104572589)
+    assert b.port_bound[(0.0, 0.1)] == pinned(0.02380760363)
+    assert 2 * b.port_bound[(0.0, 0.03)] == pinned(2 * 0.0104572589)
+    assert 2 * b.port_bound[(0.0, 0.1)] == pinned(2 * 0.02380760363)
+    assert b.result.counted == (True, True)  # r at 0.7 is at least 0.05 at both loads
+    assert b.result.halved == (True, True)
+    assert b.result.verdict == "aerosol lobe"
+    assert b.result.branch == 2
+
+
+def test_the_port_bound_cannot_carry_half_of_any_excess_large_enough_to_count() -> None:
+    """2B is under the 0.05 floor at both sun-0 conditions, and under half the sun +10 excess."""
+    tool = load_tool()
+    b = rule_b()
+    assert 2 * b.port_bound[(0.0, 0.03)] < tool.EXCESS_FLOOR
+    assert 2 * b.port_bound[(0.0, 0.1)] < tool.EXCESS_FLOOR
+    assert b.port_bound[(0.0, 0.03)] == pytest.approx(0.0105, abs=5e-5)  # the criterion's figures
+    assert b.port_bound[(0.0, 0.1)] == pytest.approx(0.0238, abs=5e-5)
+    assert b.port_bound[(10.0, 0.03)] == pytest.approx(0.0058, abs=5e-5)
+    assert b.port_bound[(10.0, 0.1)] == pytest.approx(0.0094, abs=5e-5)
+    assert b.port_bound[(10.0, 0.03)] == pinned(0.005796576675)
+    assert b.port_bound[(10.0, 0.1)] == pinned(0.009374451592)
+    for aod in (0.03, 0.1):  # against half the sun +10 excess: 0.061 and 0.204
+        assert b.port_bound[(10.0, aod)] < 0.5 * b.pilot[aod].r_at(70)
+
+
+def test_the_grid_value_that_minimises_r_at_each_sun_0_condition_alone() -> None:
+    b = rule_b()
+    assert b.k_best_sun0 == {0.03: 67, 0.1: 48}
+    assert b.sun0[0.03].r_at(67) == pinned(0.05601825059)
+    assert b.sun0[0.1].r_at(48) == pinned(0.06398375669)
+
+
+def test_the_side_and_back_sky_cost_of_fixing_the_lobe() -> None:
+    tool = load_tool()
+    b = rule_b()
+    pins = {
+        ("sun10", 0.03): (0.1090276495, 0.1158503825),
+        ("sun10", 0.1): (0.1426222844, 0.1936970755),
+        ("sun0", 0.03): (0.3046067259, 0.30686188),
+        ("sun0", 0.1): (0.2698850025, 0.2751393217),
+    }
+    for (label, aod), (at_v1, at_fit) in pins.items():
+        data = fixture_sun10() if label == "sun10" else fixture_sun0()
+        assert tool.side_and_back_r(data, aod, 70) == pinned(at_v1)
+        assert tool.side_and_back_r(data, aod, b.k_star[aod]) == pinned(at_fit)
+
+
+def test_the_sun_10_control_recomputed_with_the_fitted_asymmetry() -> None:
+    tool = load_tool()
+    rows = tool.control_with_lobe(fixture_sun10(), rule_b().k_star[0.03])
+    assert [row.azimuth for row in rows] == [0.0, 90.0, 180.0]
+    expected = [
+        (
+            (0.01031409744, -0.04895865486),
+            (0.01546092952, -0.05360277616),
+            0.004930054482,
+            0.003568036888,
+        ),
+        (
+            (0.01948547443, -0.03821735726),
+            (0.02010055397, -0.04040632428),
+            0.00258655263,
+            0.002518440931,
+        ),
+        (
+            (0.02612575002, -0.05617136565),
+            (0.02646713095, -0.05690095228),
+            0.005213757498,
+            0.005316384317,
+        ),
+    ]
+    for row, (v1_contrast, lobe_contrast, v1_distance, lobe_distance) in zip(
+        rows, expected, strict=True
+    ):
+        assert row.v1_contrast == pinned_pair(v1_contrast)
+        assert row.lobe_contrast == pinned_pair(lobe_contrast)
+        assert row.v1_distance == pinned(v1_distance)
+        assert row.lobe_distance == pinned(lobe_distance)
+        # The control's own tolerances, #34's: 0.10 per log ratio, 0.02 in u'v'.
+        assert max(abs(x) for x in row.lobe_contrast) <= tool.CONTRAST_TOLERANCE
+        assert row.lobe_distance <= tool.CHROMATICITY_TOLERANCE
+
+
+def pinned_pair(pair: tuple[float, float]) -> object:
+    return pytest.approx(pair, rel=1e-6, abs=0)
+
+
+# --- the pipeline can say each thing: positive controls on synthetic stand-ins for Prague ---------
+
+
+def with_prague_rows(
+    data: dict, aod: float, azimuth: float, rows: np.ndarray, *, readings=True
+) -> dict:
+    """A copy of a fixture whose Prague at (aod, azimuth) is `rows`, in every reading."""
+    new = copy.deepcopy(data)
+    entry = new["atmospheres"][f"{aod:g}"]
+    entry["xyz"][f"{azimuth:g}"] = rows.tolist()
+    if readings:
+        for variant in READINGS:
+            entry["diagnostics"][variant][f"{azimuth:g}"] = rows.tolist()
+    return new
+
+
+def prague_that_is(data: dict, side: str) -> dict:
+    """A fixture whose Prague has d = 0 (the port) or d = e (the Monte Carlo) at every point."""
+    tool = load_tool()
+    views, sun, azimuths = (
+        data["view_elevations_deg"],
+        data["sun_elevation_deg"],
+        data["rel_azimuths_deg"],
+    )
+    e = tool.predicted_if_monte_carlo(sun, views, azimuths).reshape(len(azimuths), len(views))
+    new = data
+    for aod in LOADS:
+        for i, azimuth in enumerate(azimuths):
+            rows = tool.engine_xyz(aod, sun, views, azimuth, "v1")
+            if aod == 0.1 and side == "monte_carlo":
+                rows = rows / (1.0 + e[i])[:, None]
+            new = with_prague_rows(new, aod, azimuth, rows)
+    return new
+
+
+def test_rule_a_says_port_when_prague_is_the_port() -> None:
+    tool = load_tool()
+    a = tool.evaluate_rule_a(prague_that_is(fixture_sun0(), "port"))
+    assert a.result.D == 0.0 and a.result.s == 0.0 and a.result.m == 0.0
+    assert (a.result.verdict, a.result.branch) == ("port", 2)
+
+
+def test_rule_a_says_monte_carlo_when_prague_is_the_monte_carlo() -> None:
+    tool = load_tool()
+    a = tool.evaluate_rule_a(prague_that_is(fixture_sun0(), "monte_carlo"))
+    assert pytest.approx(a.result.E, rel=1e-12, abs=0) == a.result.D
+    assert a.result.E > 2 * a.result.U
+    assert (a.result.verdict, a.result.branch) == ("Monte Carlo", 3)
+
+
+def test_rule_a_says_cannot_tell_by_branch_4_when_prague_is_neither() -> None:
+    """Prague 3 percent brighter at 0.1 than the Monte Carlo predicts: D falls between."""
+    tool = load_tool()
+    data = fixture_sun0()
+    views, sun, azimuths = data["view_elevations_deg"], 0.0, data["rel_azimuths_deg"]
+    e = tool.predicted_if_monte_carlo(sun, views, azimuths).reshape(len(azimuths), len(views))
+    new = prague_that_is(data, "port")
+    for i, azimuth in enumerate(azimuths):
+        rows = tool.engine_xyz(0.1, sun, views, azimuth, "v1") / (1.0 + e[i] / 2.0)[:, None]
+        new = with_prague_rows(new, 0.1, azimuth, rows)
+    a = tool.evaluate_rule_a(new)
+    assert a.result.E > 2 * a.result.U
+    assert (a.result.verdict, a.result.branch) == ("cannot tell", 4)
+
+
+def test_rule_b_says_no_excess_when_prague_is_v1_toward_the_sun() -> None:
+    tool = load_tool()
+    data = fixture_sun0()
+    index = tool.nominal_indices(data["view_elevations_deg"])
+    for aod in LOADS:
+        rows = np.array(data["atmospheres"][f"{aod:g}"]["xyz"]["0"], dtype=float)
+        rows[index] = tool.engine_xyz(
+            aod, 0.0, [data["view_elevations_deg"][i] for i in index], 0.0, "v1"
+        )
+        data = with_prague_rows(data, aod, 0.0, rows, readings=False)
+    result = tool.evaluate_rule_b(fixture_sun10(), data).result
+    assert (result.verdict, result.branch) == ("no excess at sun 0", 1)
+
+
+def test_rule_b_says_aerosol_lobe_when_prague_is_the_fitted_lobe() -> None:
+    tool = load_tool()
+    b = rule_b()
+    data = fixture_sun0()
+    index = tool.nominal_indices(data["view_elevations_deg"])
+    views = [data["view_elevations_deg"][i] for i in index]
+    for aod in LOADS:
+        rows = np.array(data["atmospheres"][f"{aod:g}"]["xyz"]["0"], dtype=float)
+        rows[index] = tool.lobe_xyz(aod, tool.asymmetry_of(b.k_star[aod]), 0.0, views, 0.0)
+        data = with_prague_rows(data, aod, 0.0, rows, readings=False)
+    result = tool.evaluate_rule_b(fixture_sun10(), data)
+    assert [result.sun0[a].r_at(b.k_star[a]) for a in LOADS] == [0.0, 0.0]
+    assert (result.result.verdict, result.result.branch) == ("aerosol lobe", 2)
+
+
+def test_rule_b_says_neither_when_prague_is_brighter_than_v1_uniformly() -> None:
+    """A lobe that is too strong cannot be the cause if v1 is too faint: g* only makes it worse."""
+    tool = load_tool()
+    data = fixture_sun0()
+    index = tool.nominal_indices(data["view_elevations_deg"])
+    views = [data["view_elevations_deg"][i] for i in index]
+    for aod in LOADS:
+        rows = np.array(data["atmospheres"][f"{aod:g}"]["xyz"]["0"], dtype=float)
+        rows[index] = 1.2 * tool.engine_xyz(aod, 0.0, views, 0.0, "v1")
+        data = with_prague_rows(data, aod, 0.0, rows, readings=False)
+    result = tool.evaluate_rule_b(fixture_sun10(), data).result
+    assert result.counted == (True, True) and result.halved == (False, False)
+    assert (result.verdict, result.branch) == ("neither", 3)
+
+
+# --- selection by value, end to end ---------------------------------------------------------------
+
+
+def permuted(data: dict) -> dict:
+    """The same fixture with its azimuths and views listed in the opposite order."""
+    new = copy.deepcopy(data)
+    new["rel_azimuths_deg"] = list(reversed(data["rel_azimuths_deg"]))
+    new["view_elevations_deg"] = list(reversed(data["view_elevations_deg"]))
+    for entry in new["atmospheres"].values():
+        for block in (entry["xyz"], *(entry["diagnostics"][v] for v in READINGS)):
+            for key in block:
+                block[key] = list(reversed(block[key]))
+    return new
+
+
+def test_rule_a_does_not_depend_on_the_order_of_azimuths_and_views() -> None:
+    tool = load_tool()
+    here, there = rule_a_sun0().result, tool.evaluate_rule_a(permuted(fixture_sun0())).result
+    for name in ("D", "E", "s", "m", "U"):
+        assert getattr(there, name) == pytest.approx(getattr(here, name), rel=1e-12, abs=0), name
+    assert (there.verdict, there.branch) == (here.verdict, here.branch)
+
+
+def test_rule_b_does_not_depend_on_the_order_of_azimuths_and_views() -> None:
+    tool = load_tool()
+    there = tool.evaluate_rule_b(permuted(fixture_sun10()), permuted(fixture_sun0()))
+    here = rule_b()
+    assert there.k_star == here.k_star
+    for aod in LOADS:
+        assert there.sun0[aod].r_at(70) == pytest.approx(here.sun0[aod].r_at(70), rel=1e-12, abs=0)
+        assert there.sun0[aod].r_at(60) == pytest.approx(here.sun0[aod].r_at(60), rel=1e-12, abs=0)
+    assert (there.result.verdict, there.result.branch) == (here.result.verdict, here.result.branch)
+
+
+def test_rule_b_refuses_fixtures_at_the_wrong_suns() -> None:
+    """The fit is at sun +10 and the ruling at sun 0: swapping or repeating them is an error."""
+    tool = load_tool()
+    with pytest.raises(tool.PragueError, match="rules at sun 0"):
+        tool.evaluate_rule_b(fixture_sun10(), fixture_sun10())
+    with pytest.raises(tool.PragueError, match="fits g.*at sun .10"):
+        tool.evaluate_rule_b(fixture_sun0(), fixture_sun0())
+
+
+# --- the report -----------------------------------------------------------------------------------
+
+
+@cache
+def sun0_report() -> str:
+    return load_tool().report_sun0(fixture_sun10(), fixture_sun0())
+
+
+def test_the_report_prints_both_verdicts_and_branches() -> None:
+    text = sun0_report()
+    assert "Verdict: **cannot tell** (branch 1)." in text
+    assert "Verdict: **aerosol lobe** (branch 2)." in text
+
+
+def test_the_report_prints_every_item_the_criterion_lists_for_rule_a() -> None:
+    text = sun0_report()
+    for needle in (
+        "D, mean of d over P",
+        "E, mean of e over P",
+        "s, sd of d over P (ddof 1)",
+        "m, largest shift of D",
+        "U, the larger of s and m",
+        "2U, the bar E must exceed",
+        "`xyz_binned` (reported, not part of m)",
+        "`xyz_altitude_0` (reported, not part of m)",
+        "all 32",
+        "azimuth 0 alone",
+        "azimuth 30 alone",
+        "azimuth 90 alone",
+        "azimuth 180 alone",
+        "the gap's own point (azimuth 30, view 1.51)",
+    ):
+        assert needle in text, needle
+
+
+def test_the_report_says_branch_1_is_a_lack_of_power_and_what_would_tell() -> None:
+    text = sun0_report()
+    assert "This says the comparison lacks power, not anything about either model." in text
+    assert "libRadtran" in text and "never vendored or imported" in text
+
+
+def test_the_report_prints_every_item_the_criterion_lists_for_rule_b() -> None:
+    text = sun0_report()
+    for needle in (
+        "#### The fit at sun +10 (the pilot)",
+        "#### The ruled conditions: sun 0",
+        "| B | 2B | counts (r at 0.7 >= 0.05) |",
+        "signed mean at 0.7",
+        "The sun +10 cross-load pilot",
+        "The grid value that minimises r at each sun-0 condition alone",
+        "Whether fixing the lobe costs the side and back sky",
+        "#34's control at sun +10",
+        "XYZ_g* within both",
+        "which is itself evidence against a pure phase-function error",
+        "a new renderer with its own registration, which the conductor files",
+    ):
+        assert needle in text, needle
+    assert "Renderer v1 is unchanged by this." in text
+
+
+def test_the_report_does_not_print_34s_old_aod_0_1_verdict() -> None:
+    text = sun0_report()
+    for old in (  # the wording of the #34 rule's output line and its verdicts
+        "**sides with",
+        "result: **",
+        "predicted gap",
+        "Rule (written before",
+        "Which model does Prague side with",
+    ):
+        assert old not in text, old
+    assert text.count("Verdict:") == 2  # rule A's and rule B's, and nothing else that reads as one
+
+
+def test_the_34_report_refuses_the_sun_0_fixture() -> None:
+    tool = load_tool()
+    with pytest.raises(tool.PragueError, match="not for sun 0"):
+        tool.report(fixture_sun0())
+
+
+def test_the_command_line_report_for_sun_0_runs_from_the_committed_fixtures(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    tool = load_tool()
+    assert tool.main(["report", "--sun", "0"]) == 0
+    assert capsys.readouterr().out == sun0_report()
+
+
+def test_the_report_rows_carry_the_pinned_numbers() -> None:
+    """The printed tables are what goes in the build log: their numbers are pinned as text."""
+    text = sun0_report()
+    for row in (
+        "| D, mean of d over P | -0.0337 |",
+        "| E, mean of e over P | +0.0445 |",
+        "| s, sd of d over P (ddof 1) | 0.0269 |",
+        "| D under `xyz_inverse_visibility` (part of m) | -0.0441 |",
+        "| D under `xyz_matched_aerosol_depth` (part of m) | -0.0584 |",
+        "| m, largest shift of D over those two readings | 0.0247 |",
+        "| U, the larger of s and m | 0.0269 |",
+        "| 2U, the bar E must exceed | 0.0538 |",
+        "| D under `xyz_binned` (reported, not part of m) | -0.0243 |",
+        "| D under `xyz_altitude_0` (reported, not part of m) | -0.0061 |",
+        "| all 32 | 32 | +0.0848 | 0.1628 | -0.0762 to +0.4119 | +0.0363 |",
+        "| azimuth 0 alone | 8 | +0.2942 | 0.1686 | -0.0072 to +0.4119 | +0.0224 |",
+        "| azimuth 30 alone | 8 | +0.1123 | 0.0657 | -0.0104 to +0.1597 | +0.0338 |",
+        "| azimuth 90 alone | 8 | -0.0141 | 0.0121 | -0.0326 to +0.0035 | +0.0441 |",
+        "| azimuth 180 alone | 8 | -0.0533 | 0.0230 | -0.0762 to -0.0222 | +0.0450 |",
+        "| the gap's own point (azimuth 30, view 1.51) | 1 | +0.1109 | n/a | n/a | +0.0485 |",
+        "| 0.03 | 0.67 | 0.1220 | 0.0428 | +0.1163 | -0.0156 |",
+        "| 0.1 | 0.60 | 0.4088 | 0.0353 | +0.4084 | -0.0133 |",
+        "| 0.03 | 0.1253 | 0.0560 | 0.447 | +0.1061 | -0.0012 | 0.0105 | 0.0209 | yes |",
+        "| 0.1 | 0.4322 | 0.1785 | 0.413 | +0.4298 | +0.1701 | 0.0238 | 0.0476 | yes |",
+        "| (sun 0, 0.03) | 0.3046 | 0.3069 |",
+        "| 0 | +0.010, -0.049 | +0.015, -0.054 | 0.0049 | 0.0036 | yes |",
+    ):
+        assert row in text.splitlines(), row
+    assert "D +0.0326, E +0.0341, s 0.0188, m 0.0250, U 0.0250" in text
+    assert "r 0.2840 against 0.1220 at 0.7 and 0.0428 at its own g*(0.03)" in text
+    assert "(sun 0, 0.1): g = 0.48, r 0.0640" in text
