@@ -100,6 +100,41 @@
       "oracle": "double",
       "find": "def build_fixture(cache: Path, spec: FixtureSpec = SUN10) -> dict:",
       "replace": "def build_fixture(cache: Path, spec: FixtureSpec = SUN0) -> dict:"
+    },
+    {
+      "label": "23 [fixer] the #34 rule's spread of d uses ddof 0 (sentence number moves)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    spread = float(np.std(d, ddof=1))\n",
+      "replace": "    spread = float(np.std(d, ddof=0))\n"
+    },
+    {
+      "label": "24 [fixer] the #34 rule's reading shift is the largest, not the mean, |d - d in 1 / V|",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    reading_shift = float(np.mean(np.abs(d - readings[\"visibility read in 1 / V\"])))\n",
+      "replace": "    reading_shift = float(np.max(np.abs(d - readings[\"visibility read in 1 / V\"])))\n"
+    },
+    {
+      "label": "25 [fixer] the #34 rule tells the models apart on the smaller of spread and shift (verdict flips)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if predicted <= max(spread, reading_shift):\n",
+      "replace": "    if predicted <= min(spread, reading_shift):\n"
+    },
+    {
+      "label": "26 [fixer] the #34 totals table prints v1 in the v0 / Prague column",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "| {v0[i, 1] / prague[i, 1]:.3f} ",
+      "replace": "| {v1[i, 1] / prague[i, 1]:.3f} "
+    },
+    {
+      "label": "27 [fixer] the #34 control table's v0 u'v' distance is measured on v1",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "u0 = np.linalg.norm(_uv(v0[NOMINAL_VIEWS - 1]) - _uv(prague[NOMINAL_VIEWS - 1]))",
+      "replace": "u0 = np.linalg.norm(_uv(v1[NOMINAL_VIEWS - 1]) - _uv(prague[NOMINAL_VIEWS - 1]))"
     }
   ]
 }

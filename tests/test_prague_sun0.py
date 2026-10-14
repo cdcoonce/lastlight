@@ -20,6 +20,7 @@ import hashlib
 import importlib.util
 import json
 import math
+import re
 import subprocess
 import sys
 import zlib
@@ -1633,3 +1634,263 @@ def test_the_report_rows_carry_the_pinned_numbers() -> None:
     assert "D +0.0326, E +0.0341, s 0.0188, m 0.0250, U 0.0250" in text
     assert "r 0.2840 against 0.1220 at 0.7 and 0.0428 at its own g*(0.03)" in text
     assert "(sun 0, 0.1): g = 0.48, r 0.0640" in text
+
+
+# --- the #34 report at sun +10: its numbers, pinned by value --------------------------------------
+#
+# `report(sun10.json)` printed these tables before #45 touched the tool, and the #34 build log
+# quotes them (0.1380 is the spread of d over the 24 points, the number its aod 0.1 rule is decided
+# on).
+# Nothing graded them, so a changed number went unseen (mutation E1: the table's sd with ddof 0).
+# They are pinned by value, never by a hash of the printed text. The quantities of the aod 0.1 rule
+# are pinned at full precision with `pinned` and the report must print exactly those, to its four
+# decimals; the other tables are pinned at the precision they print, number by number.
+
+RULE_34_ALL = "all 24"
+RULE_34_AWAY = "azimuth 90, 180 (16)"
+RULE_34_READINGS = (
+    "Koschmieder mapping (the rule's reading)",
+    "visibility read in 1 / V",
+    "aerosol depth matched",
+)
+# (reading, points) -> mean d, sd of d (ddof 1), min d, max d, mean of the expected column
+RULE_34_PINS = {
+    (RULE_34_READINGS[0], RULE_34_ALL): (
+        0.11812996731091342,
+        0.13801360494415948,
+        -0.0020563629284355844,
+        0.372533895185271,
+        0.02630972164683536,
+    ),
+    (RULE_34_READINGS[0], RULE_34_AWAY): (
+        0.03257880062457766,
+        0.018770695710166655,
+        -0.0020563629284355844,
+        0.062088876067345256,
+        0.03413468512840513,
+    ),
+    (RULE_34_READINGS[1], RULE_34_ALL): (
+        0.10623795586989511,
+        0.13211946207300945,
+        0.0013458651080480166,
+        0.35337644987362715,
+        0.02630972164683536,
+    ),
+    (RULE_34_READINGS[1], RULE_34_AWAY): (
+        0.02283951512227264,
+        0.012825539286916944,
+        0.0013458651080480166,
+        0.0439373345432712,
+        0.03413468512840513,
+    ),
+    (RULE_34_READINGS[2], RULE_34_ALL): (
+        0.083628438422715,
+        0.11792143326862765,
+        -0.018767334117661738,
+        0.30782642449041897,
+        0.02630972164683536,
+    ),
+    (RULE_34_READINGS[2], RULE_34_AWAY): (
+        0.007589731079940473,
+        0.011445232096974707,
+        -0.018767334117661738,
+        0.026890806252619415,
+        0.03413468512840513,
+    ),
+}
+RULE_34_PREDICTED = 0.02630972164683536  # mean of the expected column over all 24 points
+RULE_34_SPREAD = 0.13801360494415948  # sd of d over all 24 points: "0.1380" in the #34 log
+RULE_34_SHIFT = 0.014092184014259093  # mean |d - d in 1 / V| over all 24 points
+
+
+@cache
+def sun10_report() -> str:
+    return load_tool().report(fixture_sun10())
+
+
+def sun10_rule_34_d() -> tuple[dict[str, np.ndarray], np.ndarray, np.ndarray]:
+    """d under each reading, the expected column and the azimuth 90, 180 mask, from the tool."""
+    tool = load_tool()
+    data = fixture_sun10()
+    azimuth, view = tool.point_table(data["rel_azimuths_deg"], data["view_elevations_deg"])
+    away = tool.mask_points(azimuth, view, azimuths=tool.RULE_A_AZIMUTHS_DEG)
+    d = {
+        RULE_34_READINGS[0]: tool._ratio_of_ratios(data) - 1.0,
+        RULE_34_READINGS[1]: tool._ratio_of_ratios(data, "xyz_inverse_visibility") - 1.0,
+        RULE_34_READINGS[2]: tool._ratio_of_ratios(data, "xyz_matched_aerosol_depth") - 1.0,
+    }
+    return d, tool._predicted_if_monte_carlo(data), away
+
+
+def test_the_34_rule_quantities_are_what_the_34_log_reports() -> None:
+    d, expected, away = sun10_rule_34_d()
+    assert int(away.sum()) == 16 and d[RULE_34_READINGS[0]].size == 24
+    for (reading, points), pin in RULE_34_PINS.items():
+        mask = away if points == RULE_34_AWAY else np.ones_like(away)
+        x = d[reading][mask]
+        stats = (x.mean(), x.std(ddof=1), x.min(), x.max(), expected[mask].mean())
+        assert stats == pytest.approx(pin, rel=1e-6, abs=0), (reading, points)
+    primary = d[RULE_34_READINGS[0]]
+    assert float(np.std(primary, ddof=1)) == pinned(RULE_34_SPREAD)
+    assert float(np.mean(np.abs(primary - d[RULE_34_READINGS[1]]))) == pinned(RULE_34_SHIFT)
+    assert float(np.mean(expected)) == pinned(RULE_34_PREDICTED)
+    assert float(np.std(primary, ddof=1)) == pytest.approx(0.1380, abs=5e-5)  # the #34 log's
+
+
+def test_the_34_report_prints_the_pinned_rule_table_to_four_decimals() -> None:
+    lines = sun10_report().splitlines()
+    assert len(RULE_34_PINS) == 6
+    for (reading, points), (mean, sd, low, high, expected) in RULE_34_PINS.items():
+        row = (
+            f"| {reading} | {points} | {mean:+.4f} | {sd:.4f} | {low:+.4f} to {high:+.4f} "
+            f"| {expected:+.4f} |"
+        )
+        assert row in lines, row
+
+
+def test_the_34_report_prints_the_rule_sentence_with_the_pinned_numbers_and_its_verdict() -> None:
+    text = sun10_report()
+    assert (
+        f"the predicted gap ({RULE_34_PREDICTED:+.4f}) exceeds both the spread of d across the "
+        f"views and azimuths ({RULE_34_SPREAD:.4f}) and the shift from reading Prague's "
+        f"visibility in 1 / V ({RULE_34_SHIFT:.4f}); result: **cannot tell**."
+    ) in text
+    assert text.count("result: **") == 1  # one verdict, and it is the registered one
+
+
+def report_tables(text: str) -> list[tuple[str, list[tuple[float, ...]]]]:
+    """Every pipe table of a report but the aod 0.1 rule's: heading, then the numbers per row."""
+    number = re.compile(r"(?<![\w.])[+-]?\d+(?:\.\d+)?(?!\w)")
+    tables: list[tuple[str, list[tuple[float, ...]]]] = []
+    heading, rows, seen = "", [], 0  # `seen` counts the table's lines: header, rule, then rows
+    for line in [*text.splitlines(), ""]:
+        if line.startswith("### "):
+            heading = line
+        if line.startswith("|"):
+            seen += 1
+            if seen > 2:
+                cells = [cell.strip() for cell in line.strip("|").split("|")]
+                rows.append(tuple(float(x) for cell in cells for x in number.findall(cell)))
+        elif seen:
+            if not heading.startswith("### Which model"):
+                tables.append((heading, rows))
+            rows, seen = [], 0
+    return tables
+
+
+SUN10_REPORT_TABLES: dict[str, tuple[str, list[tuple[float, ...]]]] = {
+    # azimuth; Prague log(R/G), log(B/G); v1 minus Prague; v0 minus Prague; u'v' v1; v0
+    "control_0_03": (
+        "### Sun +10, `aod_550` 0.03,",
+        [
+            (0.0, 0.134, -0.174, 0.01, -0.049, 0.008, -0.051, 0.0049, 0.0103),
+            (90.0, 0.182, -0.149, 0.019, -0.038, 0.046, -0.121, 0.0026, 0.024),
+            (180.0, 0.172, -0.122, 0.026, -0.056, 0.056, -0.135, 0.0052, 0.0218),
+        ],
+    ),
+    # the same columns, the diagnostic load
+    "control_0_1": (
+        "### Sun +10, `aod_550` 0.1,",
+        [
+            (0.0, 0.107, -0.118, 0.01, -0.029, 0.015, -0.048, 0.0088, 0.0136),
+            (90.0, 0.114, -0.061, 0.021, -0.014, 0.075, -0.116, 0.0027, 0.0306),
+            (180.0, 0.087, -0.005, 0.026, -0.018, 0.096, -0.114, 0.0049, 0.031),
+        ],
+    ),
+    # azimuth; view; Prague Y; v1 / Prague; v0 / Prague; MS share
+    "totals_0_03": (
+        "### `aod_550` 0.03 (visibility",
+        [
+            (0.0, 1.51, 0.81624, 1.19, 1.077, 0.095),
+            (0.0, 1.96, 0.79816, 1.158, 1.049, 0.094),
+            (0.0, 2.41, 0.77669, 1.132, 1.026, 0.094),
+            (0.0, 2.86, 0.75416, 1.11, 1.007, 0.093),
+            (0.0, 3.32, 0.73192, 1.091, 0.99, 0.093),
+            (0.0, 3.99, 0.70048, 1.064, 0.967, 0.092),
+            (0.0, 30.0, 0.10272, 0.958, 0.829, 0.134),
+            (0.0, 60.0, 0.02794, 1.005, 0.784, 0.219),
+            (90.0, 1.51, 0.10201, 1.091, 0.624, 0.428),
+            (90.0, 1.96, 0.10246, 1.089, 0.636, 0.416),
+            (90.0, 2.41, 0.10215, 1.086, 0.644, 0.407),
+            (90.0, 2.86, 0.10117, 1.081, 0.65, 0.399),
+            (90.0, 3.32, 0.09971, 1.077, 0.655, 0.392),
+            (90.0, 3.99, 0.09692, 1.071, 0.66, 0.384),
+            (90.0, 30.0, 0.03149, 1.03, 0.701, 0.319),
+            (90.0, 60.0, 0.01883, 1.046, 0.742, 0.29),
+            (180.0, 1.51, 0.12819, 1.183, 0.773, 0.347),
+            (180.0, 1.96, 0.13166, 1.177, 0.788, 0.331),
+            (180.0, 2.41, 0.13383, 1.168, 0.796, 0.319),
+            (180.0, 2.86, 0.13471, 1.159, 0.801, 0.309),
+            (180.0, 3.32, 0.13456, 1.15, 0.804, 0.301),
+            (180.0, 3.99, 0.1329, 1.138, 0.806, 0.291),
+            (180.0, 30.0, 0.0402, 1.076, 0.799, 0.258),
+            (180.0, 60.0, 0.01868, 1.085, 0.773, 0.287),
+        ],
+    ),
+    # the same columns
+    "totals_0_1": (
+        "### `aod_550` 0.1 (visibility",
+        [
+            (0.0, 1.51, 0.79304, 1.544, 1.294, 0.162),
+            (0.0, 1.96, 0.81453, 1.529, 1.289, 0.157),
+            (0.0, 2.41, 0.82902, 1.513, 1.283, 0.152),
+            (0.0, 2.86, 0.83658, 1.498, 1.276, 0.148),
+            (0.0, 3.32, 0.83964, 1.483, 1.269, 0.144),
+            (0.0, 3.99, 0.8383, 1.461, 1.256, 0.14),
+            (0.0, 30.0, 0.15818, 1.179, 0.977, 0.171),
+            (0.0, 60.0, 0.03678, 1.051, 0.749, 0.288),
+            (90.0, 1.51, 0.07814, 1.116, 0.413, 0.63),
+            (90.0, 1.96, 0.07998, 1.121, 0.431, 0.616),
+            (90.0, 2.41, 0.08153, 1.123, 0.448, 0.601),
+            (90.0, 2.86, 0.08267, 1.124, 0.463, 0.589),
+            (90.0, 3.32, 0.08343, 1.122, 0.475, 0.576),
+            (90.0, 3.99, 0.08391, 1.12, 0.491, 0.562),
+            (90.0, 30.0, 0.0372, 1.048, 0.6, 0.428),
+            (90.0, 60.0, 0.02282, 1.05, 0.654, 0.377),
+            (180.0, 1.51, 0.07239, 1.205, 0.455, 0.622),
+            (180.0, 1.96, 0.07572, 1.217, 0.491, 0.597),
+            (180.0, 2.41, 0.07905, 1.222, 0.523, 0.572),
+            (180.0, 2.86, 0.08213, 1.222, 0.549, 0.55),
+            (180.0, 3.32, 0.08482, 1.217, 0.571, 0.531),
+            (180.0, 3.99, 0.08797, 1.209, 0.595, 0.507),
+            (180.0, 30.0, 0.04186, 1.094, 0.679, 0.379),
+            (180.0, 60.0, 0.02126, 1.083, 0.665, 0.386),
+        ],
+    ),
+    # per reading (xyz, binned, 1 / V, altitude 0, matched): dR/G, dB/G, u'v' at azimuth 0, 90, 180
+    "other_readings": (
+        "### The other readings of Prague",
+        [
+            (0.01, -0.049, 0.0049, 0.019, -0.038, 0.0026, 0.026, -0.056, 0.0052),
+            (0.013, -0.048, 0.0081, 0.022, -0.032, 0.0055, 0.028, -0.049, 0.0095),
+            (0.01, -0.048, 0.0051, 0.019, -0.037, 0.0025, 0.025, -0.054, 0.0053),
+            (0.008, -0.045, 0.0021, 0.024, -0.045, 0.0045, 0.028, -0.066, 0.0032),
+            (0.008, -0.045, 0.0057, 0.016, -0.032, 0.0024, 0.022, -0.048, 0.0055),
+        ],
+    ),
+    # aod_550; mapped visibility; Prague's depth there; matched visibility; its depth there
+    "aerosol_depth": (
+        "### Prague's own vertical aerosol",
+        [
+            (0.03, 123.82, 0.041, 131.8, 0.037),
+            (0.1, 49.99, 0.114, 55.53, 0.1),
+        ],
+    ),
+}
+
+
+def test_the_34_report_tables_carry_the_pinned_numbers() -> None:
+    tables = report_tables(sun10_report())
+    assert len(tables) == len(SUN10_REPORT_TABLES) == 6
+    for (heading, rows), (label, (needle, pinned_rows)) in zip(
+        tables, SUN10_REPORT_TABLES.items(), strict=True
+    ):
+        assert heading.startswith(needle), label
+        assert len(rows) == len(pinned_rows), label
+        for row, pinned_row in zip(rows, pinned_rows, strict=True):
+            assert row == pytest.approx(pinned_row, rel=1e-6, abs=0), (label, row)
+
+
+def test_the_report_parser_reads_the_numbers_of_a_row_and_skips_names() -> None:
+    text = "### H\n\n| a | b |\n| --- | --- |\n| xyz_altitude_0 | +0.010, -0.049, 0.0049 | 3 |\n"
+    assert report_tables(text) == [("### H", [(0.01, -0.049, 0.0049, 3.0)])]
