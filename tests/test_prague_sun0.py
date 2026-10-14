@@ -16,11 +16,13 @@ The rules live in `tools/prague_reference.py` (the tool only, never `lastlight.r
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib.util
 import json
 import math
 import subprocess
 import sys
+import zlib
 from functools import cache
 from pathlib import Path
 from types import ModuleType
@@ -886,6 +888,108 @@ def test_the_binned_reading_is_refused_too_when_it_leaves_no_light() -> None:
     tool = load_tool()
     with pytest.raises(tool.PragueError, match="relative azimuth 0, view 1.5 degrees"):
         tool.xyz_block(channel_rows(1, 0.0), 320.0, 40.0, [1.5], [0.0], binned=True, where="x")
+
+
+# --- the fixture builder is handed the spec's sun and azimuths ------------------------------------
+#
+# No Prague model is run here. `fetch_model`, `read_axes`, `evaluate` and the dataset table are
+# replaced by deterministic stand-ins that record what they were asked, so these tests grade the
+# arguments the builder threads through (the spec's sun and relative azimuths, the dataset's sun
+# axis), not Prague. Without them nothing in the default run called `build_fixture` at all.
+
+
+def install_prague_stand_in(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[dict]:
+    """Stand-ins for everything `build_fixture` reaches for; returns the log of `evaluate` calls."""
+    tool = load_tool()
+    recorded = json.loads(FIXTURE_SUN0.read_text())
+    axes_info = recorded["provenance"]["dataset_axes"]
+    centres = recorded["channel_centres_nm"]
+    width = centres[1] - centres[0]
+    axes = tool.Axes(
+        tuple(axes_info["visibilities_km"]),
+        tuple(axes_info["albedos"]),
+        tuple(axes_info["altitudes_m"]),
+        tuple(axes_info["elevations_deg"]),
+        len(centres),
+        centres[0] - width / 2,
+        width,
+    )
+    payload = b"stand-in dataset"
+    datasets = {
+        key: tool.Dataset(ds.name, ds.drive_id, len(payload), hashlib.sha256(payload).hexdigest())
+        for key, ds in tool.DATASETS.items()
+    }
+    (tmp_path / "dl").mkdir()
+    for dataset in datasets.values():
+        (tmp_path / "dl" / dataset.name).write_bytes(payload)
+    calls: list[dict] = []
+
+    def evaluate(cache, dataset, *, visibility, altitude_m, queries, sun_elevation_deg, mode="sky"):
+        calls.append({"sun": sun_elevation_deg, "queries": list(queries), "mode": mode})
+        rows = []
+        for azimuth, view in queries:
+            seed = repr((round(visibility, 6), altitude_m, sun_elevation_deg, azimuth, view, mode))
+            if mode == "transmittance":
+                rows.append(np.exp(-(0.3 + 5.0 / visibility)) * np.ones(len(centres)))
+            else:
+                noise = np.random.default_rng(zlib.crc32(seed.encode())).random(len(centres))
+                rows.append(0.5 + noise)
+        return tool.Evaluation(np.array(rows), axes.channel_start_nm, axes.channel_width_nm)
+
+    monkeypatch.setattr(tool, "DATASETS", datasets)
+    monkeypatch.setattr(tool, "fetch_model", lambda cache: cache)
+    monkeypatch.setattr(tool, "read_axes", lambda path: axes)
+    monkeypatch.setattr(tool, "evaluate", evaluate)
+    return calls
+
+
+def test_the_builder_evaluates_prague_at_the_specs_sun_and_azimuths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    tool = load_tool()
+    calls = install_prague_stand_in(monkeypatch, tmp_path)
+    data = tool.build_fixture(tmp_path, tool.SUN0)
+    assert data["sun_elevation_deg"] == 0.0
+    assert data["rel_azimuths_deg"] == [0.0, 30.0, 90.0, 180.0]
+    assert data["provenance"]["command"] == tool.SUN0.command
+    assert calls, "the builder evaluated nothing"
+    assert {call["sun"] for call in calls} == {0.0}  # every evaluation, not just the first
+    sky = [call for call in calls if call["mode"] == "sky"]
+    assert sky
+    assert {azimuth for call in sky for azimuth, _ in call["queries"]} == {0.0, 30.0, 90.0, 180.0}
+    for call in sky:
+        assert len(call["queries"]) == 4 * 8  # four azimuths, eight views, none left out
+    for entry in data["atmospheres"].values():
+        assert list(entry["xyz"]) == ["0", "30", "90", "180"]
+        for reading in READINGS:
+            assert list(entry["diagnostics"][reading]) == ["0", "30", "90", "180"]
+
+
+def test_the_default_spec_still_builds_the_sun_10_fixture(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    tool = load_tool()
+    calls = install_prague_stand_in(monkeypatch, tmp_path)
+    data = tool.build_fixture(tmp_path)
+    assert data["sun_elevation_deg"] == 10.0
+    assert data["rel_azimuths_deg"] == [0.0, 90.0, 180.0]
+    assert data["provenance"]["command"] == tool.SUN10.command
+    assert {call["sun"] for call in calls} == {10.0}
+    asked = {azimuth for call in calls if call["mode"] == "sky" for azimuth, _ in call["queries"]}
+    assert asked == {0.0, 90.0, 180.0}
+    assert list(data["atmospheres"]["0.1"]["xyz"]) == ["0", "90", "180"]
+
+
+def test_the_builder_refuses_a_sun_outside_the_datasets_axis(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Prague would clamp 95 degrees to 90 without a word: the builder stops, naming the axis."""
+    tool = load_tool()
+    calls = install_prague_stand_in(monkeypatch, tmp_path)
+    spec = tool.FixtureSpec(95.0, (0.0, 90.0), tmp_path / "x.json", "n/a")
+    with pytest.raises(tool.PragueError, match="outside the dataset's sun axis"):
+        tool.build_fixture(tmp_path, spec)
+    assert calls == []  # refused before Prague was asked anything
 
 
 # --- the sun-0 fixture ----------------------------------------------------------------------------

@@ -86,6 +86,20 @@
       "oracle": "double",
       "find": "    check_sun_elevation(sun, axes)\n",
       "replace": "    pass\n"
+    },
+    {
+      "label": "21 [fixer] fixture builder not given the spec's relative azimuths (builds sun10's 0, 90, 180)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "double",
+      "find": "    azimuths = spec.rel_azimuths_deg\n",
+      "replace": "    azimuths = REL_AZIMUTHS_DEG\n"
+    },
+    {
+      "label": "22 [fixer] build_fixture's default spec is the sun-0 one, not #34's sun +10",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "double",
+      "find": "def build_fixture(cache: Path, spec: FixtureSpec = SUN10) -> dict:",
+      "replace": "def build_fixture(cache: Path, spec: FixtureSpec = SUN0) -> dict:"
     }
   ]
 }
