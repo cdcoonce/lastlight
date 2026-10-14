@@ -964,6 +964,162 @@ def port_bound_rms(total_y: Sequence[float], multiple_y: Sequence[float]) -> flo
     return float(np.sqrt(np.mean(port_bound(total_y, multiple_y) ** 2)))
 
 
+# --- the engines: v1 as it is, and the lobe diagnostic --------------------------------------------
+#
+# The sun elevation is always an argument. The fixture being evaluated says what it is; the module's
+# `SUN_ELEVATION_DEG` is only the default of the sun +10 fixture and nothing here reads it.
+
+GAP_AOD_550 = 0.1
+"""The load at which the port's multiple scattering sits 6.6 percent above the Monte Carlo."""
+TOWARD_SUN_AZIMUTH_DEG = 0.0
+"""Rule B's views are the nominal ones at this relative azimuth (the solar vertical, sunward)."""
+
+
+def engine_xyz(
+    aod: float, sun_elevation_deg: float, views: Sequence[float], azimuth: float, engine: str
+) -> np.ndarray:
+    """`sky_xyz` for `Atmosphere(aod_550=aod)`, every other field at its default."""
+    return sky_xyz(Atmosphere(aod_550=aod), sun_elevation_deg, views, azimuth, engine=engine)
+
+
+def lobe_xyz(
+    aod_550: float,
+    asymmetry: float,
+    sun_elevation_deg: float,
+    views: Sequence[float],
+    rel_azimuth_deg: float,
+) -> np.ndarray:
+    """XYZ_g, the lobe diagnostic: v0's single scattering at `asymmetry`, plus v1's table.
+
+    v0's single scattering is the registered quadrature at `Atmosphere(aod_550, asymmetry)`; the
+    multiple scattering is the table's, whose asymmetry is baked at 0.7, so it does not change
+    with g. v1 itself refuses an asymmetry other than 0.7 and is never called with one. At
+    g = 0.7 this equals v1's XYZ exactly (the same two arrays, added in the same order).
+    """
+    single = sky_xyz(
+        Atmosphere(aod_550=aod_550, asymmetry=asymmetry),
+        sun_elevation_deg,
+        views,
+        rel_azimuth_deg,
+        engine="v0",
+    )
+    multiple = multiple_scattering_xyz(
+        Atmosphere(aod_550=aod_550), sun_elevation_deg, views, rel_azimuth_deg
+    )
+    return single + multiple
+
+
+def predicted_if_monte_carlo(
+    sun_elevation_deg: float, views: Sequence[float], azimuths: Sequence[float]
+) -> np.ndarray:
+    """e_i: what v1 / Prague at 0.1 would rise by, relative to 0.03, if the port's MS is 6.6% high.
+
+    e_i = T_i / (T_i - M_i * 0.066 / 1.066) - 1, with T_i v1's total Y and M_i its multiple
+    scattering Y at `aod_550` 0.1 and the given sun. Flat, azimuth-major, as the point table.
+    """
+    out = []
+    for azimuth in azimuths:
+        total = engine_xyz(GAP_AOD_550, sun_elevation_deg, views, azimuth, "v1")[:, 1]
+        multiple = multiple_scattering_xyz(
+            Atmosphere(aod_550=GAP_AOD_550), sun_elevation_deg, views, azimuth
+        )[:, 1]
+        excess_y = multiple * MONTE_CARLO_EXCESS / (1.0 + MONTE_CARLO_EXCESS)
+        out.append(total / (total - excess_y) - 1.0)
+    return np.concatenate(out)
+
+
+# --- selecting points: by value, never by position ------------------------------------------------
+
+
+def point_table(azimuths: Sequence[float], views: Sequence[float]) -> tuple[np.ndarray, np.ndarray]:
+    """The (relative azimuth, view elevation) of every point, flat and azimuth-major."""
+    azimuth = np.repeat(np.asarray(azimuths, dtype=float), len(views))
+    view = np.tile(np.asarray(views, dtype=float), len(azimuths))
+    return azimuth, view
+
+
+def mask_points(
+    azimuth: np.ndarray,
+    view: np.ndarray,
+    *,
+    azimuths: Sequence[float] | None = None,
+    views: Sequence[float] | None = None,
+    tol: float = 1e-9,
+) -> np.ndarray:
+    """The points whose azimuth is one of `azimuths` and whose view is one of `views`, by value.
+
+    Either filter may be left out (every azimuth, every view). A value matches within `tol`.
+    """
+    mask = np.ones(azimuth.shape, dtype=bool)
+    if azimuths is not None:
+        mask &= np.any(np.abs(azimuth[:, None] - np.asarray(azimuths, dtype=float)) <= tol, axis=1)
+    if views is not None:
+        mask &= np.any(np.abs(view[:, None] - np.asarray(views, dtype=float)) <= tol, axis=1)
+    return mask
+
+
+def nominal_indices(views: Sequence[float], tol: float = 1e-9) -> list[int]:
+    """Where WHTM1's six nominal views are among `views`, found by value, in the camera's order.
+
+    Each must appear exactly once (to `tol`): a fixture made for another camera fit is refused.
+    """
+    indices = []
+    for wanted in (float(x) for x in build_views()["nominal"].elevations_deg):
+        hits = [i for i, value in enumerate(views) if abs(value - wanted) <= tol]
+        if not hits:
+            raise ValueError(f"the nominal view {wanted:.4f} is not in the fixture's views")
+        if len(hits) > 1:
+            raise ValueError(f"the nominal view {wanted:.4f} appears more than once")
+        indices.append(hits[0])
+    return indices
+
+
+# --- the excess curve: r and its signed mean against the asymmetry --------------------------------
+
+
+@dataclass(frozen=True)
+class LobeCurve:
+    """r and the signed mean of ln(Y_g / Y_Prague) over the nominal views at azimuth 0, per k."""
+
+    sun_elevation_deg: float
+    aod_550: float
+    ks: tuple[int, ...]
+    r: tuple[float, ...]
+    signed_mean: tuple[float, ...]
+
+    def r_at(self, k: int) -> float:
+        return self.r[self.ks.index(k)]
+
+    def signed_mean_at(self, k: int) -> float:
+        return self.signed_mean[self.ks.index(k)]
+
+    def r_by_k(self) -> dict[int, float]:
+        return dict(zip(self.ks, self.r, strict=True))
+
+
+def lobe_curve(
+    aod_550: float,
+    sun_elevation_deg: float,
+    views: Sequence[float],
+    prague_y: Sequence[float],
+    ks: Sequence[int] = ASYMMETRY_GRID_K,
+) -> LobeCurve:
+    """The excess of XYZ_g over Prague's luminance at the given views (azimuth 0), for each k.
+
+    `views` are the six nominal elevations and `prague_y` Prague's primary-reading luminance at
+    them, in the same order. The default `ks` is the whole grid.
+    """
+    rs, means = [], []
+    for k in ks:
+        y = lobe_xyz(aod_550, asymmetry_of(k), sun_elevation_deg, views, TOWARD_SUN_AZIMUTH_DEG)[
+            :, 1
+        ]
+        r, mean = excess(y, prague_y)
+        rs.append(r)
+        means.append(mean)
+    return LobeCurve(sun_elevation_deg, aod_550, tuple(ks), tuple(rs), tuple(means))
+
+
 def _fixture_xyz(entry: dict, azimuth: float, variant: str = "xyz") -> np.ndarray:
     block = entry["xyz"] if variant == "xyz" else entry["diagnostics"][variant]
     return np.array(block[f"{azimuth:g}"], dtype=float)
@@ -980,19 +1136,16 @@ def _uv(xyz: np.ndarray) -> np.ndarray:
     return np.array([4.0 * x / denominator, 9.0 * y / denominator])
 
 
-def _engine_xyz(aod: float, views: Sequence[float], azimuth: float, engine: str) -> np.ndarray:
-    return sky_xyz(Atmosphere(aod_550=aod), SUN_ELEVATION_DEG, views, azimuth, engine=engine)
-
-
 def _ratio_of_ratios(data: dict, variant: str = "xyz") -> np.ndarray:
     """v1 over Prague in luminance at aod_550 0.1, divided by the same at 0.03: one per point."""
     views = data["view_elevations_deg"]
+    sun = data["sun_elevation_deg"]
     out = []
-    for azimuth in REL_AZIMUTHS_DEG:
+    for azimuth in data["rel_azimuths_deg"]:
         ratios = []
         for aod in AEROSOL_OPTICAL_DEPTHS:
             entry = data["atmospheres"][f"{aod:g}"]
-            v1 = _engine_xyz(aod, views, azimuth, "v1")[:, 1]
+            v1 = engine_xyz(aod, sun, views, azimuth, "v1")[:, 1]
             ratios.append(v1 / _fixture_xyz(entry, azimuth, variant)[:, 1])
         out.append(ratios[1] / ratios[0])
     return np.concatenate(out)
@@ -1000,20 +1153,21 @@ def _ratio_of_ratios(data: dict, variant: str = "xyz") -> np.ndarray:
 
 def _predicted_if_monte_carlo(data: dict) -> np.ndarray:
     """What v1 / Prague at 0.1 would rise by, relative to 0.03, if the port's MS is 6.6% high."""
-    views = data["view_elevations_deg"]
-    out = []
-    for azimuth in REL_AZIMUTHS_DEG:
-        total = _engine_xyz(0.1, views, azimuth, "v1")[:, 1]
-        multiple = multiple_scattering_xyz(
-            Atmosphere(aod_550=0.1), SUN_ELEVATION_DEG, views, azimuth
-        )[:, 1]
-        excess = multiple * MONTE_CARLO_EXCESS / (1.0 + MONTE_CARLO_EXCESS)
-        out.append(total / (total - excess) - 1.0)
-    return np.concatenate(out)
+    return predicted_if_monte_carlo(
+        data["sun_elevation_deg"], data["view_elevations_deg"], data["rel_azimuths_deg"]
+    )
 
 
 def report(data: dict) -> str:
+    """The #34 tables (sun +10) and its aod 0.1 rule. Refuses any other sun: see `report_sun0`."""
+    if data["sun_elevation_deg"] != SUN_ELEVATION_DEG:
+        raise PragueError(
+            f"this is #34's report for the sun +{SUN_ELEVATION_DEG:g} fixture, not for sun "
+            f"{data['sun_elevation_deg']:g}: its aod 0.1 rule is not applied there (use --sun)"
+        )
     views = data["view_elevations_deg"]
+    sun = data["sun_elevation_deg"]
+    azimuths = data["rel_azimuths_deg"]
     lines: list[str] = []
     out = lines.append
     for aod in AEROSOL_OPTICAL_DEPTHS:
@@ -1026,10 +1180,10 @@ def report(data: dict) -> str:
         )
         out("| --- | --- | --- | --- | --- | --- |")
         entry = data["atmospheres"][f"{aod:g}"]
-        for azimuth in REL_AZIMUTHS_DEG:
+        for azimuth in azimuths:
             prague = _fixture_xyz(entry, azimuth)
-            v1 = _engine_xyz(aod, views, azimuth, "v1")
-            v0 = _engine_xyz(aod, views, azimuth, "v0")
+            v1 = engine_xyz(aod, sun, views, azimuth, "v1")
+            v0 = engine_xyz(aod, sun, views, azimuth, "v0")
             p = _contrast(prague)
             d1, d0 = _contrast(v1) - p, _contrast(v0) - p
             u1 = np.linalg.norm(_uv(v1[NOMINAL_VIEWS - 1]) - _uv(prague[NOMINAL_VIEWS - 1]))
@@ -1054,13 +1208,11 @@ def report(data: dict) -> str:
             "| MS share of v1 |"
         )
         out("| --- | --- | --- | --- | --- | --- |")
-        for azimuth in REL_AZIMUTHS_DEG:
+        for azimuth in azimuths:
             prague = _fixture_xyz(entry, azimuth)
-            v1 = _engine_xyz(aod, views, azimuth, "v1")
-            v0 = _engine_xyz(aod, views, azimuth, "v0")
-            multiple = multiple_scattering_xyz(
-                Atmosphere(aod_550=aod), SUN_ELEVATION_DEG, views, azimuth
-            )
+            v1 = engine_xyz(aod, sun, views, azimuth, "v1")
+            v0 = engine_xyz(aod, sun, views, azimuth, "v0")
+            multiple = multiple_scattering_xyz(Atmosphere(aod_550=aod), sun, views, azimuth)
             for i, view in enumerate(views):
                 out(
                     f"| {azimuth:g} | {view:.2f} | {prague[i, 1]:.5f} "
@@ -1078,7 +1230,9 @@ def report(data: dict) -> str:
     )
     out("")
     expected = _predicted_if_monte_carlo(data)
-    away = np.repeat([False, True, True], len(views))  # azimuths 90 and 180: off the aureole
+    away = mask_points(
+        *point_table(azimuths, views), azimuths=RULE_A_AZIMUTHS_DEG
+    )  # off the aureole
     readings = {
         "Koschmieder mapping (the rule's reading)": _ratio_of_ratios(data) - 1.0,
         "visibility read in 1 / V": _ratio_of_ratios(data, "xyz_inverse_visibility") - 1.0,
@@ -1130,9 +1284,9 @@ def report(data: dict) -> str:
         "xyz_matched_aerosol_depth",
     ):
         cells = []
-        for azimuth in REL_AZIMUTHS_DEG:
+        for azimuth in azimuths:
             prague = _fixture_xyz(entry, azimuth, variant)
-            v1 = _engine_xyz(0.03, views, azimuth, "v1")
+            v1 = engine_xyz(0.03, sun, views, azimuth, "v1")
             delta = _contrast(v1) - _contrast(prague)
             dist = np.linalg.norm(_uv(v1[NOMINAL_VIEWS - 1]) - _uv(prague[NOMINAL_VIEWS - 1]))
             cells.append(f"{delta[0]:+.3f}, {delta[1]:+.3f}, {dist:.4f}")
