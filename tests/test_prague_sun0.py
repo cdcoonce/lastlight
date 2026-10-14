@@ -16,8 +16,11 @@ The rules live in `tools/prague_reference.py` (the tool only, never `lastlight.r
 from __future__ import annotations
 
 import importlib.util
+import json
 import math
+import subprocess
 import sys
+from functools import cache
 from pathlib import Path
 from types import ModuleType
 
@@ -31,6 +34,10 @@ from lastlight.render.v1 import multiple_scattering_xyz
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / "tools" / "prague_reference.py"
+FIXTURE_DIR = ROOT / "tests" / "fixtures" / "prague"
+FIXTURE_SUN0 = FIXTURE_DIR / "sun0.json"
+FIXTURE_SUN10 = FIXTURE_DIR / "sun10.json"
+CACHE = Path.home() / ".cache" / "lastlight" / "prague"
 
 
 def load_tool() -> ModuleType:
@@ -878,3 +885,138 @@ def test_the_binned_reading_is_refused_too_when_it_leaves_no_light() -> None:
     tool = load_tool()
     with pytest.raises(tool.PragueError, match="relative azimuth 0, view 1.5 degrees"):
         tool.xyz_block(channel_rows(1, 0.0), 320.0, 40.0, [1.5], [0.0], binned=True, where="x")
+
+
+# --- the sun-0 fixture ----------------------------------------------------------------------------
+
+READINGS = (
+    "xyz_binned",
+    "xyz_inverse_visibility",
+    "xyz_altitude_0",
+    "xyz_matched_aerosol_depth",
+)
+"""The fixture's diagnostic readings of Prague, each laid out like the primary `xyz`."""
+NOMINAL_VIEWS = 6
+DIAGNOSTIC_ELEVATIONS = (30.0, 60.0)
+
+
+@cache
+def fixture_sun0() -> dict:
+    return json.loads(FIXTURE_SUN0.read_text())
+
+
+@cache
+def fixture_sun10() -> dict:
+    return json.loads(FIXTURE_SUN10.read_text())
+
+
+def prague_block(data: dict, aod: float, variant: str = "xyz") -> dict:
+    entry = data["atmospheres"][f"{aod:g}"]
+    return entry["xyz"] if variant == "xyz" else entry["diagnostics"][variant]
+
+
+def test_the_sun_0_fixture_has_the_documented_layout() -> None:
+    data = fixture_sun0()
+    assert data["format"] == "lastlight-prague-control"
+    assert data["version"] == 1
+    assert data["sun_elevation_deg"] == 0.0  # the fixture records its own sun
+    assert data["observer_altitude_km"] == 0.34
+    assert data["ground_albedo"] == 0.2
+    assert [float(a) for a in data["rel_azimuths_deg"]] == [0.0, 30.0, 90.0, 180.0]
+    views = data["view_elevations_deg"]
+    assert len(views) == NOMINAL_VIEWS + len(DIAGNOSTIC_ELEVATIONS) == 8
+    assert views[NOMINAL_VIEWS:] == list(DIAGNOSTIC_ELEVATIONS)
+    assert set(data["atmospheres"]) == {"0.03", "0.1"}
+    for aod in LOADS:
+        assert data["atmospheres"][f"{aod:g}"]["aod_550"] == aod
+        for variant in ("xyz", *READINGS):
+            block = prague_block(data, aod, variant)
+            assert list(block) == ["0", "30", "90", "180"]
+            for azimuth in ("0", "30", "90", "180"):
+                xyz = np.array(block[azimuth], dtype=float)
+                assert xyz.shape == (8, 3), (aod, azimuth, variant)
+                assert np.isfinite(xyz).all() and (xyz > 0.0).all(), (aod, azimuth, variant)
+
+
+def test_the_sun_0_fixture_has_every_diagnostic_reading_sun_10_has() -> None:
+    new, old = fixture_sun0(), fixture_sun10()
+    assert new.keys() == old.keys()
+    for aod in ("0.03", "0.1"):
+        assert new["atmospheres"][aod].keys() == old["atmospheres"][aod].keys()
+        assert (
+            new["atmospheres"][aod]["diagnostics"].keys()
+            == old["atmospheres"][aod]["diagnostics"].keys()
+        )
+
+
+def test_the_sun_0_fixture_views_are_the_cameras_nominal_views() -> None:
+    """A refit of WHTM1 moves its bands: the control must be regenerated, not left stale."""
+    nominal = build_views()["nominal"].elevations_deg
+    recorded = fixture_sun0()["view_elevations_deg"][:NOMINAL_VIEWS]
+    assert len(nominal) == NOMINAL_VIEWS
+    assert recorded == pytest.approx(list(nominal), abs=1e-9), (
+        "the camera's nominal band and reference elevations changed since the fixture was made: "
+        "rerun tools/prague_reference.py fixture --sun 0"
+    )
+    assert fixture_sun0()["view_elevations_deg"] == fixture_sun10()["view_elevations_deg"]
+
+
+def test_the_sun_0_fixture_maps_aod_to_visibility_as_sun_10_does() -> None:
+    """Only the sun changed: Koschmieder at 550 nm, v1's own ground extinction."""
+    tool = load_tool()
+    for aod in LOADS:
+        entry = fixture_sun0()["atmospheres"][f"{aod:g}"]
+        assert entry["visibility_km"] == pytest.approx(
+            tool.visibility_km(Atmosphere(aod_550=aod)), rel=1e-9
+        )
+        assert entry["visibility_km"] == fixture_sun10()["atmospheres"][f"{aod:g}"]["visibility_km"]
+    low, high = fixture_sun0()["prague_visibility_range_km"]
+    assert all(
+        low <= fixture_sun0()["atmospheres"][a]["visibility_km"] <= high for a in ("0.03", "0.1")
+    )
+
+
+def test_the_matched_reading_is_clamped_at_0_03_as_the_criterion_says() -> None:
+    """No visibility in Prague's range has an aerosol as thin as v1's 0.03: 131.8 km, kept."""
+    thin = fixture_sun0()["atmospheres"]["0.03"]["diagnostics"]["matched_aerosol_depth"]
+    assert thin["clamped_at_largest_visibility"] is True
+    assert thin["visibility_km"] == 131.8
+    thick = fixture_sun0()["atmospheres"]["0.1"]["diagnostics"]["matched_aerosol_depth"]
+    assert thick["clamped_at_largest_visibility"] is False
+    assert thick["prague_aerosol_depth"] == pytest.approx(0.1, abs=1e-4)
+
+
+def test_the_sun_0_fixture_is_the_same_model_and_data_as_sun_10() -> None:
+    new, old = fixture_sun0()["provenance"], fixture_sun10()["provenance"]
+    assert new["model"] == old["model"]
+    assert new["datasets"] == old["datasets"]
+    assert new["dataset_axes"] == old["dataset_axes"]
+    assert new["ground_level_dataset_matches_full_at_altitude_0"] is True
+    assert new["command"] == "uv run python tools/prague_reference.py fixture --sun 0"
+    assert len(new["model"]["commit"]) == 40 and len(new["datasets"]["full"]["sha256"]) == 64
+
+
+def test_the_sun_0_sun_is_inside_the_datasets_sun_axis() -> None:
+    axis = fixture_sun0()["provenance"]["dataset_axes"]["elevations_deg"]
+    assert axis[0] <= fixture_sun0()["sun_elevation_deg"] <= axis[-1]
+    assert -4.2 in axis and 0.0 in axis  # the model's sun axis reaches -4.2, and has a node at 0
+
+
+def test_the_sun_10_fixture_is_untouched() -> None:
+    """#34's fixture is pinned by its own control; this one only checks the sun it records."""
+    assert fixture_sun10()["sun_elevation_deg"] == 10.0
+    assert fixture_sun10()["rel_azimuths_deg"] == [0.0, 90.0, 180.0]
+
+
+@pytest.mark.network
+def test_the_sun_0_fixture_matches_a_fresh_evaluation_of_the_built_model() -> None:
+    """`tools/prague_reference.py fixture --sun 0 --check` re-evaluates Prague and compares."""
+    if not (CACHE / "build" / "prague_eval").exists():
+        pytest.skip("the Prague model is not built: run tools/prague_reference.py fetch build")
+    result = subprocess.run(
+        [sys.executable, str(TOOL), "fixture", "--sun", "0", "--check"],
+        capture_output=True,
+        text=True,
+        timeout=900,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
