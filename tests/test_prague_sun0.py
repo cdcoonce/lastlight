@@ -24,6 +24,11 @@ from types import ModuleType
 import numpy as np
 import pytest
 
+from lastlight.g0.collect import build_views
+from lastlight.render import Atmosphere
+from lastlight.render.curve import sky_xyz
+from lastlight.render.v1 import multiple_scattering_xyz
+
 ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / "tools" / "prague_reference.py"
 
@@ -504,6 +509,16 @@ def test_r_is_the_root_mean_square_of_the_log_ratio_and_the_mean_is_signed() -> 
     assert mean == pytest.approx(-0.25, rel=1e-12, abs=0)  # ...the mean carries the sign
 
 
+def test_r_squares_before_it_averages() -> None:
+    """Unequal logs tell a root mean square from a mean absolute value."""
+    tool = load_tool()
+    model = np.exp(np.array([0.1, -0.3]))
+    r, mean = tool.excess(model, np.ones(2))
+    assert r == pytest.approx(math.sqrt((0.01 + 0.09) / 2), rel=1e-12, abs=0)
+    assert r != pytest.approx(0.2, rel=1e-3, abs=0)  # the mean absolute log
+    assert mean == pytest.approx(-0.1, rel=1e-12, abs=0)
+
+
 def test_r_is_zero_when_the_model_is_prague() -> None:
     tool = load_tool()
     y = np.array([0.8, 0.1, 0.03])
@@ -545,3 +560,202 @@ def test_B_is_the_root_mean_square_of_b_over_the_views() -> None:
         math.sqrt(float(np.mean(b**2))), rel=1e-12, abs=0
     )
     assert tool.port_bound_rms(total, multiple) != pytest.approx(float(np.mean(b)), rel=1e-6, abs=0)
+
+
+# --- the lobe diagnostic engine -------------------------------------------------------------------
+#
+# XYZ_g = v0's single scattering at asymmetry g plus v1's multiple scattering (asymmetry baked at
+# 0.7). v1 refuses any other asymmetry, so it is never called with one: the tool builds XYZ_g from
+# `sky_xyz(..., engine="v0")` and `multiple_scattering_xyz`.
+
+SUNS = (10.0, 0.0)
+LOADS = (0.03, 0.1)
+ALL_AZIMUTHS = (0.0, 30.0, 90.0, 180.0)
+GAP_VIEW = 1.51
+
+
+def v1_reference(aod: float, sun: float, views: list[float], azimuth: float) -> np.ndarray:
+
+    return sky_xyz(Atmosphere(aod_550=aod), sun, views, azimuth, engine="v1")
+
+
+@pytest.mark.parametrize("azimuth", ALL_AZIMUTHS)
+@pytest.mark.parametrize("aod", LOADS)
+@pytest.mark.parametrize("sun", SUNS)
+def test_the_lobe_engine_at_g_0_7_is_v1_exactly(sun: float, aod: float, azimuth: float) -> None:
+    tool = load_tool()
+    views = tool.view_elevations()
+    lobe = tool.lobe_xyz(aod, 0.7, sun, views, azimuth)
+    assert np.array_equal(lobe, v1_reference(aod, sun, views, azimuth))
+
+
+def test_the_lobe_engine_is_the_registered_composition() -> None:
+    """v0 at asymmetry g, plus the table's multiple scattering at v1's own atmosphere."""
+
+    tool = load_tool()
+    views = tool.view_elevations()
+    lobe = tool.lobe_xyz(0.1, 0.55, 0.0, views, 0.0)
+    expected = sky_xyz(
+        Atmosphere(aod_550=0.1, asymmetry=0.55), 0.0, views, 0.0, engine="v0"
+    ) + multiple_scattering_xyz(Atmosphere(aod_550=0.1), 0.0, views, 0.0)
+    assert np.array_equal(lobe, expected)
+
+
+@pytest.mark.parametrize("sun", SUNS)
+@pytest.mark.parametrize("aod", LOADS)
+def test_a_lower_asymmetry_lowers_luminance_at_a_toward_sun_low_view(
+    sun: float, aod: float
+) -> None:
+    """The positive control: the diagnostic can move the quantity it is meant to explain."""
+    tool = load_tool()
+    views = tool.view_elevations()[:1]  # WHTM1's lowest band, 1.51 degrees
+    y = [tool.lobe_xyz(aod, g, sun, views, 0.0)[0, 1] for g in (0.5, 0.6, 0.7, 0.8)]
+    assert y[0] < y[1] < y[2] < y[3]
+
+
+def test_a_lower_asymmetry_barely_moves_the_sky_away_from_the_sun() -> None:
+    """Behind the observer (azimuth 180) the forward lobe is not what is being changed."""
+    tool = load_tool()
+    views = tool.view_elevations()[:1]
+    toward = (
+        tool.lobe_xyz(0.1, 0.6, 10.0, views, 0.0)[0, 1] / v1_reference(0.1, 10.0, views, 0.0)[0, 1]
+    )
+    away = (
+        tool.lobe_xyz(0.1, 0.6, 10.0, views, 180.0)[0, 1]
+        / v1_reference(0.1, 10.0, views, 180.0)[0, 1]
+    )
+    assert toward < 0.7  # toward the sun, the lobe carries most of the light
+    assert abs(away - 1.0) < abs(toward - 1.0)
+
+
+def test_the_engine_never_hands_v1_an_asymmetry_other_than_0_7() -> None:
+    """v1 refuses one: the diagnostic is built from v0 and the table, so v1 is untouched."""
+    with pytest.raises(ValueError):
+        sky_xyz(Atmosphere(aod_550=0.1, asymmetry=0.6), 0.0, [1.5], 0.0, engine="v1")
+    tool = load_tool()
+    assert tool.lobe_xyz(0.1, 0.6, 0.0, [1.5], 0.0).shape == (1, 3)
+
+
+# --- the sun elevation comes from the fixture, never from the module's +10 ------------------------
+
+
+def test_engine_xyz_takes_the_sun_it_is_given() -> None:
+    tool = load_tool()
+    views = tool.view_elevations()
+    for sun in SUNS:
+        assert np.array_equal(
+            tool.engine_xyz(0.1, sun, views, 90.0, "v1"), v1_reference(0.1, sun, views, 90.0)
+        )
+    assert not np.array_equal(
+        tool.engine_xyz(0.1, 0.0, views, 90.0, "v1"), tool.engine_xyz(0.1, 10.0, views, 90.0, "v1")
+    )
+
+
+def test_e_over_p_at_sun_0_is_the_criterions_0_044527_from_v1_alone() -> None:
+    tool = load_tool()
+    e = tool.predicted_if_monte_carlo(0.0, tool.view_elevations(), tool.RULE_A_AZIMUTHS_DEG)
+    assert e.shape == (16,)
+    assert float(np.mean(e)) == pytest.approx(0.044527, rel=1e-4, abs=0)
+
+
+def test_e_over_p_at_sun_10_is_what_the_pilot_log_reports() -> None:
+    """The #34 log: expected if Monte Carlo, azimuths 90 and 180, is +0.0341."""
+    tool = load_tool()
+    e = tool.predicted_if_monte_carlo(10.0, tool.view_elevations(), tool.RULE_A_AZIMUTHS_DEG)
+    assert float(np.mean(e)) == pytest.approx(0.0341, abs=5e-5)
+
+
+def test_e_depends_on_the_sun_elevation() -> None:
+    tool = load_tool()
+    views = tool.view_elevations()
+    sun0 = tool.predicted_if_monte_carlo(0.0, views, (90.0, 180.0))
+    sun10 = tool.predicted_if_monte_carlo(10.0, views, (90.0, 180.0))
+    assert not np.allclose(sun0, sun10, rtol=1e-2)
+
+
+def test_e_is_the_port_bound_in_other_clothes() -> None:
+    """e = exp(b) - 1: the same 6.6 percent of the multiple scattering, as a ratio."""
+    tool = load_tool()
+    views = tool.view_elevations()
+    e = tool.predicted_if_monte_carlo(0.0, views, (90.0,))
+    total = v1_reference(0.1, 0.0, views, 90.0)[:, 1]
+
+    multiple = multiple_scattering_xyz(Atmosphere(aod_550=0.1), 0.0, views, 90.0)[:, 1]
+    assert e == pytest.approx(np.expm1(tool.port_bound(total, multiple)), rel=1e-12, abs=0)
+
+
+# --- selecting points by value, never by position -------------------------------------------------
+
+
+def test_points_are_selected_by_azimuth_and_view_value() -> None:
+    tool = load_tool()
+    azimuth, view = tool.point_table([0.0, 30.0, 90.0, 180.0], [1.5, 2.5, 30.0])
+    assert azimuth.tolist() == [0.0] * 3 + [30.0] * 3 + [90.0] * 3 + [180.0] * 3
+    assert view.tolist() == [1.5, 2.5, 30.0] * 4
+    mask = tool.mask_points(azimuth, view, azimuths=(90.0, 180.0))
+    assert mask.sum() == 6
+    assert set(azimuth[mask]) == {90.0, 180.0}
+    only = tool.mask_points(azimuth, view, azimuths=(30.0,), views=(2.5,))
+    assert only.sum() == 1
+
+
+def test_a_permuted_point_table_selects_the_same_points() -> None:
+    tool = load_tool()
+    azimuths, views = [180.0, 0.0, 90.0, 30.0], [30.0, 1.5, 2.5]
+    azimuth, view = tool.point_table(azimuths, views)
+    mask = tool.mask_points(azimuth, view, azimuths=(90.0, 180.0))
+    chosen = sorted(zip(azimuth[mask].tolist(), view[mask].tolist(), strict=True))
+    assert chosen == sorted((a, v) for a in (90.0, 180.0) for v in views)
+
+
+def test_a_view_is_matched_within_a_tolerance_not_by_exact_equality() -> None:
+    tool = load_tool()
+    azimuth, view = tool.point_table([0.0], [1.5066301585401483, 2.0])
+    assert tool.mask_points(azimuth, view, views=(1.51,), tol=0.005).tolist() == [True, False]
+    assert tool.mask_points(azimuth, view, views=(1.51,), tol=0.001).tolist() == [False, False]
+
+
+def test_the_nominal_views_are_found_by_value_in_any_order() -> None:
+    tool = load_tool()
+
+    nominal = [float(x) for x in build_views()["nominal"].elevations_deg]
+    stored = [60.0, *reversed(nominal), 30.0]
+    indices = tool.nominal_indices(stored)
+    assert [stored[i] for i in indices] == nominal  # in the camera's order, whatever the file's
+
+
+def test_a_missing_nominal_view_is_refused_by_name() -> None:
+    tool = load_tool()
+
+    nominal = [float(x) for x in build_views()["nominal"].elevations_deg]
+    with pytest.raises(ValueError, match=r"nominal view .* not in the fixture"):
+        tool.nominal_indices([*nominal[:-1], 30.0, 60.0])
+    with pytest.raises(ValueError, match="more than once"):
+        tool.nominal_indices([*nominal, nominal[0], 30.0])
+
+
+# --- the grid fit on a planted asymmetry (a positive control) -------------------------------------
+
+
+def test_the_excess_curve_recovers_an_asymmetry_planted_in_a_stand_in_for_prague() -> None:
+    """If Prague were XYZ_g at g = 0.55, r is exactly 0 there and large at v1's 0.7."""
+    tool = load_tool()
+    views = tool.view_elevations()[: tool.NOMINAL_VIEWS]
+    planted = tool.lobe_xyz(0.1, 0.55, 0.0, views, 0.0)[:, 1]
+    ks = (45, 50, 55, 60, 70)
+    curve = tool.lobe_curve(0.1, 0.0, views, planted, ks=ks)
+    assert curve.ks == ks
+    assert curve.r_at(55) == 0.0
+    assert curve.signed_mean_at(55) == 0.0
+    assert curve.r_at(70) > tool.EXCESS_FLOOR
+    assert curve.signed_mean_at(70) > 0.0  # v1 is brighter than the planted, weaker lobe
+    assert min(ks, key=curve.r_at) == 55
+
+
+def test_the_excess_curve_at_v1_itself_is_zero_at_k_70() -> None:
+    tool = load_tool()
+    views = tool.view_elevations()[: tool.NOMINAL_VIEWS]
+    v1_y = v1_reference(0.03, 10.0, views, 0.0)[:, 1]
+    curve = tool.lobe_curve(0.03, 10.0, views, v1_y, ks=(60, 70, 80))
+    assert curve.r_at(70) == 0.0
+    assert curve.r_at(60) > 0.0 and curve.r_at(80) > 0.0
