@@ -1514,6 +1514,18 @@ def test_the_report_rows_carry_the_pinned_numbers() -> None:
         "| 0 | +0.010, -0.049 | +0.015, -0.054 | 0.0049 | 0.0036 | yes |",
     ):
         assert row in text.splitlines(), row
+    for row in (  # the exploratory section: every figure the build log quotes beyond the rulings
+        "| 0.03 | 0 | 1.024 to 1.249 | 1.136 | 0.16 to 0.22 |",
+        "| 0.03 | 90 | 1.254 to 1.400 | 1.352 | 0.25 to 0.58 |",
+        "| 0.1 | 0 | 1.223 to 1.625 | 1.462 | 0.28 to 0.49 |",
+        "| 0.1 | 180 | 1.240 to 1.308 | 1.282 | 0.29 to 0.97 |",
+        "| 0.03 | 0.2252 | 0.2296 | +0.2236 | +0.2280 |",
+        "| 0.1 | 0.3604 | 0.3625 | +0.3600 | +0.3622 |",
+        "| (sun 0, 0.03) | 0.67 (g*(0.03)) | +0.097 +0.042 -0.000 -0.029 -0.049 -0.067 |",
+        "| (sun 0, 0.1) | 0.48 (the sun-0 minimiser) | +0.108 +0.056 +0.008 -0.027 -0.054 -0.078 |",
+    ):
+        assert row in text.splitlines(), row
+    assert "the rule would fall through to branch 4 (cannot tell) at the largest such U" in text
     assert "D +0.0326, E +0.0341, s 0.0188, m 0.0250, U 0.0250" in text
     assert "r 0.2840 against 0.1220 at 0.7 and 0.0428 at its own g*(0.03)" in text
     assert "(sun 0, 0.1): g = 0.48, r 0.0640" in text

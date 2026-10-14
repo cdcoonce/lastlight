@@ -1639,6 +1639,82 @@ def _gap_mask(a: RuleAReport) -> np.ndarray:
     return mask
 
 
+def _exploratory_sun0(sun0: dict, a: RuleAReport, b: RuleBReport) -> list[str]:
+    """What the numbers say beyond the two rules: chosen after the first look, so not evidence.
+
+    Every figure the build log quotes beyond the rulings is printed here, so that it can be
+    reproduced from the fixtures.
+    """
+    views = sun0["view_elevations_deg"]
+    loads = AEROSOL_OPTICAL_DEPTHS
+    lines: list[str] = []
+    out = lines.append
+    out("")
+    out(
+        "### Exploratory: chosen after the first look at the numbers above; not part of either rule"
+    )
+    out("")
+    out("v1 over Prague in luminance at sun 0, all eight views at each azimuth:")
+    out("")
+    out(
+        "| `aod_550` | rel. azimuth | v1 / Prague, min to max | mean | MS share of v1, min to max |"
+    )
+    out("| --- | --- | --- | --- | --- |")
+    for aod in loads:
+        entry = sun0["atmospheres"][f"{aod:g}"]
+        for azimuth in sun0["rel_azimuths_deg"]:
+            prague = _fixture_xyz(entry, azimuth)[:, 1]
+            v1 = engine_xyz(aod, 0.0, views, azimuth, "v1")[:, 1]
+            ms = multiple_scattering_xyz(Atmosphere(aod_550=aod), 0.0, views, azimuth)[:, 1]
+            ratio = v1 / prague
+            out(
+                f"| {aod:g} | {azimuth:g} | {ratio.min():.3f} to {ratio.max():.3f} "
+                f"| {ratio.mean():.3f} | {(ms / v1).min():.2f} to {(ms / v1).max():.2f} |"
+            )
+    out("")
+    out(
+        "The excess at relative azimuth 30 (six nominal views; the rule rules on azimuth 0 only), "
+        "with v1's asymmetry and the fitted one:"
+    )
+    out("")
+    out("| `aod_550` | r at 0.7 | r at g*(a) | signed mean at 0.7 | at g*(a) |")
+    out("| --- | --- | --- | --- | --- |")
+    index = nominal_indices(views)
+    nominal = [views[i] for i in index]
+    for aod in loads:
+        prague = _fixture_xyz(sun0["atmospheres"][f"{aod:g}"], GAP_AZIMUTH_DEG)[index, 1]
+        cells = []
+        for k in (V1_ASYMMETRY_K, b.k_star[aod]):
+            y = lobe_xyz(aod, asymmetry_of(k), 0.0, nominal, GAP_AZIMUTH_DEG)[:, 1]
+            cells.append(excess(y, prague))
+        (r70, m70), (rk, mk) = cells
+        out(f"| {aod:g} | {r70:.4f} | {rk:.4f} | {m70:+.4f} | {mk:+.4f} |")
+    out("")
+    out("ln(Y_g / Y_Prague) at each of the six nominal views at relative azimuth 0, lowest first:")
+    out("")
+    out("| condition | g | per view |")
+    out("| --- | --- | --- |")
+    for aod in loads:
+        prague = _fixture_xyz(sun0["atmospheres"][f"{aod:g}"], TOWARD_SUN_AZIMUTH_DEG)[index, 1]
+        picks = [(V1_ASYMMETRY_K, "0.7"), (b.k_star[aod], f"g*({aod:g})")]
+        if b.k_best_sun0[aod] != b.k_star[aod]:
+            picks.append((b.k_best_sun0[aod], "the sun-0 minimiser"))
+        for k, label in picks:
+            y = lobe_xyz(aod, asymmetry_of(k), 0.0, nominal, TOWARD_SUN_AZIMUTH_DEG)[:, 1]
+            logs = " ".join(f"{x:+.3f}" for x in np.log(y / prague))
+            out(f"| (sun 0, {aod:g}) | {asymmetry_of(k):.2f} ({label}) | {logs} |")
+    out("")
+    r = a.result
+    bar = r.E / UNCERTAINTY_BAR_FACTOR
+    verdict, branch = rule_a_verdict(r.D, r.E, math.nextafter(bar, 0.0))
+    out(
+        f"Rule A's counterfactual (not a ruling): branch 1 passes only if U < E / 2 = {bar:.4f}. "
+        f"At D = {r.D:+.4f} the rule would fall through to branch {branch} ({verdict}) at the "
+        f"largest such U: |D| = {abs(r.D):.4f} and |D - E| = {abs(r.D - r.E):.4f}."
+    )
+    return lines
+
+
 def report_sun0(pilot: dict, sun0: dict) -> str:
     """Rules A and B at sun 0 from the two committed fixtures: every quantity the criterion lists.
 
@@ -1843,6 +1919,7 @@ def report_sun0(pilot: dict, sun0: dict) -> str:
             f"| {row.lobe_contrast[0]:+.3f}, {row.lobe_contrast[1]:+.3f} | {row.v1_distance:.4f} "
             f"| {row.lobe_distance:.4f} | {'yes' if within else 'no'} |"
         )
+    lines.extend(_exploratory_sun0(sun0, a, b))
     return "\n".join(lines) + "\n"
 
 
