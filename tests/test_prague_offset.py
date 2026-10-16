@@ -17,11 +17,13 @@ The rules live in `tools/prague_reference.py` (the tool only, never `lastlight.r
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import importlib.util
 import itertools
 import json
 import math
+import subprocess
 import sys
 import zlib
 from functools import cache
@@ -31,6 +33,7 @@ from types import ModuleType
 import numpy as np
 import pytest
 
+from lastlight.g0.collect import build_views
 from lastlight.render import Atmosphere
 from lastlight.render.curve import sky_xyz
 from lastlight.render.v1 import DOMAIN, default_table, multiple_scattering_xyz
@@ -942,3 +945,1610 @@ def test_a_node_sun_outside_the_datasets_axis_is_still_refused_by_the_range_chec
     with pytest.raises(tool.PragueError, match="outside the dataset's sun axis"):
         tool.build_fixture(tmp_path, spec)
     assert calls == []
+
+
+# --- the two new fixtures -------------------------------------------------------------------------
+#
+# `sun-1.json` and `sun1.json` were written by the tool after the rule functions, the ozone engine
+# and the node check were committed: `fixture --sun -1` and `fixture --sun 1`.
+
+FIXTURE_FILES = {10.0: "sun10.json", 0.0: "sun0.json", -1.0: "sun-1.json", 1.0: "sun1.json"}
+FOUR_SUNS = (10.0, 0.0, -1.0, 1.0)
+READINGS = (
+    "xyz_binned",
+    "xyz_inverse_visibility",
+    "xyz_altitude_0",
+    "xyz_matched_aerosol_depth",
+)
+"""The fixture's diagnostic readings of Prague, each laid out like the primary `xyz`."""
+ALL_READINGS = ("xyz", *READINGS)
+NOMINAL_VIEWS = 6
+CACHE = Path.home() / ".cache" / "lastlight" / "prague"
+
+
+@cache
+def committed(sun: float) -> dict:
+    return json.loads((FIXTURE_DIR / FIXTURE_FILES[sun]).read_text())
+
+
+def fresh_fixtures() -> dict[float, dict]:
+    """Copies of the four committed fixtures, safe to edit."""
+    return {sun: copy.deepcopy(committed(sun)) for sun in FOUR_SUNS}
+
+
+@pytest.mark.parametrize("sun", [-1.0, 1.0])
+def test_a_new_fixture_has_the_documented_layout(sun: float) -> None:
+    data = committed(sun)
+    assert data["format"] == "lastlight-prague-control"
+    assert data["version"] == 1
+    assert data["sun_elevation_deg"] == sun  # the fixture records its own sun
+    assert data["observer_altitude_km"] == 0.34
+    assert data["ground_albedo"] == 0.2
+    assert [float(a) for a in data["rel_azimuths_deg"]] == [0.0, 30.0, 90.0, 180.0]
+    views_ = data["view_elevations_deg"]
+    assert len(views_) == 8 and views_[NOMINAL_VIEWS:] == [30.0, 60.0]
+    assert set(data["atmospheres"]) == {"0.03", "0.1"}  # there is no third load
+    for aod in LOADS:
+        assert data["atmospheres"][f"{aod:g}"]["aod_550"] == aod
+        entry = data["atmospheres"][f"{aod:g}"]
+        for variant in ALL_READINGS:
+            block = entry["xyz"] if variant == "xyz" else entry["diagnostics"][variant]
+            assert list(block) == ["0", "30", "90", "180"]
+            for key in block:
+                xyz = np.array(block[key], dtype=float)
+                assert xyz.shape == (8, 3), (aod, key, variant)
+                assert np.isfinite(xyz).all() and (xyz > 0.0).all(), (aod, key, variant)
+
+
+@pytest.mark.parametrize("sun", [-1.0, 1.0])
+def test_a_new_fixture_has_every_key_sun_0_has(sun: float) -> None:
+    new, old = committed(sun), committed(0.0)
+    assert new.keys() == old.keys()
+    for aod in ("0.03", "0.1"):
+        assert new["atmospheres"][aod].keys() == old["atmospheres"][aod].keys()
+        assert (
+            new["atmospheres"][aod]["diagnostics"].keys()
+            == old["atmospheres"][aod]["diagnostics"].keys()
+        )
+
+
+@pytest.mark.parametrize("sun", [-1.0, 1.0])
+def test_a_new_fixtures_views_are_the_cameras_nominal_views(sun: float) -> None:
+    """A refit of WHTM1 moves its bands: the control must be regenerated, not left stale."""
+    nominal = build_views()["nominal"].elevations_deg
+    recorded = committed(sun)["view_elevations_deg"][:NOMINAL_VIEWS]
+    assert recorded == pytest.approx(list(nominal), abs=1e-9), (
+        "the camera's nominal band and reference elevations changed since the fixture was made: "
+        f"rerun tools/prague_reference.py fixture --sun {sun:g}"
+    )
+    assert committed(sun)["view_elevations_deg"] == committed(10.0)["view_elevations_deg"]
+
+
+@pytest.mark.parametrize("sun", [-1.0, 1.0])
+def test_a_new_fixture_maps_aod_to_visibility_as_the_others_do(sun: float) -> None:
+    """Only the sun changed: Koschmieder at 550 nm, v1's own ground extinction."""
+    tool = load_tool()
+    for aod in LOADS:
+        entry = committed(sun)["atmospheres"][f"{aod:g}"]
+        assert entry["visibility_km"] == pytest.approx(
+            tool.visibility_km(Atmosphere(aod_550=aod)), rel=1e-9
+        )
+        assert entry["visibility_km"] == committed(10.0)["atmospheres"][f"{aod:g}"]["visibility_km"]
+
+
+@pytest.mark.parametrize("sun", [-1.0, 1.0])
+def test_a_new_fixtures_matched_reading_is_clamped_at_0_03_and_not_at_0_1(sun: float) -> None:
+    thin = committed(sun)["atmospheres"]["0.03"]["diagnostics"]["matched_aerosol_depth"]
+    assert thin["clamped_at_largest_visibility"] is True and thin["visibility_km"] == 131.8
+    thick = committed(sun)["atmospheres"]["0.1"]["diagnostics"]["matched_aerosol_depth"]
+    assert thick["clamped_at_largest_visibility"] is False
+    assert thick["prague_aerosol_depth"] == pytest.approx(0.1, abs=1e-4)
+
+
+@pytest.mark.parametrize("sun", [-1.0, 1.0])
+def test_a_new_fixture_is_the_same_model_and_data_as_the_others(sun: float) -> None:
+    tool = load_tool()
+    new, old = committed(sun)["provenance"], committed(10.0)["provenance"]
+    assert new["model"] == old["model"]
+    assert new["datasets"] == old["datasets"]
+    assert new["dataset_axes"] == old["dataset_axes"]
+    assert new["ground_level_dataset_matches_full_at_altitude_0"] is True
+    assert new["command"] == tool.fixture_spec(sun).command
+    assert len(new["model"]["commit"]) == 40 and len(new["datasets"]["full"]["sha256"]) == 64
+
+
+@pytest.mark.parametrize("sun", [-1.0, 1.0])
+def test_a_new_fixtures_sun_is_a_node_of_pragues_axis_and_of_v1s_table(sun: float) -> None:
+    """So neither model interpolates in the sun there, as at sun 0."""
+    tool = load_tool()
+    prague = committed(sun)["provenance"]["dataset_axes"]["elevations_deg"]
+    tool.check_sun_node(sun, prague, "Prague's sun axis")
+    tool.check_sun_node(sun, default_table().axes["sun_elevation_deg"], "v1's table sun axis")
+
+
+def test_the_two_old_fixtures_are_the_ones_the_earlier_issues_made() -> None:
+    assert committed(10.0)["sun_elevation_deg"] == 10.0
+    assert committed(10.0)["rel_azimuths_deg"] == [0.0, 90.0, 180.0]
+    assert (
+        committed(10.0)["provenance"]["command"]
+        == "uv run python tools/prague_reference.py fixture"
+    )
+    assert committed(0.0)["sun_elevation_deg"] == 0.0
+    assert committed(0.0)["provenance"]["command"].endswith("fixture --sun 0")
+
+
+@pytest.mark.parametrize("sun", FOUR_SUNS)
+@pytest.mark.parametrize("aod", LOADS)
+def test_the_ozone_engine_at_280_du_is_v1_at_every_point_of_every_fixture(
+    sun: float, aod: float
+) -> None:
+    """|Y_oz(280) / Y_v1 - 1| <= 1e-12 at every stored view and relative azimuth."""
+    tool = load_tool()
+    data = committed(sun)
+    views_ = data["view_elevations_deg"]
+    for azimuth in data["rel_azimuths_deg"]:
+        ozone = tool.ozone_xyz(aod, 280.0, sun, views_, azimuth)[:, 1]
+        v1 = sky_xyz(Atmosphere(aod_550=aod), sun, views_, azimuth, engine="v1")[:, 1]
+        assert np.abs(ozone / v1 - 1.0).max() <= 1e-12, (sun, aod, azimuth)
+
+
+@pytest.mark.network
+@pytest.mark.parametrize("sun", ["-1", "1"])
+def test_a_new_fixture_matches_a_fresh_evaluation_of_the_built_model(sun: str) -> None:
+    """`tools/prague_reference.py fixture --sun N --check` re-evaluates Prague and compares."""
+    if not (CACHE / "build" / "prague_eval").exists():
+        pytest.skip("the Prague model is not built: run tools/prague_reference.py fetch build")
+    result = subprocess.run(
+        [sys.executable, str(TOOL), "fixture", "--sun", sun, "--check"],
+        capture_output=True,
+        text=True,
+        timeout=900,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_the_provenance_note_names_all_four_fixtures_and_the_two_new_commands() -> None:
+    text = (FIXTURE_DIR / "PROVENANCE.md").read_text(encoding="utf-8")
+    for name in FIXTURE_FILES.values():
+        assert f"`{name}`" in text, name
+    for command in (
+        "uv run python tools/prague_reference.py fixture --sun -1",
+        "uv run python tools/prague_reference.py fixture --sun 1",
+        "uv run python tools/prague_reference.py report --offset",
+    ):
+        assert command in text, command
+
+
+# --- the rules run on the fixtures, pinned by value -----------------------------------------------
+#
+# Every pin is `pytest.approx(x, rel=1e-6, abs=0)`: a relative bar. (pytest's default absolute
+# tolerance of 1e-12 would void a relative bar on a value this small, so abs is always 0.) The
+# numbers were first computed after the rules and both new fixtures were committed, and are
+# reproduced by `uv run python tools/prague_reference.py report --offset`. A pin that moves means
+# the physics, a fixture or a rule moved: it is not a number to be updated until the reason is
+# known.
+
+CONDITION_PINS = {  # (sun, aod_550): the quantities over P, first computed after the fixtures
+    (10.0, 0.03): {
+        "L": 0.10058602433842617,
+        "L_A": 0.11940190714347143,
+        "L_inv": 0.09697907095159833,
+        "L_binned": 0.12149864916911769,
+        "L_matched": 0.08753935378367879,
+        "delta_o": 0.029429443852198534,
+        "delta_o_v0": 0.029680582746008134,
+        "line": 1.2991741194615078,
+        "slab": -0.02650692317658665,
+        "deeper": 0.016587881434686036,
+        "depth": 0.04071429226692963,
+        "depth_matched": 0.036851,
+    },
+    (10.0, 0.1): {
+        "L": 0.13249007040044167,
+        "L_A": 0.19433922486530908,
+        "L_inv": 0.11948789187728692,
+        "L_binned": 0.1484080850128942,
+        "L_matched": 0.09503966631294729,
+        "delta_o": 0.029169770926095566,
+        "delta_o_v0": 0.02974183081450626,
+        "line": 1.2992644869497179,
+        "slab": -0.05965094380013669,
+        "deeper": 0.0405226806745258,
+        "depth": 0.11366904176346802,
+        "depth_matched": 0.0999986,
+    },
+    (0.0, 0.03): {
+        "L": 0.3021636459391136,
+        "L_A": 0.37049461987365107,
+        "L_inv": 0.29495295296295293,
+        "L_binned": 0.30921607438665044,
+        "L_matched": 0.27609419631290094,
+        "delta_o": 0.0963016603448515,
+        "delta_o_v0": 0.10187666960849465,
+        "line": 1.2962995547385983,
+        "slab": -0.06835381150712472,
+        "deeper": -0.015636919781699454,
+        "depth": 0.04071429226692963,
+        "depth_matched": 0.036851,
+    },
+    (0.0, 0.1): {
+        "L": 0.26750937236089,
+        "L_A": 0.3637546212285046,
+        "L_inv": 0.24942529038889782,
+        "L_binned": 0.28429169433481527,
+        "L_matched": 0.2153704766580869,
+        "delta_o": 0.09513665716366657,
+        "delta_o_v0": 0.10960168269764514,
+        "line": 1.2960114162640577,
+        "slab": -0.08938229944094278,
+        "deeper": -0.05758592619304359,
+        "depth": 0.11366904176346802,
+        "depth_matched": 0.0999986,
+    },
+    (-1.0, 0.03): {
+        "L": 0.32967599161510547,
+        "L_A": 0.3805726045950555,
+        "L_inv": 0.3250113610109935,
+        "L_binned": 0.3453946195991221,
+        "L_matched": 0.3127634650446506,
+        "delta_o": 0.10839994882689824,
+        "delta_o_v0": 0.1198100844448115,
+        "line": 1.2950322771893275,
+        "slab": -0.044701985286584645,
+        "deeper": -0.04340072701905129,
+        "depth": 0.04071429226692963,
+        "depth_matched": 0.036851,
+    },
+    (-1.0, 0.1): {
+        "L": 0.3175745049881771,
+        "L_A": 0.39609386060234664,
+        "L_inv": 0.3037138850846979,
+        "L_binned": 0.3390642701767629,
+        "L_matched": 0.277448842171621,
+        "delta_o": 0.10750743119724851,
+        "delta_o_v0": 0.1344679978079286,
+        "line": 1.294891642853663,
+        "slab": -0.06575910034798937,
+        "deeper": -0.14348936197820805,
+        "depth": 0.11366904176346802,
+        "depth_matched": 0.0999986,
+    },
+    (1.0, 0.03): {
+        "L": 0.26005800082827923,
+        "L_A": 0.3313417797087614,
+        "L_inv": 0.2521550393652515,
+        "L_binned": 0.26597463812223276,
+        "L_matched": 0.2315286601199695,
+        "delta_o": 0.08474310691696046,
+        "delta_o_v0": 0.08867549032270812,
+        "line": 1.2971448621954982,
+        "slab": -0.0670830133096727,
+        "deeper": -0.006105435271164694,
+        "depth": 0.04071429226692963,
+        "depth_matched": 0.036851,
+    },
+    (1.0, 0.1): {
+        "L": 0.24577917500104757,
+        "L_A": 0.3580987475095475,
+        "L_inv": 0.22351956379984803,
+        "L_binned": 0.2589767988354512,
+        "L_matched": 0.18190115669673496,
+        "delta_o": 0.08318544532216146,
+        "delta_o_v0": 0.0926456024274841,
+        "line": 1.2971032279938817,
+        "slab": -0.11136725892423271,
+        "deeper": -0.011536968513031098,
+        "depth": 0.11366904176346802,
+        "depth_matched": 0.0999986,
+    },
+}
+
+AZIMUTH_PINS = {  # (sun, aod_550, rel. azimuth): (L, L_A, L_inv, Delta_O), each azimuth alone
+    (10.0, 0.03, 0.0): (
+        0.08241356895529747,
+        0.052012217986137754,
+        0.0901047523644819,
+        0.02861600617825584,
+    ),
+    (10.0, 0.03, 90.0): (
+        0.06883924334539189,
+        0.0789113400624982,
+        0.06747988823637094,
+        0.028840240593403316,
+    ),
+    (10.0, 0.03, 180.0): (
+        0.1323328053314604,
+        0.1598924742244447,
+        0.12647825366682572,
+        0.030018647110993755,
+    ),
+    (10.0, 0.1, 0.0): (
+        0.3330892187151742,
+        0.37456464738923073,
+        0.32876707170219843,
+        0.029235163460289166,
+    ),
+    (10.0, 0.1, 90.0): (
+        0.09763018868155235,
+        0.14756635620251202,
+        0.08997586428859922,
+        0.028838372599371987,
+    ),
+    (10.0, 0.1, 180.0): (
+        0.16734995211933096,
+        0.24111209352810614,
+        0.14899991946597463,
+        0.02950116925281914,
+    ),
+    (0.0, 0.03, 0.0): (
+        0.12476933037038054,
+        0.21067703981275565,
+        0.11304559850728718,
+        0.08334629115444733,
+    ),
+    (0.0, 0.03, 30.0): (
+        0.21465308990263113,
+        0.2905649468468798,
+        0.20452946375238917,
+        0.08465476499252401,
+    ),
+    (0.0, 0.03, 90.0): (
+        0.3007196590514416,
+        0.36764066533967044,
+        0.2929951943605058,
+        0.09285471857804718,
+    ),
+    (0.0, 0.03, 180.0): (
+        0.3036076328267856,
+        0.37334857440763175,
+        0.29691071156540005,
+        0.09974860211165584,
+    ),
+    (0.0, 0.1, 0.0): (
+        0.374468540212517,
+        0.5641651939748883,
+        0.33176753055439034,
+        0.0852027795507751,
+    ),
+    (0.0, 0.1, 30.0): (
+        0.31950981248628485,
+        0.4654456306046436,
+        0.2879656097556397,
+        0.08600782941464738,
+    ),
+    (0.0, 0.1, 90.0): (
+        0.2864187152862616,
+        0.3874130928057433,
+        0.26669520358371734,
+        0.0916871957697423,
+    ),
+    (0.0, 0.1, 180.0): (
+        0.24860002943551845,
+        0.3400961496512659,
+        0.23215537719407825,
+        0.09858611855759083,
+    ),
+    (-1.0, 0.03, 0.0): (
+        0.06037733389067981,
+        0.15406103027539392,
+        0.0480717158770156,
+        0.09326495021261494,
+    ),
+    (-1.0, 0.03, 30.0): (
+        0.25690420233932587,
+        0.3367072995084679,
+        0.24672493813034044,
+        0.09604016689730521,
+    ),
+    (-1.0, 0.03, 90.0): (
+        0.36426504399070914,
+        0.4263988029268174,
+        0.3576444439118121,
+        0.10691751362314611,
+    ),
+    (-1.0, 0.03, 180.0): (
+        0.29508693923950186,
+        0.33474640626329355,
+        0.29237827811017497,
+        0.1098823840306504,
+    ),
+    (-1.0, 0.1, 0.0): (
+        0.2665817644664823,
+        0.4523450480572543,
+        0.22740115980279568,
+        0.09542554327895247,
+    ),
+    (-1.0, 0.1, 30.0): (
+        0.31036813947893727,
+        0.45199113760831283,
+        0.2806986409286557,
+        0.09748717062962836,
+    ),
+    (-1.0, 0.1, 90.0): (
+        0.3365729357456508,
+        0.42972811722427773,
+        0.31892029641034403,
+        0.1050308312206687,
+    ),
+    (-1.0, 0.1, 180.0): (
+        0.2985760742307033,
+        0.36245960398041555,
+        0.28850747375905167,
+        0.10998403117382835,
+    ),
+    (1.0, 0.03, 0.0): (
+        0.13816746278920333,
+        0.2063456939564635,
+        0.13069418946950942,
+        0.07511623969459955,
+    ),
+    (1.0, 0.03, 30.0): (
+        0.16592643469554993,
+        0.2283698310291843,
+        0.15866337034511446,
+        0.07512478322535442,
+    ),
+    (1.0, 0.03, 90.0): (
+        0.2447061302240763,
+        0.309410125587622,
+        0.23732862304364918,
+        0.08062895115946209,
+    ),
+    (1.0, 0.03, 180.0): (
+        0.2754098714324822,
+        0.3532734338299008,
+        0.2669814556868539,
+        0.08885726267445884,
+    ),
+    (1.0, 0.1, 0.0): (
+        0.41718359821881945,
+        0.6221238066416448,
+        0.3725669719651885,
+        0.07664642173394907,
+    ),
+    (1.0, 0.1, 30.0): (
+        0.3079922306278796,
+        0.4670655495236349,
+        0.2742190379165601,
+        0.07635963097400005,
+    ),
+    (1.0, 0.1, 90.0): (
+        0.25533560371260877,
+        0.36506185586608697,
+        0.23303837036260802,
+        0.07969193301605185,
+    ),
+    (1.0, 0.1, 180.0): (
+        0.23622274628948642,
+        0.35113563915300805,
+        0.21400075723708803,
+        0.08667895762827105,
+    ),
+}
+
+RULE1_PINS = {  # (sun, aod_550): (Delta_O, L, bar, left after ozone)
+    (-1.0, 0.03): (
+        0.10839994882689824,
+        0.32967599161510547,
+        0.009329261208223971,
+        0.22127604278820723,
+    ),
+    (-1.0, 0.1): (
+        0.10750743119724851,
+        0.3175745049881771,
+        0.027721239806958398,
+        0.21006707379092857,
+    ),
+    (1.0, 0.03): (
+        0.08474310691696046,
+        0.26005800082827923,
+        0.015805922926055427,
+        0.17531489391131877,
+    ),
+    (1.0, 0.1): (0.08318544532216146, 0.24577917500104757, 0.04451922240239908, 0.1625937296788861),
+}
+
+RULE3_PINS = {  # aod_550: (L, L_A, m at sun -1, 0, +1; kappa; kappa_A; removed; offset; bar)
+    0.03: (
+        (0.32967599161510547, 0.3021636459391136, 0.26005800082827923),
+        (0.3805726045950555, 0.37049461987365107, 0.3313417797087614),
+        (0.004664630604111986, 0.007210692976160671, 0.007902961463027713),
+        0.0072966497174212774,
+        0.014537427721742602,
+        0.0072966497174212774,
+        0.3021636459391136,
+        0.05,
+    ),
+    0.1: (
+        (0.3175745049881771, 0.26750937236089, 0.24577917500104757),
+        (0.39609386060234664, 0.3637546212285046, 0.3580987475095475),
+        (0.013860619903479199, 0.018084081971992183, 0.02225961120119954),
+        -0.014167467633722342,
+        -0.01334168282744247,
+        -0.014167467633722342,
+        0.26750937236089,
+        0.05,
+    ),
+}
+
+KAPPA_PINS = {  # aod_550: (kappa: Delta_O, L; kappa_A: L_A; kappa: L - Delta_O; kappa_A: L_A - D_O)
+    0.03: (
+        -0.00026986752707784667,
+        0.0072966497174212774,
+        0.014537427721742602,
+        0.00756651724449911,
+        0.014807295248820462,
+    ),
+    0.1: (
+        -0.00020978109603841943,
+        -0.014167467633722342,
+        -0.01334168282744247,
+        -0.013957686537683894,
+        -0.01313190173140405,
+    ),
+}
+
+V1_BEND = {0.03: 0.09962043590903846, 0.1: 0.05427717402958088}
+OZONE_COLUMNS = {
+    (10.0, 0.03): 295.91100119919986,
+    (10.0, 0.1): 337.93891178065303,
+    (0.0, 0.03): 289.6692062996262,
+    (0.0, 0.1): 304.63625064140814,
+}
+
+
+@cache
+def result() -> object:
+    return load_tool().evaluate_offset({sun: committed(sun) for sun in FOUR_SUNS})
+
+
+@cache
+def report_text() -> str:
+    return load_tool().format_offset(result())
+
+
+def test_the_rule_set_p_is_16_points_and_each_azimuth_8() -> None:
+    for condition in result().conditions.values():
+        assert condition.p.points == 16
+        assert [point.points for point in condition.by_azimuth.values()] == [8] * len(
+            condition.by_azimuth
+        )
+    assert list(result().conditions[10.0, 0.03].by_azimuth) == [0.0, 90.0, 180.0]  # no 30
+    assert list(result().conditions[-1.0, 0.03].by_azimuth) == [0.0, 30.0, 90.0, 180.0]
+
+
+def test_the_offset_over_p_and_every_reading_carry_the_pinned_numbers() -> None:
+    assert set(CONDITION_PINS) == set(result().conditions)
+    for key, expected in CONDITION_PINS.items():
+        condition = result().conditions[key]
+        got = {
+            "L": condition.p.L,
+            "L_A": condition.p.L_A,
+            "L_inv": condition.p.L_inv,
+            "L_binned": condition.p.L_binned,
+            "L_matched": condition.p.L_matched,
+            "delta_o": condition.p.delta_o,
+            "delta_o_v0": condition.p.delta_o_v0,
+            "line": condition.p.line,
+            "slab": condition.slab,
+            "deeper": condition.deeper,
+            "depth": condition.depth,
+            "depth_matched": condition.depth_matched,
+        }
+        for name, value in expected.items():
+            assert got[name] == pinned(value), (key, name)
+
+
+def test_m_and_delta_h_are_defined_from_those_readings() -> None:
+    for condition in result().conditions.values():
+        p = condition.p
+        assert p.m == pytest.approx(abs(p.L_inv - p.L), rel=1e-12, abs=0)
+        assert p.delta_h == pytest.approx(p.L - p.L_A, rel=1e-12, abs=0)
+
+
+def test_the_offset_at_each_azimuth_alone_carries_the_pinned_numbers() -> None:
+    seen = set()
+    for (sun, aod), condition in result().conditions.items():
+        for azimuth, point in condition.by_azimuth.items():
+            seen.add((sun, aod, azimuth))
+            expected = AZIMUTH_PINS[sun, aod, azimuth]
+            got = (point.L, point.L_A, point.L_inv, point.delta_o)
+            assert got == pinned_tuple(expected), (sun, aod, azimuth)
+    assert seen == set(AZIMUTH_PINS)
+
+
+def pinned_tuple(values: tuple[float, ...]) -> object:
+    return pytest.approx(values, rel=1e-6, abs=0)
+
+
+def test_the_offset_over_p_is_the_mean_of_its_azimuths_alone_since_each_has_eight_points() -> None:
+    """P is two azimuths of eight views: the mean over 16 points is the mean of the two means."""
+    for condition in result().conditions.values():
+        a, b = condition.by_azimuth[90.0], condition.by_azimuth[180.0]
+        assert pytest.approx((a.L + b.L) / 2, rel=1e-12, abs=0) == condition.p.L
+        assert condition.p.delta_o == pytest.approx((a.delta_o + b.delta_o) / 2, rel=1e-12, abs=0)
+
+
+def test_rule_1_at_sun_minus_1_and_plus_1_is_pinned_and_contributes_at_every_condition() -> None:
+    rule = result().rule1
+    assert list(rule.conditions) == list(RULE1_PINS)
+    for key, (removed, offset, bar, left) in RULE1_PINS.items():
+        condition = rule.conditions[key]
+        assert condition.removed == pinned(removed)
+        assert condition.offset == pinned(offset)
+        assert condition.bar == pinned(bar)
+        assert condition.share == pinned(removed / offset)
+        assert condition.verdict == "contributes", key
+        assert result().left_after_ozone[key] == pinned(left)
+    assert (rule.verdict, rule.branch) == ("contributes", 2)
+
+
+def test_rule_1s_bar_is_twice_the_reading_noise_and_its_offset_is_l() -> None:
+    for (sun, aod), condition in result().rule1.conditions.items():
+        p = result().conditions[sun, aod].p
+        assert condition.bar == pytest.approx(2 * p.m, rel=1e-12, abs=0)
+        assert condition.offset == p.L and condition.removed == p.delta_o
+
+
+def test_rule_1_beside_it_the_pilots_two_sun_0_conditions_give_contributes_branch_2() -> None:
+    rule = result().rule1
+    assert (rule.pilot_verdict, rule.pilot_branch) == ("contributes", 2)
+    assert list(rule.pilot) == [(10.0, 0.03), (10.0, 0.1), (0.0, 0.03), (0.0, 0.1)]
+    assert [c.verdict for c in rule.pilot.values()] == ["contributes"] * 4
+
+
+def test_rule_3_is_pinned_and_both_loads_read_not_this() -> None:
+    rule = result().rule3
+    assert [f.aod for f in rule.conditions] == [0.03, 0.1]
+    for fit in rule.conditions:
+        l_values, la_values, m_values, kappa, kappa_a, removed, offset, bar = RULE3_PINS[fit.aod]
+        assert pinned_tuple(l_values) == fit.L
+        assert pinned_tuple(la_values) == fit.L_A
+        assert fit.m == pinned_tuple(m_values)
+        assert fit.kappa == pinned(kappa)
+        assert fit.kappa_a == pinned(kappa_a)
+        assert fit.condition.removed == pinned(removed)
+        assert fit.condition.offset == pinned(offset)
+        assert fit.condition.bar == pinned(bar)
+        assert fit.condition.verdict == "not this"
+    assert (rule.verdict, rule.branch) == ("not this", 3)
+
+
+def test_rule_3s_removed_part_is_the_smaller_of_the_two_bends_and_its_bar_the_floor_here() -> None:
+    for fit in result().rule3.conditions:
+        assert fit.condition.removed == min(fit.kappa, fit.kappa_a)
+        assert fit.kappa == pytest.approx(fit.L[1] - (fit.L[0] + fit.L[2]) / 2, rel=1e-12, abs=0)
+        assert fit.kappa_a == pytest.approx(
+            fit.L_A[1] - (fit.L_A[0] + fit.L_A[2]) / 2, rel=1e-12, abs=0
+        )
+        assert fit.condition.offset == fit.L[1]  # L at sun 0, primary
+        # twice the largest m is under the 0.05 floor at both loads, so the floor is the bar
+        assert 2 * max(fit.m) < 0.05 and fit.condition.bar == 0.05
+
+
+def test_the_reported_bends_and_columns_are_pinned() -> None:
+    for aod, expected in KAPPA_PINS.items():
+        k = result().kappas[aod]
+        assert (k.delta_o, k.L, k.L_A, k.left, k.left_a) == pinned_tuple(expected)
+    for aod, expected in V1_BEND.items():
+        assert result().v1_bend[aod] == pinned(expected)
+    assert set(OZONE_COLUMNS) == set(result().ozone_columns)
+    for key, expected in OZONE_COLUMNS.items():
+        assert result().ozone_columns[key] == pinned(expected)
+
+
+# --- the pilot: what the tool gives against what the criterion printed ----------------------------
+#
+# Each criterion value is checked as "within half a unit of the last digit shown".
+
+PILOT_TABLE = {  # (sun, aod_550): (L, m, 2m, Delta_O, Delta_H), four decimals
+    (10.0, 0.03): (0.1006, 0.0036, 0.0072, 0.0294, -0.0188),
+    (10.0, 0.1): (0.1325, 0.0130, 0.0260, 0.0292, -0.0618),
+    (0.0, 0.03): (0.3022, 0.0072, 0.0144, 0.0963, -0.0683),
+    (0.0, 0.1): (0.2675, 0.0181, 0.0362, 0.0951, -0.0962),
+}
+PILOT_SHARES = {(0.0, 0.03): (0.319, 3), (0.0, 0.1): (0.356, 3), (10.0, 0.03): (0.29, 2)}
+PILOT_MARGINS = {(0.0, 0.03): 6.68, (0.0, 0.1): 2.63, (10.0, 0.03): 4.08, (10.0, 0.1): 1.12}
+RULE1_BARS = {  # (sun, aod_550): (Delta_O, 2 Delta_O, Delta_O / 2, that m over the pilot's largest)
+    (-1.0, 0.03): (0.1084, 0.2168, 0.0542, 3.0),
+    (-1.0, 0.1): (0.1075, 0.2150, 0.0538, 3.0),
+    (1.0, 0.03): (0.0847, 0.1695, 0.0424, 2.3),
+    (1.0, 0.1): (0.0832, 0.1664, 0.0416, 2.3),
+}
+
+
+@pytest.mark.parametrize(("key", "printed"), sorted(PILOT_TABLE.items()))
+def test_the_tool_reproduces_the_criterions_pilot_table(
+    key: tuple[float, float], printed: tuple[float, ...]
+) -> None:
+    p = result().conditions[key].p
+    got = (p.L, p.m, 2 * p.m, p.delta_o, p.delta_h)
+    names = ("L", "m", "2m", "Delta_O", "Delta_H")
+    for name, value, expected in zip(names, got, printed, strict=True):
+        assert_shown(value, expected, 4, f"{name} at {key}")
+
+
+def test_the_tool_reproduces_the_criterions_pilot_shares_margins_and_what_is_left() -> None:
+    pilot = result().rule1.pilot
+    for key, (printed, digits) in PILOT_SHARES.items():
+        assert_shown(pilot[key].share, printed, digits, f"share at {key}")
+    assert_shown(pilot[10.0, 0.1].share, 0.22, 2, "share at (10, 0.1)")
+    for key, printed in PILOT_MARGINS.items():
+        assert_shown(pilot[key].removed / pilot[key].bar, printed, 2, f"margin at {key}")
+    # After ozone, 0.2059 and 0.1724 of the sun-0 offset is left.
+    for aod, printed in ((0.03, 0.2059), (0.1, 0.1724)):
+        p = result().conditions[0.0, aod].p
+        assert_shown(p.L - p.delta_o, printed, 4, f"L - Delta_O at (0, {aod})")
+
+
+def test_the_tool_reproduces_the_prague_column_that_turns_sun_10_at_0_1_into_not_this() -> None:
+    """A Prague column under 337.94 DU would turn (sun +10, 0.1) into "not this"."""
+    column = result().ozone_columns[10.0, 0.1]
+    assert_shown(column, 337.94, 2, "the column at (10, 0.1)")
+    # It is the column at which Delta_O falls to the bar: just under it the verdict flips.
+    tool = load_tool()
+    data = committed(10.0)
+    views_ = data["view_elevations_deg"]
+    bar = result().rule1.pilot[10.0, 0.1].bar
+
+    def part(ozone_du: float) -> float:
+        v1 = np.concatenate([v1_y_at(0.1, 10.0, az, views_) for az in (90.0, 180.0)])
+        engine = np.concatenate(
+            [tool.ozone_xyz(0.1, ozone_du, 10.0, views_, az)[:, 1] for az in (90.0, 180.0)]
+        )
+        return tool.offset_of(v1, engine)
+
+    assert part(column) == pytest.approx(bar, rel=1e-9)
+    assert part(column - 0.5) < bar < part(column + 0.5)
+    assert tool.condition_verdict(part(column - 0.5), result().conditions[10.0, 0.1].p.L, bar) == (
+        "not this"
+    )
+
+
+def v1_y_at(aod: float, sun: float, azimuth: float, views_: list[float]) -> np.ndarray:
+    return sky_xyz(Atmosphere(aod_550=aod), sun, views_, azimuth, engine="v1")[:, 1]
+
+
+@pytest.mark.parametrize(("key", "printed"), sorted(RULE1_BARS.items()))
+def test_the_tool_reproduces_the_criterions_rule_1_bars(
+    key: tuple[float, float], printed: tuple[float, ...]
+) -> None:
+    removed = result().rule1.conditions[key].removed
+    biggest = max(result().conditions[k].p.m for k in result().rule1.pilot)
+    assert_shown(biggest, 0.0181, 4, "the pilot's largest m")
+    got = (removed, 2 * removed, removed / 2, removed / 2 / biggest)
+    for name, value, expected, digits in zip(
+        ("Delta_O", "2 Delta_O", "Delta_O / 2", "multiple"), got, printed, (4, 4, 4, 1), strict=True
+    ):
+        assert_shown(value, expected, digits, f"{name} at {key}")
+
+
+def test_the_tool_reproduces_v1s_own_bend_and_the_ozone_bend() -> None:
+    assert_shown(result().v1_bend[0.03], 0.0996, 4, "v1's bend at 0.03")
+    assert_shown(result().v1_bend[0.1], 0.0543, 4, "v1's bend at 0.1")
+    # "ozone, -0.0003 at 0.03 (0.0963 - (0.1084 + 0.0847) / 2)"
+    assert_shown(result().kappas[0.03].delta_o, -0.0003, 4, "kappa for Delta_O at 0.03")
+
+
+def test_the_tool_reproduces_the_rule_2_stand_in_and_its_bend_from_v1_alone() -> None:
+    for (sun, aod), printed in {
+        (0.0, 0.03): -0.0684,
+        (0.0, 0.1): -0.0894,
+        (10.0, 0.03): -0.0265,
+        (10.0, 0.1): -0.0597,
+    }.items():
+        assert_shown(result().conditions[sun, aod].slab, printed, 4, f"stand-in at {(sun, aod)}")
+    # The stand-in's bend across sun -1, 0 and +1: -0.0125 at 0.03 and -0.0008 at 0.1.
+    for aod, printed in ((0.03, -0.0125), (0.1, -0.0008)):
+        slabs = [result().conditions[sun, aod].slab for sun in (-1.0, 0.0, 1.0)]
+        assert_shown(load_tool().bend(*slabs), printed, 4, f"the stand-in's bend at {aod}")
+
+
+def test_the_criterions_delta_h_minus_stand_in_figures_are_differences_of_rounded_values() -> None:
+    """The criterion's +0.0001, -0.0068, +0.0077, -0.0021 subtract four-decimal figures.
+
+    From unrounded values the tool gives +0.0000228, -0.0068629, +0.0076910 and -0.0021982: the
+    first, second and fourth differ from the criterion's by one unit in the last digit (they are
+    not in the pilot section, whose figures all agree to half a unit). Reported as found.
+    """
+    printed = {(0.0, 0.03): 0.0001, (0.0, 0.1): -0.0068, (10.0, 0.03): 0.0077, (10.0, 0.1): -0.0021}
+    for key, value in printed.items():
+        c = result().conditions[key]
+        difference = c.p.delta_h - c.slab
+        assert abs(difference - value) <= 1.0e-4 + 1e-12, key  # within one unit of the last digit
+    assert_shown(
+        result().conditions[10.0, 0.03].p.delta_h - result().conditions[10.0, 0.03].slab,
+        0.0077,
+        4,
+        "the one that agrees to half a unit",
+    )
+
+
+def test_the_tool_reproduces_rule_4s_matched_depth_figures() -> None:
+    tool = load_tool()
+    conditions = result().conditions
+    assert_shown(conditions[0.0, 0.1].delta_m, 0.0521, 4, "Delta_M at (0, 0.1)")
+    assert_shown(conditions[10.0, 0.1].delta_m, 0.0375, 4, "Delta_M at (10, 0.1)")
+    assert_shown(conditions[0.0, 0.03].depth, 0.0407, 4, "Prague's depth at 0.03")
+    assert_shown(conditions[0.0, 0.1].depth, 0.1137, 4, "Prague's depth at 0.1")
+    assert_shown(conditions[0.0, 0.03].depth_matched, 0.0369, 4, "the clamped depth")
+    assert all(conditions[sun, 0.03].clamped for sun in FOUR_SUNS)
+    assert not any(conditions[sun, 0.1].clamped for sun in FOUR_SUNS)
+    assert conditions[0.0, 0.03].delta_m is None  # clamped: no Delta_M
+    c = conditions[0.0, 0.1]
+    gap = c.depth - c.depth_matched
+    assert_shown(gap, 0.0137, 4, "g, the gap")
+    low, high = tool.depth_range(c.delta_m, gap)
+    assert_shown(low, 0.0140, 4, "Delta_M's range at +-0.01, low")
+    assert_shown(high, 0.0903, 4, "Delta_M's range at +-0.01, high")
+    assert_shown(2 * c.p.m, 0.0362, 4, "the bar at (0, 0.1)")  # 0.0140 to 0.0903 straddles it
+    assert low < 2 * c.p.m < high
+    low5, high5 = tool.depth_range(c.delta_m, gap, 0.005)
+    assert_shown(low5, 0.0331, 4, "Delta_M's range at +-0.005, low")
+    assert_shown(high5, 0.0712, 4, "Delta_M's range at +-0.005, high")
+
+
+def test_the_tool_reproduces_rule_4s_deeper_layer_figures() -> None:
+    assert_shown(result().conditions[10.0, 0.1].deeper, 0.0405, 4, "deeper layer at (10, 0.1)")
+    assert_shown(result().conditions[0.0, 0.1].deeper, -0.0576, 4, "deeper layer at (0, 0.1)")
+    for sun, printed in ((-1.0, 3.31), (0.0, 3.68), (1.0, 1.89)):
+        ratio = result().conditions[sun, 0.1].deeper / result().conditions[sun, 0.03].deeper
+        assert_shown(ratio, printed, 2, f"deeper layer growth 0.03 to 0.1 at sun {sun}")
+
+
+def test_the_tool_reproduces_the_ozone_line_check_of_the_pilot() -> None:
+    for key, printed in {
+        (0.0, 0.03): 1.2963,
+        (0.0, 0.1): 1.2960,
+        (10.0, 0.03): 1.2992,
+        (10.0, 0.1): 1.2993,
+    }.items():
+        assert_shown(result().conditions[key].p.line, printed, 4, f"line check at {key}")
+
+
+def test_the_criterions_one_sided_remark_about_sun_plus_1_does_not_come_true() -> None:
+    """Rule 1 would carry a condition at sun +1 only if L(+1) were at most 0.1695 or 0.1664."""
+    for aod, bound in ((0.03, 0.1695), (0.1, 0.1664)):
+        c = result().rule1.conditions[1.0, aod]
+        assert_shown(2 * c.removed, bound, 4, f"the bar on L at (1, {aod})")
+        assert c.offset > 2 * c.removed  # L(+1) is over it: the condition cannot carry
+
+
+# --- the pipeline can say each thing: stand-ins for Prague ----------------------------------------
+#
+# Rules 1 and 3 are run end to end on copies of the fixtures whose Prague numbers are replaced, so
+# that "carries", "contributes", "not this" and "cannot tell" are each shown able to come out.
+
+
+def set_prague(data: dict, aod: float, rows_for) -> None:
+    """In place: Prague's XYZ at `aod` (every azimuth, every reading) is `rows_for(reading, az)`."""
+    entry = data["atmospheres"][f"{aod:g}"]
+    for azimuth in data["rel_azimuths_deg"]:
+        for reading in ALL_READINGS:
+            block = entry["xyz"] if reading == "xyz" else entry["diagnostics"][reading]
+            block[f"{azimuth:g}"] = np.asarray(rows_for(reading, azimuth)).tolist()
+
+
+def uniform(offset: float, **others: float) -> dict[str, float]:
+    """One offset under every reading, with some readings (by name) set to another value."""
+    out = dict.fromkeys(ALL_READINGS, offset)
+    out.update(others)
+    return out
+
+
+def prague_below_v1(data: dict, aod: float, offsets: dict[str, float]) -> None:
+    """Prague := v1 * exp(-offset) under each reading: L under that reading is its offset."""
+    tool = load_tool()
+    sun, views_ = data["sun_elevation_deg"], data["view_elevations_deg"]
+    set_prague(
+        data,
+        aod,
+        lambda reading, azimuth: (
+            tool.engine_xyz(aod, sun, views_, azimuth, "v1") * math.exp(-offsets[reading])
+        ),
+    )
+
+
+def prague_below_ozone(data: dict, aod: float, residual: dict[str, float]) -> None:
+    """Prague := the ozone engine at 345 DU * exp(-residual): L is Delta_O plus the residual."""
+    tool = load_tool()
+    sun, views_ = data["sun_elevation_deg"], data["view_elevations_deg"]
+    set_prague(
+        data,
+        aod,
+        lambda reading, azimuth: (
+            tool.ozone_xyz(aod, tool.US_STANDARD_OZONE_DU, sun, views_, azimuth)
+            * math.exp(-residual[reading])
+        ),
+    )
+
+
+def rule3_stand_in(table: dict[float, tuple[float, float, float]], **per_reading) -> dict:
+    """Fixtures whose offset at sun -1, 0 and +1 is `table[aod]`; `per_reading` edits some readings.
+
+    `per_reading` maps a reading name to a function (sun, aod) -> its offset there, overriding
+    the uniform one.
+    """
+    fixtures = fresh_fixtures()
+    for aod, offsets in table.items():
+        for sun, offset in zip((-1.0, 0.0, 1.0), offsets, strict=True):
+            overrides = {reading: function(sun, aod) for reading, function in per_reading.items()}
+            prague_below_v1(fixtures[sun], aod, uniform(offset, **overrides))
+    return fixtures
+
+
+def rule3(table: dict[float, tuple[float, float, float]], **per_reading) -> object:
+    return load_tool().evaluate_offset(rule3_stand_in(table, **per_reading)).rule3
+
+
+CARRIES_LINE = (0.1, 0.5, 0.1)  # kappa 0.4 over L(0) 0.5: carries
+CONTRIBUTES_LINE = (0.25, 0.4, 0.25)  # kappa 0.15 over L(0) 0.4, under half of it: contributes
+FLAT_LINE = (0.3, 0.3, 0.3)  # kappa 0: not this
+
+
+def test_rule_3_carries_when_sun_0_sits_far_above_the_line_through_its_neighbours() -> None:
+    rule = rule3({0.03: CARRIES_LINE, 0.1: CARRIES_LINE})
+    assert [f.condition.verdict for f in rule.conditions] == ["carries", "carries"]
+    assert (rule.verdict, rule.branch) == ("carries", 1)
+    fit = rule.conditions[0]
+    assert fit.kappa == pytest.approx(0.4, abs=1e-12) and fit.kappa_a == fit.kappa
+    assert fit.condition.offset == pytest.approx(0.5, abs=1e-12)
+    assert fit.condition.bar == 0.05  # m is 0 here: the floor is the bar
+
+
+def test_rule_3_contributes_when_the_bend_is_over_the_bar_but_under_half_the_offset() -> None:
+    rule = rule3({0.03: CONTRIBUTES_LINE, 0.1: CONTRIBUTES_LINE})
+    assert [f.condition.verdict for f in rule.conditions] == ["contributes", "contributes"]
+    assert (rule.verdict, rule.branch) == ("contributes", 2)
+    assert rule.conditions[0].kappa == pytest.approx(0.15, abs=1e-12)
+
+
+def test_rule_3_says_not_this_when_sun_0_is_on_the_line() -> None:
+    rule = rule3({0.03: FLAT_LINE, 0.1: FLAT_LINE})
+    assert [f.condition.verdict for f in rule.conditions] == ["not this", "not this"]
+    assert (rule.verdict, rule.branch) == ("not this", 3)
+    assert rule.conditions[0].kappa == pytest.approx(0.0, abs=1e-12)
+
+
+def test_rule_3_says_cannot_tell_when_the_two_loads_disagree() -> None:
+    rule = rule3({0.03: CARRIES_LINE, 0.1: FLAT_LINE})
+    assert [f.condition.verdict for f in rule.conditions] == ["carries", "not this"]
+    assert (rule.verdict, rule.branch) == ("cannot tell", 4)
+
+
+def test_rule_3_over_a_carries_and_a_contributes_is_contributes() -> None:
+    rule = rule3({0.03: CARRIES_LINE, 0.1: CONTRIBUTES_LINE})
+    assert [f.condition.verdict for f in rule.conditions] == ["carries", "contributes"]
+    assert (rule.verdict, rule.branch) == ("contributes", 2)
+
+
+def test_rule_3_reads_a_dip_at_sun_0_as_not_this() -> None:
+    """A negative kappa (sun 0 below its neighbours' line) reads "not this"."""
+    rule = rule3({0.03: (0.5, 0.1, 0.5), 0.1: (0.5, 0.1, 0.5)})
+    assert all(f.kappa < 0 for f in rule.conditions)
+    assert (rule.verdict, rule.branch) == ("not this", 3)
+
+
+def test_rule_3_floor_makes_a_small_bend_not_this_even_with_no_noise_at_all() -> None:
+    """kappa 0.04 is over the noise bar (0) and under the 0.05 floor: not this."""
+    rule = rule3({0.03: (0.2, 0.24, 0.2), 0.1: (0.2, 0.24, 0.2)})
+    fit = rule.conditions[0]
+    assert fit.kappa == pytest.approx(0.04, abs=1e-12)
+    assert fit.condition.bar == 0.05 and fit.condition.verdict == "not this"
+    over = rule3({0.03: (0.2, 0.26, 0.2), 0.1: (0.2, 0.26, 0.2)})  # kappa 0.06: over the floor
+    assert over.conditions[0].condition.verdict == "contributes"
+
+
+def test_rule_3_calls_a_fault_only_if_both_readings_show_it() -> None:
+    """The removed part is min(kappa, kappa_A): a bend under one reading alone is not a fault."""
+    table = {0.03: CARRIES_LINE, 0.1: CARRIES_LINE}
+    only_primary = rule3(
+        table, xyz_altitude_0=lambda sun, aod: 0.3
+    )  # altitude 0: flat at 0.3, so kappa_A = 0
+    assert only_primary.conditions[0].kappa == pytest.approx(0.4, abs=1e-12)
+    assert only_primary.conditions[0].kappa_a == pytest.approx(0.0, abs=1e-12)
+    assert only_primary.conditions[0].condition.removed == pytest.approx(0.0, abs=1e-12)
+    assert (only_primary.verdict, only_primary.branch) == ("not this", 3)
+    only_altitude = rule3(
+        {0.03: FLAT_LINE, 0.1: FLAT_LINE},
+        xyz_altitude_0=lambda sun, aod: {-1.0: 0.1, 0.0: 0.5, 1.0: 0.1}[sun],
+    )
+    assert only_altitude.conditions[0].kappa_a == pytest.approx(0.4, abs=1e-12)
+    assert (only_altitude.verdict, only_altitude.branch) == ("not this", 3)
+
+
+@pytest.mark.parametrize("noisy_sun", [-1.0, 0.0, 1.0])
+def test_rule_3s_bar_is_twice_the_largest_reading_noise_at_any_of_the_three_suns(
+    noisy_sun: float,
+) -> None:
+    """m_F is the largest of m(-1), m(0) and m(+1): noise at either neighbour counts too."""
+    table = {0.03: (0.1, 0.4, 0.1), 0.1: (0.1, 0.4, 0.1)}  # kappa 0.3: carries over a 0.05 floor
+    quiet = rule3(table)
+    assert quiet.conditions[0].condition.verdict == "carries"
+
+    def inverse(sun: float, aod: float) -> float:
+        offset = dict(zip((-1.0, 0.0, 1.0), table[aod], strict=True))[sun]
+        return offset + (0.2 if sun == noisy_sun else 0.0)
+
+    loud = rule3(table, xyz_inverse_visibility=inverse)
+    fit = loud.conditions[0]
+    assert fit.m[(-1.0, 0.0, 1.0).index(noisy_sun)] == pytest.approx(0.2, abs=1e-12)
+    assert fit.condition.bar == pytest.approx(0.4, abs=1e-12)  # 2 * 0.2, over the floor
+    assert fit.kappa == pytest.approx(0.3, abs=1e-12)  # kappa uses the primary reading only
+    assert fit.condition.verdict == "not this"  # 0.3 is under the 0.4 bar
+    assert (loud.verdict, loud.branch) == ("not this", 3)
+
+
+def rule1_stand_in(residual, shift=None) -> dict:
+    """Fixtures whose Prague at sun -1 and +1 is the ozone engine at 345 DU, less a residual.
+
+    `residual(sun, aod)` is L - Delta_O there; `shift(sun, aod)` (default 0) is how far the
+    inverse-visibility reading is from the primary one, which makes the reading noise m.
+    """
+    fixtures = fresh_fixtures()
+    for sun in (-1.0, 1.0):
+        for aod in LOADS:
+            base = residual(sun, aod)
+            moved = base + (shift(sun, aod) if shift else 0.0)
+            prague_below_ozone(fixtures[sun], aod, uniform(base, xyz_inverse_visibility=moved))
+    return fixtures
+
+
+@cache
+def delta_o(sun: float, aod: float) -> float:
+    return result().conditions[sun, aod].p.delta_o
+
+
+def rule1(fixtures: dict) -> object:
+    return load_tool().evaluate_offset(fixtures).rule1
+
+
+def test_rule_1_carries_when_prague_is_v1_with_the_ozone_column_alone() -> None:
+    rule = rule1(rule1_stand_in(lambda sun, aod: 0.0))
+    assert [c.verdict for c in rule.conditions.values()] == ["carries"] * 4
+    assert (rule.verdict, rule.branch) == ("carries", 1)
+    for key, c in rule.conditions.items():
+        assert c.offset == pytest.approx(delta_o(*key), rel=1e-9)  # L is Delta_O: share 1
+        assert c.share == pytest.approx(1.0, rel=1e-9)
+
+
+def test_rule_1_contributes_when_ozone_is_a_third_of_the_offset() -> None:
+    rule = rule1(rule1_stand_in(lambda sun, aod: 2 * delta_o(sun, aod)))
+    assert [c.verdict for c in rule.conditions.values()] == ["contributes"] * 4
+    assert (rule.verdict, rule.branch) == ("contributes", 2)
+    assert rule.conditions[-1.0, 0.03].share == pytest.approx(1 / 3, rel=1e-9)
+
+
+def test_rule_1_over_a_carries_and_a_contributes_is_contributes_not_cannot_tell() -> None:
+    """The rule-level verdict is registered: carries and contributes together are "contributes".
+
+    (The criterion's prediction paragraph names "cannot tell" for sun +1 carrying and sun -1
+    contributing; its rule-level verdict, which the tool follows, says branch 2.)
+    """
+    rule = rule1(rule1_stand_in(lambda sun, aod: 0.0 if sun == 1.0 else 2 * delta_o(sun, aod)))
+    verdicts = [c.verdict for c in rule.conditions.values()]
+    assert verdicts == ["contributes", "contributes", "carries", "carries"]
+    assert (rule.verdict, rule.branch) == ("contributes", 2)
+
+
+def test_rule_1_says_cannot_tell_when_one_condition_is_not_this() -> None:
+    """A reading noise over half of Delta_O (the bar is 2m) makes a condition "not this"."""
+    rule = rule1(
+        rule1_stand_in(
+            lambda sun, aod: 2 * delta_o(sun, aod),
+            shift=lambda sun, aod: 0.1 if (sun, aod) == (1.0, 0.1) else 0.0,
+        )
+    )
+    verdicts = [c.verdict for c in rule.conditions.values()]
+    assert verdicts == ["contributes", "contributes", "contributes", "not this"]
+    assert (rule.verdict, rule.branch) == ("cannot tell", 4)
+    assert rule.conditions[1.0, 0.1].bar == pytest.approx(0.2, abs=1e-12)  # 2m
+
+
+def test_rule_1_code_path_not_this_exists_though_it_cannot_fire_on_prague() -> None:
+    """The criterion: Delta_O is fixed and positive, so "not this" would need a huge m."""
+    rule = rule1(rule1_stand_in(lambda sun, aod: 0.0, shift=lambda sun, aod: 0.2))
+    assert [c.verdict for c in rule.conditions.values()] == ["not this"] * 4
+    assert (rule.verdict, rule.branch) == ("not this", 3)
+
+
+def test_the_pilot_verdict_beside_rule_1_is_over_the_sun_0_conditions_only() -> None:
+    """Sun +10 stays "contributes" while sun 0 is made to carry: the verdict follows sun 0."""
+    fixtures = fresh_fixtures()
+    for aod in LOADS:
+        prague_below_ozone(fixtures[0.0], aod, uniform(0.0))
+    rule = rule1(fixtures)
+    assert [rule.pilot[0.0, aod].verdict for aod in LOADS] == ["carries", "carries"]
+    assert [rule.pilot[10.0, aod].verdict for aod in LOADS] == ["contributes", "contributes"]
+    assert (rule.pilot_verdict, rule.pilot_branch) == ("carries", 1)
+    assert (rule.verdict, rule.branch) == ("contributes", 2)  # the ruled conditions are untouched
+
+
+def test_what_is_left_after_ozone_is_l_less_delta_o_unless_the_condition_is_not_this() -> None:
+    fixtures = rule1_stand_in(
+        lambda sun, aod: 2 * delta_o(sun, aod),
+        shift=lambda sun, aod: 0.1 if (sun, aod) == (-1.0, 0.03) else 0.0,
+    )
+    outcome = load_tool().evaluate_offset(fixtures)
+    rule = outcome.rule1
+    assert rule.conditions[-1.0, 0.03].verdict == "not this"
+    assert outcome.left_after_ozone[-1.0, 0.03] == rule.conditions[-1.0, 0.03].offset  # L
+    key = (1.0, 0.1)
+    assert rule.conditions[key].verdict == "contributes"
+    left = rule.conditions[key].offset - rule.conditions[key].removed
+    assert outcome.left_after_ozone[key] == pytest.approx(left, rel=1e-12)
+
+
+# --- selection by value, end to end ---------------------------------------------------------------
+
+
+def permuted(data: dict) -> dict:
+    """The same fixture with its azimuths and views listed in the opposite order."""
+    new = copy.deepcopy(data)
+    new["rel_azimuths_deg"] = list(reversed(data["rel_azimuths_deg"]))
+    new["view_elevations_deg"] = list(reversed(data["view_elevations_deg"]))
+    for entry in new["atmospheres"].values():
+        for block in (entry["xyz"], *(entry["diagnostics"][v] for v in READINGS)):
+            for key in block:
+                block[key] = list(reversed(block[key]))
+    return new
+
+
+@cache
+def permuted_result() -> object:
+    return load_tool().evaluate_offset({sun: permuted(committed(sun)) for sun in FOUR_SUNS})
+
+
+def test_both_rules_do_not_depend_on_the_order_of_azimuths_and_views() -> None:
+    here, there = result(), permuted_result()
+    for key, condition in here.conditions.items():
+        other = there.conditions[key]
+        for name in ("L", "L_A", "L_inv", "L_binned", "L_matched", "delta_o", "delta_o_v0", "line"):
+            assert getattr(other.p, name) == pytest.approx(
+                getattr(condition.p, name), rel=1e-12, abs=0
+            ), (key, name)
+        for name in ("slab", "deeper", "depth", "depth_matched"):
+            assert getattr(other, name) == pytest.approx(getattr(condition, name), rel=1e-12, abs=0)
+        for azimuth, point in condition.by_azimuth.items():
+            assert pytest.approx(point.L, rel=1e-12, abs=0) == other.by_azimuth[azimuth].L
+    for key, c in here.rule1.conditions.items():
+        assert there.rule1.conditions[key].verdict == c.verdict
+        assert there.rule1.conditions[key].removed == pytest.approx(c.removed, rel=1e-12, abs=0)
+        assert there.rule1.conditions[key].bar == pytest.approx(c.bar, rel=1e-12, abs=0)
+    assert (there.rule1.verdict, there.rule1.branch) == (here.rule1.verdict, here.rule1.branch)
+    for a, b in zip(here.rule3.conditions, there.rule3.conditions, strict=True):
+        assert b.kappa == pytest.approx(a.kappa, rel=1e-12, abs=0)
+        assert b.kappa_a == pytest.approx(a.kappa_a, rel=1e-12, abs=0)
+        assert b.condition.verdict == a.condition.verdict
+    assert (there.rule3.verdict, there.rule3.branch) == (here.rule3.verdict, here.rule3.branch)
+    assert there.left_after_ozone == pytest.approx(here.left_after_ozone, rel=1e-12, abs=0)
+
+
+def test_the_order_of_the_report_rows_follows_the_fixtures_but_the_numbers_do_not() -> None:
+    """Rows are keyed by the azimuth's value, not by where it is listed."""
+    there = permuted_result()
+    assert list(there.conditions[-1.0, 0.03].by_azimuth) == [180.0, 90.0, 30.0, 0.0]
+    assert (
+        pytest.approx(result().conditions[-1.0, 0.03].by_azimuth[30.0].L, rel=1e-12, abs=0)
+        == there.conditions[-1.0, 0.03].by_azimuth[30.0].L
+    )
+
+
+# --- no excess to attribute: the refusal ----------------------------------------------------------
+
+REFUSALS = [  # (sun, aod_550, reading): an offset a rule uses, under the reading it uses it under
+    (sun, aod, reading)
+    for aod in LOADS
+    for sun in (-1.0, 0.0, 1.0)
+    for reading in ("xyz", "xyz_altitude_0")
+]
+
+
+@pytest.mark.parametrize(("sun", "aod", "reading"), REFUSALS)
+def test_an_offset_at_or_under_zero_that_a_rule_uses_stops_the_report_naming_it(
+    sun: float, aod: float, reading: str
+) -> None:
+    tool = load_tool()
+    fixtures = fresh_fixtures()
+    data = fixtures[sun]
+    views_ = data["view_elevations_deg"]
+    entry = data["atmospheres"][f"{aod:g}"]
+    existing = {
+        rd: copy.deepcopy(entry["xyz"] if rd == "xyz" else entry["diagnostics"][rd])
+        for rd in ALL_READINGS
+    }
+
+    def brighter(rd: str, azimuth: float) -> np.ndarray:
+        if rd == reading:  # Prague brighter than v1 under this one reading only
+            return tool.engine_xyz(aod, sun, views_, azimuth, "v1") * math.exp(0.1)
+        return np.array(existing[rd][f"{azimuth:g}"])
+
+    set_prague(data, aod, brighter)
+    label = f"sun {'0' if sun == 0 else f'{sun:+g}'}, aod_550 {aod:g}"
+    with pytest.raises(tool.PragueError) as error:
+        tool.evaluate_offset(fixtures)
+    message = str(error.value)
+    assert label in message
+    assert f"reading {reading}" in message
+    assert "no excess to attribute" in message
+
+
+def test_an_offset_of_exactly_zero_is_refused_too() -> None:
+    tool = load_tool()
+    fixtures = fresh_fixtures()
+    prague_below_v1(fixtures[1.0], 0.03, uniform(0.0))
+    with pytest.raises(tool.PragueError, match=r"sun \+1, aod_550 0.03"):
+        tool.evaluate_offset(fixtures)
+
+
+def test_an_offset_no_rule_uses_does_not_stop_the_report() -> None:
+    """Sun +10 is not an input of either rule, and neither is L_A at the ruled suns for rule 1."""
+    tool = load_tool()
+    fixtures = fresh_fixtures()
+    prague_below_v1(fixtures[10.0], 0.03, uniform(-0.1))  # Prague brighter at sun +10: negative L
+    outcome = tool.evaluate_offset(fixtures)
+    assert outcome.conditions[10.0, 0.03].p.L < 0.0
+    assert tool.format_offset(outcome)  # printed as found, signed
+
+
+def test_the_command_line_writes_nothing_and_exits_1_when_there_is_no_excess(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tool = load_tool()
+    fixtures = fresh_fixtures()
+    prague_below_v1(fixtures[-1.0], 0.1, uniform(-0.05))
+    monkeypatch.setattr(tool, "read_offset_fixtures", lambda: fixtures)
+    assert tool.main(["report", "--offset"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "sun -1, aod_550 0.1" in captured.err and "reading xyz" in captured.err
+
+
+# --- another tool wrote these files: nothing is used before it is checked -------------------------
+
+
+def corrupt(sun: float, edit) -> dict:
+    fixtures = fresh_fixtures()
+    edit(fixtures[sun])
+    return fixtures
+
+
+def edit_luminance(value: object):
+    def edit(data: dict) -> None:
+        data["atmospheres"]["0.1"]["xyz"]["90"][2][1] = value
+
+    return edit
+
+
+BAD_FIXTURES = {
+    "a sun recorded as a string": lambda d: d.update(sun_elevation_deg="0"),
+    "a sun recorded as a bool": lambda d: d.update(sun_elevation_deg=True),
+    "a sun that is not finite": lambda d: d.update(sun_elevation_deg=math.nan),
+    "a sun that is another fixture's": lambda d: d.update(sun_elevation_deg=5.0),
+    "the wrong format": lambda d: d.update(format="something-else"),
+    "views that are not a list": lambda d: d.update(view_elevations_deg="1.5"),
+    "a view that is not finite": lambda d: d["view_elevations_deg"].__setitem__(2, math.inf),
+    "a view that is a bool": lambda d: d["view_elevations_deg"].__setitem__(0, False),
+    "no azimuth 90": lambda d: d.update(rel_azimuths_deg=[0.0, 30.0, 180.0, 45.0]),
+    "an azimuth listed twice": lambda d: d.update(rel_azimuths_deg=[0.0, 30.0, 90.0, 90.0, 180.0]),
+    "an azimuth that is not finite": lambda d: d["rel_azimuths_deg"].__setitem__(0, math.nan),
+    "channel centres that are not numbers": lambda d: d.update(channel_centres_nm=["a", "b"]),
+    "no atmospheres": lambda d: d.update(atmospheres=[]),
+    "no 0.1 atmosphere": lambda d: d["atmospheres"].pop("0.1"),
+    "an aod that does not match its key": lambda d: d["atmospheres"]["0.1"].update(aod_550=0.2),
+    "no diagnostics": lambda d: d["atmospheres"]["0.1"].pop("diagnostics"),
+    "a missing reading": lambda d: d["atmospheres"]["0.1"]["diagnostics"].pop("xyz_altitude_0"),
+    "a missing azimuth block": lambda d: d["atmospheres"]["0.1"]["xyz"].pop("90"),
+    "a block of the wrong length": lambda d: d["atmospheres"]["0.1"]["xyz"]["90"].pop(),
+    "a row of two numbers": lambda d: d["atmospheres"]["0.1"]["xyz"]["90"][1].pop(),
+    "a luminance that is NaN": edit_luminance(math.nan),
+    "a luminance that is infinite": edit_luminance(math.inf),
+    "a luminance of zero": edit_luminance(0.0),
+    "a negative luminance": edit_luminance(-1.0),
+    "a luminance that is a string": edit_luminance("0.5"),
+    "a luminance that is a bool": edit_luminance(True),
+    "a diagnostic luminance that is NaN": lambda d: d["atmospheres"]["0.03"]["diagnostics"][
+        "xyz_inverse_visibility"
+    ]["180"][0].__setitem__(1, math.nan),
+    "a transmittance of zero": lambda d: d["atmospheres"]["0.1"]["diagnostics"][
+        "zenith_transmittance"
+    ].__setitem__(3, 0.0),
+    "a transmittance list of the wrong length": lambda d: d["atmospheres"]["0.1"]["diagnostics"][
+        "zenith_transmittance"
+    ].pop(),
+    "no matched depth": lambda d: d["atmospheres"]["0.1"]["diagnostics"].pop(
+        "matched_aerosol_depth"
+    ),
+    "a clamp flag that is a number": lambda d: d["atmospheres"]["0.1"]["diagnostics"][
+        "matched_aerosol_depth"
+    ].update(clamped_at_largest_visibility=1),
+    "a matched depth that is NaN": lambda d: d["atmospheres"]["0.1"]["diagnostics"][
+        "matched_aerosol_depth"
+    ].update(prague_aerosol_depth=math.nan),
+}
+
+
+@pytest.mark.parametrize("name", sorted(BAD_FIXTURES))
+def test_a_malformed_fixture_is_refused_before_any_value_is_used(name: str) -> None:
+    tool = load_tool()
+    fixtures = corrupt(-1.0, BAD_FIXTURES[name])
+    with pytest.raises(tool.PragueError, match="malformed"):
+        tool.evaluate_offset(fixtures)
+
+
+def test_a_fixture_that_is_not_an_object_is_refused() -> None:
+    tool = load_tool()
+    fixtures = fresh_fixtures()
+    fixtures[-1.0] = [1, 2, 3]
+    with pytest.raises(tool.PragueError, match="not a JSON object"):
+        tool.evaluate_offset(fixtures)
+
+
+def test_a_missing_fixture_is_refused() -> None:
+    tool = load_tool()
+    fixtures = fresh_fixtures()
+    del fixtures[1.0]
+    with pytest.raises(tool.PragueError, match="need the fixtures"):
+        tool.evaluate_offset(fixtures)
+
+
+def test_the_committed_fixtures_pass_the_check() -> None:
+    tool = load_tool()
+    for sun in FOUR_SUNS:
+        tool.check_offset_fixture(committed(sun), sun)
+
+
+def test_an_unreadable_fixture_file_is_an_error_not_a_traceback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tool = load_tool()
+    moved = {}
+    for sun, spec in tool.FIXTURE_SPECS.items():
+        path = tmp_path / spec.path.name
+        path.write_text(spec.path.read_text())
+        moved[sun] = tool.fixture_spec(sun, path)
+    (tmp_path / "sun1.json").write_text("{ this is not json")
+    monkeypatch.setattr(tool, "FIXTURE_SPECS", moved)
+    assert tool.main(["report", "--offset"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == "" and "sun1.json" in captured.err and "cannot be read" in captured.err
+
+
+# --- the report -----------------------------------------------------------------------------------
+
+HEADINGS = (
+    "### Rule 1: ozone",
+    "### Rule 2: no test",
+    "### Rule 3: Prague's fit near the horizon sun",
+    "### Rule 4: no test",
+    "### Reported, never ruled",
+)
+
+
+def test_the_report_has_the_pilot_then_rules_1_to_4_then_what_is_reported_in_that_order() -> None:
+    text = report_text()
+    headings = [line for line in text.splitlines() if line.startswith("### ")]
+    assert "pilot" in headings[0].lower()
+    assert len(headings) == 1 + len(HEADINGS)
+    for found, wanted in zip(headings[1:], HEADINGS, strict=True):
+        assert found.startswith(wanted), (found, wanted)
+    positions = [text.index(heading) for heading in HEADINGS]
+    assert text.index(headings[0]) < positions[0]
+    assert positions == sorted(positions)
+
+
+def test_the_report_prints_two_verdicts_and_nothing_else_that_reads_as_one() -> None:
+    text = report_text()
+    assert "Verdict: **contributes** (branch 2)." in text
+    assert "Verdict: **not this** (branch 3)." in text
+    assert text.count("Verdict:") == 2  # rules 1 and 3; rules 2 and 4 are "no test"
+    assert text.count("No verdict is printed.") == 2
+
+
+def test_the_report_prints_the_pilots_rule_level_verdict_beside_rule_1s() -> None:
+    text = report_text()
+    assert "under the same rule-level verdict (not a ruling): contributes (branch 2)." in text
+
+
+def section(text: str, heading: str) -> str:
+    start = text.index(heading)
+    following = [text.find("\n### ", start + 1)]
+    end = following[0] if following[0] != -1 else len(text)
+    return text[start:end]
+
+
+def test_the_report_prints_every_item_the_criterion_lists_for_the_pilot() -> None:
+    pilot = section(report_text(), "### The pilot")
+    for needle in (
+        "| condition | L | m | 2m | Delta_O, ozone | Delta_H, altitude 0 |",
+        "(sun +10, 0.03)",
+        "(sun +10, 0.1)",
+        "(sun 0, 0.03)",
+        "(sun 0, 0.1)",
+        "share Delta_O / L",
+        "margin over the bar, Delta_O / 2m",
+        "a Prague column under (DU) turns it into",
+        "left after ozone, L - Delta_O",
+        "carries only if L is at most 2 Delta_O",
+        '"not this" only if m is at least Delta_O / 2',
+        "the pilot's largest m (0.0181)",
+        "v1's own sky across sun -1, 0 and +1",
+    ):
+        assert needle in pilot, needle
+
+
+def test_the_report_prints_every_item_the_criterion_lists_for_rule_1() -> None:
+    rule_1 = section(report_text(), "### Rule 1: ozone")
+    for needle in (
+        "| condition | Delta_O | L | bar 2m | share Delta_O / L | verdict |",
+        "(sun -1, 0.03)",
+        "(sun -1, 0.1)",
+        "(sun +1, 0.03)",
+        "(sun +1, 0.1)",
+        "Verdict:",
+        "the pilot's two sun-0 conditions",
+    ):
+        assert needle in rule_1, needle
+
+
+def test_the_report_prints_every_item_the_criterion_lists_for_rule_2() -> None:
+    rule_2 = section(report_text(), "### Rule 2: no test")
+    for needle in (
+        "Delta_H = L - L_A",
+        "1.2544",
+        "slab stand-in",
+        "Delta_H minus stand-in",
+        "libRadtran",
+        "never vendored or imported",
+        "ground raised to the observer",
+    ):
+        assert needle in rule_2, needle
+    for sun in ("+10", "0", "-1", "+1"):
+        for aod in ("0.03", "0.1"):
+            assert f"| (sun {sun}, {aod}) |" in rule_2, (sun, aod)
+
+
+def test_the_report_prints_every_item_the_criterion_lists_for_rule_3() -> None:
+    rule_3 = section(report_text(), "### Rule 3: Prague's fit near the horizon sun")
+    for needle in (
+        "kappa(a) = L(0, a) - (L(-1, a) + L(+1, a)) / 2",
+        "kappa_A",
+        "| `aod_550` | L(-1) | L(0) | L(+1) | L_A(-1) | L_A(0) | L_A(+1) | m(-1) | m(0) | m(+1) |",
+        "removed, min(kappa, kappa_A)",
+        "bar max(2 m_F, 0.05)",
+        "share removed / L(0)",
+        'A negative kappa reads "not this".',
+        "Verdict: **not this** (branch 3).",
+    ):
+        assert needle in rule_3, needle
+    assert "kink" not in rule_3  # that sentence is for "carries" or "contributes" only
+
+
+def test_the_report_prints_every_item_the_criterion_lists_for_rule_4() -> None:
+    rule_4 = section(report_text(), "### Rule 4: no test")
+    for needle in (
+        "Delta_M = L - L_matched",
+        "Prague's depth, primary",
+        "Prague's depth at the match",
+        "0.01 off either way",
+        "clamped (no range)",
+        "load step L(0.1) - L(0.03)",
+        "deeper layer at 0.03",
+        "deeper layer at 0.1",
+        "ratio 0.1 to 0.03",
+        "libRadtran",
+    ):
+        assert needle in rule_4, needle
+    for sun in ("+10", "0", "-1", "+1"):
+        for aod in ("0.03", "0.1"):
+            assert f"| (sun {sun}, {aod}) |" in rule_4, (sun, aod)
+        assert f"| {sun} | " in rule_4  # the load step and the deeper layer, at each sun
+
+
+def test_the_report_prints_every_item_the_criterion_lists_as_reported_never_ruled() -> None:
+    reported = section(report_text(), "### Reported, never ruled")
+    for needle in (
+        "| `aod_550` | points | L | L_A | m | Delta_O | Delta_H | Delta_O / L | Delta_H / L",
+        "Delta_O (v0)",
+        "line check",
+        "L_binned",
+        "never part of m",
+        "kappa for Delta_O",
+        "kappa for L",
+        "kappa_A for L_A",
+        "kappa for L - Delta_O",
+        "kappa_A for L_A - Delta_O",
+        "What is left of L after ozone",
+    ):
+        assert needle in reported, needle
+
+
+def test_the_per_azimuth_rows_are_only_for_the_azimuths_a_fixture_has() -> None:
+    reported = section(report_text(), "### Reported, never ruled")
+    pieces = reported.split("#### Sun ")[1:]
+    by_sun = {piece.split(" ", 1)[0]: piece for piece in pieces}
+    assert set(by_sun) == {"+10", "0", "-1", "+1"}
+    assert "azimuth 30 alone" not in by_sun["+10"]  # sun10.json has no azimuth 30
+    for sun in ("0", "-1", "+1"):
+        assert "azimuth 30 alone" in by_sun[sun]
+    for sun, piece in by_sun.items():
+        for azimuth in ("0", "90", "180"):
+            assert f"azimuth {azimuth} alone (8)" in piece, (sun, azimuth)
+        assert "P (azimuths 90, 180) (16)" in piece
+    assert "`sun-1.json`" in by_sun["-1"] and "`sun1.json`" in by_sun["+1"]
+
+
+def test_there_is_no_third_load_anywhere_in_the_report() -> None:
+    text = report_text()
+    for sun in ("+10", "0", "-1", "+1"):
+        assert f"(sun {sun}, 0.2)" not in text
+
+
+def test_the_report_rows_carry_the_pinned_numbers() -> None:
+    """The printed tables are what goes in the build log: their numbers are pinned as text."""
+    text = report_text()
+    for row in (
+        "| (sun +10, 0.03) | 0.1006 | 0.0036 | 0.0072 | 0.0294 | -0.0188 |",
+        "| (sun 0, 0.1) | 0.2675 | 0.0181 | 0.0362 | 0.0951 | -0.0962 |",
+        "| (sun +10, 0.1) | 0.220 | 1.12 | contributes | 337.94 | 0.1033 |",
+        "| (sun 0, 0.03) | 0.319 | 6.68 | contributes | 289.67 | 0.2059 |",
+        "| (sun -1, 0.03) | 0.1084 | 0.3297 | 0.0093 | 0.329 | contributes |",
+        "| (sun -1, 0.1) | 0.1075 | 0.3176 | 0.0277 | 0.339 | contributes |",
+        "| (sun +1, 0.03) | 0.0847 | 0.2601 | 0.0158 | 0.326 | contributes |",
+        "| (sun +1, 0.1) | 0.0832 | 0.2458 | 0.0445 | 0.338 | contributes |",
+        "| 0.03 | 0.3297 | 0.3022 | 0.2601 | 0.3806 | 0.3705 | 0.3313 | 0.0047 | 0.0072 | 0.0079 |",
+        "| 0.1 | 0.3176 | 0.2675 | 0.2458 | 0.3961 | 0.3638 | 0.3581 | 0.0139 | 0.0181 | 0.0223 |",
+        "| 0.03 | +0.0073 | +0.0145 | +0.0073 | 0.3022 | 0.0500 | +0.024 | not this |",
+        "| 0.1 | -0.0142 | -0.0133 | -0.0142 | 0.2675 | 0.0500 | -0.053 | not this |",
+        "| (sun 0, 0.1) | +0.0521 | 0.1137 | 0.1000 | 0.0140 to 0.0903 |",
+        "| (sun 0, 0.03) | clamped | 0.0407 | 0.0369 | clamped (no range) |",
+        "| 0.03 | -0.0003 | +0.0073 | +0.0145 | +0.0076 | +0.0148 |",
+        "| 0.1 | -0.0002 | -0.0142 | -0.0133 | -0.0140 | -0.0131 |",
+    ):
+        assert row in text, row
+    assert "0.03: +0.0996; 0.1: +0.0543" in text
+
+
+def test_the_report_is_complete_and_deterministic() -> None:
+    tool = load_tool()
+    again = tool.report_offset({sun: committed(sun) for sun in FOUR_SUNS})
+    assert again == report_text()
+    assert report_text().endswith("\n") and not report_text().endswith("\n\n")
+
+
+def test_the_command_line_report_for_the_offset_runs_from_the_committed_fixtures(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    tool = load_tool()
+    assert tool.main(["report", "--offset"]) == 0
+    assert capsys.readouterr().out == report_text()
+
+
+def test_the_offset_flag_belongs_to_report_alone() -> None:
+    tool = load_tool()
+    assert tool.build_parser().parse_args(["report", "--offset"]).offset is True
+    assert tool.build_parser().parse_args(["report"]).offset is False
+    with pytest.raises(SystemExit):
+        tool.main(["fixture", "--offset"])
+
+
+def test_a_report_for_one_of_the_new_suns_alone_points_at_the_offset_report(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    tool = load_tool()
+    assert tool.main(["report", "--sun", "-1"]) == 1
+    assert "report --offset" in capsys.readouterr().err
+
+
+def test_the_older_reports_still_run_and_the_34_and_45_reports_are_unchanged_in_kind(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Byte identity with the earlier reports is checked against origin/main's output (the log)."""
+    tool = load_tool()
+    assert tool.main(["report"]) == 0
+    first = capsys.readouterr().out
+    assert first.startswith("### Sun +10, `aod_550` 0.03")
+    assert tool.main(["report", "--sun", "0"]) == 0
+    second = capsys.readouterr().out
+    assert second.startswith("### Rule A at sun 0")
+    assert "Rule 1" not in first and "Rule 1" not in second
