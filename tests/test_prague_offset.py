@@ -492,19 +492,35 @@ def test_the_engine_never_asks_v1_for_an_ozone_outside_its_table(
         sky_xyz(Atmosphere(aod_550=0.1, ozone_du=345.0), 0.0, [2.0], 0.0, engine="v1")
 
 
-def test_the_ozone_engine_reads_the_tables_ozone_nodes_from_its_domain(
+def test_the_ozone_engine_asks_the_table_for_the_nodes_the_domain_names(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The nodes are read from the domain, and the table is asked at exactly those columns.
+
+    The continuation is log-linear in ozone, so any two nodes give the same value inside the
+    table (the two readings differ by 1e-15). Only the columns the engine asks the table for tell
+    a domain read from two numbers written into the code, so they are recorded.
+    """
     tool = load_tool()
     assert DOMAIN["ozone_du"] == (250.0, 330.0)  # v1 is unchanged: its domain is registered
     views_ = list(all_views())
+    asked: list[float] = []
+    real_multiple = tool.multiple_scattering_xyz
+
+    def record_multiple(atm, *args, **kwargs):
+        asked.append(atm.ozone_du)
+        return real_multiple(atm, *args, **kwargs)
+
     monkeypatch.setattr(tool, "DOMAIN", {"ozone_du": (260.0, 320.0)})
+    monkeypatch.setattr(tool, "multiple_scattering_xyz", record_multiple)
+    got = tool.ozone_xyz(0.1, 290.0, 0.0, views_, 90.0)
+    assert sorted(asked) == [260.0, 320.0]
     t = (290.0 - 260.0) / 60.0
-    low = multiple_scattering_xyz(Atmosphere(aod_550=0.1, ozone_du=260.0), 0.0, views_, 90.0)
-    high = multiple_scattering_xyz(Atmosphere(aod_550=0.1, ozone_du=320.0), 0.0, views_, 90.0)
+    low = real_multiple(Atmosphere(aod_550=0.1, ozone_du=260.0), 0.0, views_, 90.0)
+    high = real_multiple(Atmosphere(aod_550=0.1, ozone_du=320.0), 0.0, views_, 90.0)
     single = sky_xyz(Atmosphere(aod_550=0.1, ozone_du=290.0), 0.0, views_, 90.0)
     expected = single + np.exp((1.0 - t) * np.log(low) + t * np.log(high))
-    assert np.abs(tool.ozone_xyz(0.1, 290.0, 0.0, views_, 90.0) / expected - 1.0).max() <= 1e-13
+    assert np.abs(got / expected - 1.0).max() <= 1e-13
 
 
 def test_more_ozone_means_less_light_at_every_view_and_never_changes_the_geometry() -> None:
