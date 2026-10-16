@@ -823,6 +823,23 @@ def test_a_sun_that_is_not_finite_is_not_a_node() -> None:
             tool.check_sun_node(sun, PRAGUE_AXIS, "axis")
 
 
+def test_an_unregistered_sun_next_to_a_node_is_not_reported_as_the_node(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A refusal names the sun it was given in full: -1.0000000001 never reads as "-1"."""
+    tool = load_tool()
+    assert tool.main(["fixture", "--sun=-1.0000000001", "--check"]) == 1
+    refusal = capsys.readouterr().err
+    assert "no fixture is registered" in refusal
+    assert "-1.0000000001" in refusal
+    assert "sun elevation -1 " not in refusal
+    near = 1.0 + 2e-9  # off the node by twice the tolerance
+    with pytest.raises(tool.PragueError, match="not a node") as error:
+        tool.check_sun_node(near, PRAGUE_AXIS, "axis")
+    assert repr(near) in str(error.value)
+    assert "sun elevation 1 " not in str(error.value)
+
+
 def test_the_real_axes_have_minus_1_0_and_1_as_nodes_and_10_is_a_node_of_v1_only() -> None:
     """The reason for the check: sun 10 interpolates in Prague, ±1 do not interpolate anywhere."""
     recorded = json.loads((FIXTURE_DIR / "sun0.json").read_text())
