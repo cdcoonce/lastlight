@@ -377,6 +377,13 @@
       "oracle": "real",
       "find": "    return replace(base, path=output)",
       "replace": "    return FixtureSpec(base.sun_elevation_deg, base.rel_azimuths_deg, output, base.command)"
+    },
+    {
+      "label": "X30 P is taken by position (the last two azimuths of the fixture's list), not by azimuth value",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        p=offset_point(data, aod, OFFSET_AZIMUTHS_DEG),",
+      "replace": "        p=offset_point(data, aod, tuple(data[\"rel_azimuths_deg\"][-2:])),"
     }
   ]
 }
