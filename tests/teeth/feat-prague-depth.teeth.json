@@ -35,15 +35,15 @@
       "label": "I1 fit includes the 340 nm channel (ten channels become eleven) -> test_the_gas_shapes_are_v1s_rayleigh_ratio_and_ozone_table_at_the_channel_centres",
       "file": "../../tools/prague_reference.py",
       "oracle": "real",
-      "find": "GAS_FIT_FIRST_NM = 380.0\n\"\"\"The fit uses the channels centred from here up; SPCTRL2's ozone table starts at 380 nm.\"\"\"\nGAS_FIT_CHANNELS = 10",
-      "replace": "GAS_FIT_FIRST_NM = 340.0\n\"\"\"The fit uses the channels centred from here up; SPCTRL2's ozone table starts at 380 nm.\"\"\"\nGAS_FIT_CHANNELS = 11"
+      "find": "GAS_FIT_FIRST_NM = 380.0\n\"\"\"The fit uses the channels centred from here up; SPCTRL2's ozone table starts at 380 nm.\"\"\"",
+      "replace": "GAS_FIT_FIRST_NM = 340.0\n\"\"\"The fit uses the channels centred from here up; SPCTRL2's ozone table starts at 380 nm.\"\"\""
     },
     {
       "label": "I2 fit drops the 740 nm channel -> test_the_gas_shapes_are_v1s_rayleigh_ratio_and_ozone_table_at_the_channel_centres",
       "file": "../../tools/prague_reference.py",
       "oracle": "real",
-      "find": "    fitted = all_centres >= GAS_FIT_FIRST_NM\n    chosen = all_centres[fitted]\n    if chosen.size != GAS_FIT_CHANNELS:",
-      "replace": "    fitted = (all_centres >= GAS_FIT_FIRST_NM) & (all_centres < 740.0)\n    chosen = all_centres[fitted]\n    if False:"
+      "find": "    fitted = (\n        np.abs(all_centres[:, None] - fit_centres[None, :]).min(axis=1) <= GAS_CENTRE_TOLERANCE_NM\n    )\n    chosen = all_centres[fitted]",
+      "replace": "    fitted = (\n        np.abs(all_centres[:, None] - fit_centres[None, :]).min(axis=1) <= GAS_CENTRE_TOLERANCE_NM\n    ) & (all_centres < 740.0)\n    chosen = all_centres[fitted]"
     },
     {
       "label": "I3 s2 divides by the number of values, not values minus parameters -> test_every_pilot_quantity_is_the_criterions_to_half_a_unit",
@@ -406,7 +406,7 @@
       "label": "X19 the channel-count guard is dropped (any consistent centres are fitted) -> none (expect SURVIVED)",
       "file": "../../tools/prague_reference.py",
       "oracle": "real",
-      "find": "    if chosen.size != GAS_FIT_CHANNELS:",
+      "find": "    if all_centres.shape != registered.shape or not np.all(\n        np.abs(all_centres - registered) <= GAS_CENTRE_TOLERANCE_NM\n    ):",
       "replace": "    if False:"
     },
     {
