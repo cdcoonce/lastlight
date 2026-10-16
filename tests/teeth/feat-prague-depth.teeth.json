@@ -1,0 +1,478 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "env",
+    "PYTHONDONTWRITEBYTECODE=1",
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-x",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_prague_depth.py",
+    "tests/test_prague_offset.py",
+    "-m",
+    "not network"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_prague_depth.py",
+    "tests/test_prague_offset.py",
+    "-m",
+    "not network"
+  ],
+  "mutants": [
+    {
+      "label": "I1 fit includes the 340 nm channel (ten channels become eleven) -> test_the_gas_shapes_are_v1s_rayleigh_ratio_and_ozone_table_at_the_channel_centres",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "GAS_FIT_FIRST_NM = 380.0\n\"\"\"The fit uses the channels centred from here up; SPCTRL2's ozone table starts at 380 nm.\"\"\"",
+      "replace": "GAS_FIT_FIRST_NM = 340.0\n\"\"\"The fit uses the channels centred from here up; SPCTRL2's ozone table starts at 380 nm.\"\"\""
+    },
+    {
+      "label": "I2 fit drops the 740 nm channel -> test_the_gas_shapes_are_v1s_rayleigh_ratio_and_ozone_table_at_the_channel_centres",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    fitted = (\n        np.abs(all_centres[:, None] - fit_centres[None, :]).min(axis=1) <= GAS_CENTRE_TOLERANCE_NM\n    )\n    chosen = all_centres[fitted]",
+      "replace": "    fitted = (\n        np.abs(all_centres[:, None] - fit_centres[None, :]).min(axis=1) <= GAS_CENTRE_TOLERANCE_NM\n    ) & (all_centres < 740.0)\n    chosen = all_centres[fitted]"
+    },
+    {
+      "label": "I3 s2 divides by the number of values, not values minus parameters -> test_every_pilot_quantity_is_the_criterions_to_half_a_unit",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "free = values - parameters",
+      "replace": "free = values"
+    },
+    {
+      "label": "I4 SE's q uses 1 for a_R instead of rho-bar -> test_every_pilot_quantity_is_the_criterions_to_half_a_unit",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "q[index] = data.rho_bar",
+      "replace": "q[index] = 1.0"
+    },
+    {
+      "label": "I5 a curved estimate fixes gamma_i = 0 (aerosol ignores the curvature term) -> test_the_model_residuals_and_the_analytic_jacobian_are_the_criterions",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if blocks.shape[1] == 3:",
+      "replace": "    if False:"
+    },
+    {
+      "label": "I6 the paper's ozone is 0.330 atm cm instead of 0.345 -> test_the_four_estimates_with_a_fixed_gas_parameter_keep_it_exactly",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "GAS_OZONE_START = US_STANDARD_OZONE_DU / 1e3",
+      "replace": "GAS_OZONE_START = 0.330"
+    },
+    {
+      "label": "I7 the paper's Rayleigh uses v1's 970 hPa instead of 973.0664 -> test_the_four_estimates_with_a_fixed_gas_parameter_keep_it_exactly",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "r_paper=float(rayleigh_optical_depth(REFERENCE_WAVELENGTH_NM, PAPER_PRESSURE_HPA)),",
+      "replace": "r_paper=float(rayleigh_optical_depth(REFERENCE_WAVELENGTH_NM, Atmosphere(0.0).pressure_hpa)),"
+    },
+    {
+      "label": "I8 the paper's pressure is rounded to 973.07 before use -> test_the_four_estimates_with_a_fixed_gas_parameter_keep_it_exactly",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "PAPER_PRESSURE_HPA = STANDARD_PRESSURE_HPA * (1 - 0.0065 * PAPER_ALTITUDE_M / 288.15) ** 5.25588",
+      "replace": "PAPER_PRESSURE_HPA = round(STANDARD_PRESSURE_HPA * (1 - 0.0065 * PAPER_ALTITUDE_M / 288.15) ** 5.25588, 2)"
+    },
+    {
+      "label": "I9 G takes the gas at 550 nm directly (point values) instead of interpolating 540 to 580 -> test_the_gas_means_at_550_nm_interpolate_between_the_540_and_580_channels",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        rho_bar=float(np.interp(REFERENCE_WAVELENGTH_NM, chosen, rho)),\n        kappa_bar=float(np.interp(REFERENCE_WAVELENGTH_NM, chosen, kappa)),",
+      "replace": "        rho_bar=1.0,\n        kappa_bar=float(ozone_absorption_per_atm_cm(REFERENCE_WAVELENGTH_NM)),"
+    },
+    {
+      "label": "I10 y-bar uses the nearest channel instead of linear interpolation at 550 nm -> test_the_solver_is_called_as_the_criterion_says_from_the_registered_start",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "y_bar=np.array([np.interp(REFERENCE_WAVELENGTH_NM, all_centres, row) for row in tau]),",
+      "replace": "y_bar=np.array([row[int(np.argmin(np.abs(all_centres - REFERENCE_WAVELENGTH_NM)))] for row in tau]),"
+    },
+    {
+      "label": "I11 estimates numbered with the aerosol form varying fastest -> test_the_eight_estimates_are_numbered_with_the_aerosol_form_varying_slowest",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    for number, (curved, ozone_free, rayleigh_free) in enumerate(\n        itertools.product((False, True), (True, False), (True, False)), start=1\n    )",
+      "replace": "    for number, (rayleigh_free, ozone_free, curved) in enumerate(\n        itertools.product((True, False), (True, False), (False, True)), start=1\n    )"
+    },
+    {
+      "label": "I12 a fit with status <= 0 is accepted instead of refused -> test_a_fit_that_did_not_converge_is_refused_naming_the_estimate",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if result.status <= 0:",
+      "replace": "    if False:"
+    },
+    {
+      "label": "I13 the fit is weighted by T (residuals and Jacobian rows) -> test_the_model_residuals_and_the_analytic_jacobian_are_the_criterions",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    def residuals(theta: np.ndarray) -> np.ndarray:\n        return gas_residuals(estimate, data, theta, visibilities)\n\n    def jacobian(theta: np.ndarray) -> np.ndarray:\n        return gas_jacobian(estimate, data, theta, visibilities)",
+      "replace": "    weights = np.exp(-data.y[:visibilities]).ravel()\n\n    def residuals(theta: np.ndarray) -> np.ndarray:\n        return weights * gas_residuals(estimate, data, theta, visibilities)\n\n    def jacobian(theta: np.ndarray) -> np.ndarray:\n        return weights[:, None] * gas_jacobian(estimate, data, theta, visibilities)"
+    },
+    {
+      "label": "I14 the start for u_i uses G_old (0.12208) instead of G_paper -> test_the_solver_is_called_as_the_criterion_says_from_the_registered_start",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "start.append(math.log(max(float(y_bar) - data.g_paper, GAS_START_FLOOR)))",
+      "replace": "start.append(math.log(max(float(y_bar) - sum(v1_gas_depth_at_550(Atmosphere(0.0).pressure_hpa)), GAS_START_FLOOR)))"
+    },
+    {
+      "label": "I15 residual rms divides by values minus parameters instead of values -> test_every_pilot_quantity_is_the_criterions_to_half_a_unit",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "rms=math.sqrt(ssr / final.size),",
+      "replace": "rms=math.sqrt(ssr / (final.size - theta.size)),"
+    },
+    {
+      "label": "I16 condition number on a column-scaled J instead of the unscaled J -> test_every_pilot_quantity_is_the_criterions_to_half_a_unit",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "condition=float(np.linalg.cond(jac)),",
+      "replace": "condition=float(np.linalg.cond(jac / np.linalg.norm(jac, axis=0))),"
+    },
+    {
+      "label": "I17 a non-positive or non-finite q'Cq gives SE = 0 instead of infinity -> test_the_standard_error_is_infinite_where_the_variance_is_not_positive_and_finite",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "return math.sqrt(variance) if math.isfinite(variance) and variance > 0.0 else math.inf",
+      "replace": "return math.sqrt(variance) if math.isfinite(variance) and variance > 0.0 else 0.0"
+    },
+    {
+      "label": "I18 g_k subtracts 0.03 instead of 0.1 -> test_every_pilot_quantity_is_the_criterions_to_half_a_unit",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "return y_bar_p - self.gas - DEPTH_LOADS[-1]",
+      "replace": "return y_bar_p - self.gas - DEPTH_LOADS[0]"
+    },
+    {
+      "label": "I19 the envelope uses 1 SE instead of 2 SE -> test_every_pilot_quantity_is_the_criterions_to_half_a_unit",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "SE_MULTIPLE = 2.0",
+      "replace": "SE_MULTIPLE = 1.0"
+    },
+    {
+      "label": "I21 the old G uses the paper's pressure (the pressure part vanishes) -> test_the_old_gas_and_the_paper_gas_and_the_split_of_their_difference",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "rayleigh_old, ozone_old = v1_gas_depth_at_550(Atmosphere(0.0).pressure_hpa)",
+      "replace": "rayleigh_old, ozone_old = v1_gas_depth_at_550(PAPER_PRESSURE_HPA)"
+    },
+    {
+      "label": "I22 g* scales by the paper's excess g_4 instead of the old 0.01367 -> test_the_crossing_quantities_are_pinned_by_value",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "return self.g_old * self.bar / self.delta_m",
+      "replace": "return self.g_paper * self.bar / self.delta_m"
+    },
+    {
+      "label": "I23 the carrying excess uses L instead of L / 2 -> test_the_crossing_quantities_are_pinned_by_value",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "return self.g_old * (self.L * CARRIES_SHARE) / self.delta_m",
+      "replace": "return self.g_old * self.L / self.delta_m"
+    },
+    {
+      "label": "I24 the ratio at the paper's excess uses g_1 instead of g_4 -> test_the_crossing_quantities_are_pinned_by_value",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "g_paper = paper.excess_over(y_bar_p)",
+      "replace": "g_paper = fits[0].excess_over(y_bar_p)"
+    },
+    {
+      "label": "I25 y-bar(131.8) uses the paper's G instead of the old G -> test_the_clearest_node_from_the_recorded_clamped_match",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "y_bar_clearest=clearest_depth + gas_old,",
+      "replace": "y_bar_clearest=clearest_depth + paper.gas,"
+    },
+    {
+      "label": "I26 g_max uses y-bar(V_0.03) instead of y-bar(V_p) -> test_the_clearest_node_from_the_recorded_clamped_match",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "return self.y_bar_p - self.y_bar_clearest",
+      "replace": "return float(self.data.y_bar[0]) - self.y_bar_clearest"
+    },
+    {
+      "label": "I27 the 0.03 load's G threshold adds 0.03 instead of subtracting -> test_the_clearest_node_from_the_recorded_clamped_match",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "return self.y_bar_clearest - DEPTH_LOADS[0]",
+      "replace": "return self.y_bar_clearest + DEPTH_LOADS[0]"
+    },
+    {
+      "label": "I28 a sun's quantities come from the fixture at the same position, not the same sun -> test_the_fixtures_may_be_given_in_any_order",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    suns = tuple(\n        depth_crossing(sun, offset_condition(fixtures[sun], DEPTH_LOADS[-1]), g_paper)\n        for sun in DEPTH_SUNS_DEG\n    )",
+      "replace": "    by_position = list(fixtures.values())\n    suns = tuple(\n        depth_crossing(sun, offset_condition(by_position[index], DEPTH_LOADS[-1]), g_paper)\n        for index, sun in enumerate(DEPTH_SUNS_DEG)\n    )"
+    },
+    {
+      "label": "I29 the amount-scaling check scales the gas columns instead of the aerosol columns -> test_scaling_every_nodes_amount_by_a_power_of_two_leaves_the_standard_error_alone",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "scaled[:, gas:] *= factor",
+      "replace": "scaled[:, :gas] *= factor"
+    },
+    {
+      "label": "I31 the three-copy check ties one set of aerosol columns across the copies (J tiled) -> test_the_three_copy_check_hands_the_standard_error_a_block_diagonal_sixty_row_jacobian",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        triple[estimate.number] = standard_error(wide, q_wide, fit.s2) / fit.se",
+      "replace": "        triple[estimate.number] = (\n            standard_error(np.tile(fit.jac, (INVARIANCE_COPIES, 1)), q, fit.s2) / fit.se\n        )"
+    },
+    {
+      "label": "I32 the three-copy check recomputes s for six nodes (n - p changes) -> test_three_copies_of_each_spectrum_divide_every_standard_error_by_root_3",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        triple[estimate.number] = standard_error(wide, q_wide, fit.s2) / fit.se",
+      "replace": "        triple[estimate.number] = (\n            standard_error(\n                wide,\n                q_wide,\n                residual_variance(INVARIANCE_COPIES * fit.ssr, nodes * data.y.shape[1], repeated.size),\n            )\n            / fit.se\n        )"
+    },
+    {
+      "label": "I33 the invariance rows drop one of the six gas-fitting estimates (estimate 7) -> test_the_invariance_covers_the_six_estimates_that_fit_a_gas_parameter",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        if not estimate.gas_parameters:\n            continue",
+      "replace": "        if not estimate.gas_parameters or estimate.number == 7:\n            continue"
+    },
+    {
+      "label": "I34 the report command's output differs from the report function's (trailing newline) -> test_the_command_line_writes_exactly_the_report_functions_text",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "sys.stdout.write(report_depth(read_offset_fixtures()))",
+      "replace": "sys.stdout.write(report_depth(read_offset_fixtures()) + \"\\n\")"
+    },
+    {
+      "label": "I35 the heading lacks #55 -> test_the_report_has_the_issue_heading_and_a_pilot_heading_above_the_numbers",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "out(\"### #55: Prague's aerosol amount from its own gas depths, no test (pre-registered)\")",
+      "replace": "out(\"### Prague's aerosol amount from its own gas depths, no test (pre-registered)\")"
+    },
+    {
+      "label": "I36 the report evaluates Prague (calls evaluate, error swallowed unless a test forbids it) -> test_the_command_line_runs_no_prague_evaluation_and_writes_no_file",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    sys.stdout.write(report_depth(read_offset_fixtures()))",
+      "replace": "    try:\n        evaluate()\n    except TypeError:\n        pass\n    sys.stdout.write(report_depth(read_offset_fixtures()))"
+    },
+    {
+      "label": "I37 a printed figure is rounded differently from the criterion (G to three places) -> test_every_printed_pilot_number_reproduces_the_criterions_to_half_a_unit",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "f\"| {fit.estimate.number} | {fit.gas:.4f} | {format_two_se(fit.se)} \"",
+      "replace": "f\"| {fit.estimate.number} | {fit.gas:.3f} | {format_two_se(fit.se)} \""
+    },
+    {
+      "label": "X1 SE's q omits kappa-bar for a_O (uses 1) -> test_every_pilot_quantity_is_the_criterions_to_half_a_unit",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "q[index] = data.kappa_bar",
+      "replace": "q[index] = 1.0"
+    },
+    {
+      "label": "X2 a fit with status 0 is accepted (status <= 0 becomes < 0) -> test_a_fit_that_did_not_converge_is_refused_naming_the_estimate",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if result.status <= 0:",
+      "replace": "    if result.status < 0:"
+    },
+    {
+      "label": "X3 numpy.linalg.inv raising is swallowed into SE = 0 -> test_the_standard_error_is_infinite_where_the_normal_matrix_is_singular",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    except np.linalg.LinAlgError:\n        return math.inf",
+      "replace": "    except np.linalg.LinAlgError:\n        return 0.0"
+    },
+    {
+      "label": "X4 the bar is m instead of 2m -> test_each_sun_takes_its_own_fixtures_numbers",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        return OFFSET_BAR_FACTOR * self.m",
+      "replace": "        return self.m"
+    },
+    {
+      "label": "X5 the amount-scaling check scales nothing -> test_the_amount_scaling_check_scales_the_pilots_aerosol_columns_and_only_those",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "scaled[:, gas:] *= factor",
+      "replace": "scaled[:, gas:] *= 1.0"
+    },
+    {
+      "label": "X6 the invariance rows include estimates 4 and 8 (0/0) -> test_perturbing_the_340_nm_transmittance_changes_no_fit_at_all",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        if not estimate.gas_parameters:\n            continue",
+      "replace": "        if False:\n            continue"
+    },
+    {
+      "label": "X7 the heading lacks no test -> test_the_report_has_the_issue_heading_and_a_pilot_heading_above_the_numbers",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "out(\"### #55: Prague's aerosol amount from its own gas depths, no test (pre-registered)\")",
+      "replace": "out(\"### #55: Prague's aerosol amount from its own gas depths (pre-registered)\")"
+    },
+    {
+      "label": "X8 the pilot table's heading lacks pilot -> test_the_report_has_the_issue_heading_and_a_pilot_heading_above_the_numbers",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "out(\"#### The pilot (not a test): eight gas estimates fitted to the two committed spectra\")",
+      "replace": "out(\"#### The eight gas estimates (not a test) fitted to the two committed spectra\")"
+    },
+    {
+      "label": "X9 the report command writes a file -> test_the_command_line_runs_no_prague_evaluation_and_writes_no_file",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    sys.stdout.write(report_depth(read_offset_fixtures()))",
+      "replace": "    Path(\"/dev/null\").write_text(\"{}\")\n    sys.stdout.write(report_depth(read_offset_fixtures()))"
+    },
+    {
+      "label": "X10 y-bar(V_p) (the result's property) takes the 0.03 spectrum -> test_every_pilot_quantity_is_the_criterions_to_half_a_unit",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        return float(self.data.y_bar[-1])",
+      "replace": "        return float(self.data.y_bar[0])"
+    },
+    {
+      "label": "X11 the printed g_4 sentence prints g_1 -> test_the_printed_sentence_gives_the_papers_excess_and_the_old_one",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "f\"The paper's gas puts the excess at g_4 = {result.excess(paper):.4f}, not the old \"",
+      "replace": "f\"The paper's gas puts the excess at g_4 = {result.excess(result.fits[0]):.4f}, not the old \""
+    },
+    {
+      "label": "X12 the printed g_old in that sentence is the paper's excess -> test_the_printed_sentence_gives_the_papers_excess_and_the_old_one",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "f\"g_old = {result.suns[0].g_old:.4f} (Prague's depth at V_p less its depth at the \"",
+      "replace": "f\"g_old = {result.suns[0].g_paper:.4f} (Prague's depth at V_p less its depth at the \""
+    },
+    {
+      "label": "X13 the prose swaps the two spectra's visibilities -> test_the_prose_labels_the_two_visibilities_with_the_criterions_values",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    low_km, p_km = result.visibilities_km",
+      "replace": "    p_km, low_km = result.visibilities_km"
+    },
+    {
+      "label": "X14 the prose prints v1's 970 hPa as the paper's pressure -> test_the_prose_names_the_papers_pressure_not_v1s",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "at {PAPER_PRESSURE_HPA:.4f} \"",
+      "replace": "at {Atmosphere(0.0).pressure_hpa:.4f} \""
+    },
+    {
+      "label": "X15 the printed 'largest of the eight G' is the smallest -> test_the_largest_of_the_eight_g_is_the_maximum",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    largest = max(fit.gas for fit in result.fits)",
+      "replace": "    largest = min(fit.gas for fit in result.fits)"
+    },
+    {
+      "label": "X16 the condition number is that of J'J (the normal matrix) instead of J -> test_every_pilot_quantity_is_the_criterions_to_half_a_unit",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "condition=float(np.linalg.cond(jac)),",
+      "replace": "condition=float(np.linalg.cond(jac.T @ jac)),"
+    },
+    {
+      "label": "X17 the old estimate subtracts the gas summed (total - (rayleigh + ozone)) -> test_the_old_estimate_is_unchanged_by_the_shared_gas_helper",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    return total - rayleigh - ozone",
+      "replace": "    return total - (rayleigh + ozone)"
+    },
+    {
+      "label": "X18 the old estimate takes the paper's pressure (v1's own estimate moves) -> test_the_old_estimate_is_unchanged_by_the_shared_gas_helper",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    rayleigh, ozone = v1_gas_depth_at_550(Atmosphere(0.0).pressure_hpa)",
+      "replace": "    rayleigh, ozone = v1_gas_depth_at_550(PAPER_PRESSURE_HPA)"
+    },
+    {
+      "label": "X19 the channel-count guard is dropped (any consistent centres are fitted) -> test_centres_that_are_not_the_registered_ones_are_refused_not_fitted",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if all_centres.shape != registered.shape or not np.all(\n        np.abs(all_centres - registered) <= GAS_CENTRE_TOLERANCE_NM\n    ):",
+      "replace": "    if False:"
+    },
+    {
+      "label": "X20 the control raises the first visibility's u instead of its alpha -> test_the_control_that_must_move_is_the_first_visibilitys_alpha_raised_by_0_5",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "raised[gas + 1] += ALPHA_CONTROL_STEP  # the first visibility's alpha",
+      "replace": "raised[gas] += ALPHA_CONTROL_STEP  # the first visibility's alpha"
+    },
+    {
+      "label": "X21 three copies become two -> test_three_copies_of_each_spectrum_divide_every_standard_error_by_root_3",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "INVARIANCE_COPIES = 3",
+      "replace": "INVARIANCE_COPIES = 2"
+    },
+    {
+      "label": "X22 the standard error uses J at the start instead of at the solution -> test_the_model_residuals_and_the_analytic_jacobian_are_the_criterions",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    jac = jacobian(theta)",
+      "replace": "    jac = jacobian(gas_start(estimate, data))"
+    },
+    {
+      "label": "X23 the aerosol floor of the start is 0.01 instead of 0.001 -> test_a_start_whose_aerosol_would_be_under_a_thousandth_is_floored_at_0_001",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "GAS_START_FLOOR = 0.001",
+      "replace": "GAS_START_FLOOR = 0.01"
+    },
+    {
+      "label": "X24 fixtures that disagree on a visibility are accepted -> test_fixtures_that_disagree_on_a_visibility_are_refused",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "and ours[\"visibility_km\"] == theirs[\"visibility_km\"]",
+      "replace": "and True"
+    },
+    {
+      "label": "X25 fixtures with different channel centres are accepted -> test_fixtures_with_different_channel_centres_are_refused",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "if data[\"channel_centres_nm\"] != base[\"channel_centres_nm\"]:",
+      "replace": "if False:"
+    },
+    {
+      "label": "X26 an unclamped clearest match is accepted as the depth at 131.8 km -> test_a_clearest_load_that_is_not_clamped_has_no_depth_at_131_8_km_and_is_refused",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if not matched[\"clamped_at_largest_visibility\"]:",
+      "replace": "    if False:"
+    },
+    {
+      "label": "X27 the three-copy check gives every node the first spectrum's aerosol parameters -> test_three_copies_of_each_spectrum_divide_every_standard_error_by_root_3",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "np.repeat(blocks, INVARIANCE_COPIES, axis=0).ravel()",
+      "replace": "np.tile(blocks[:1], (visibilities * INVARIANCE_COPIES, 1)).ravel()"
+    },
+    {
+      "label": "[control] C1 a docstring word (metres to meters) on the altitude constant -> none (control, must survive)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "A string literal after an assignment is an expression statement: never evaluated, stored or read, so the word changes nothing the tool computes or prints. Inert on every path; the scope is the suite not reading this one docstring's text (test_the_module_docstring_lists_the_new_command reads the module docstring only).",
+      "find": "\"\"\"The observer's height in the fixtures, 0.34 km, in metres.\"\"\"",
+      "replace": "\"\"\"The observer's height in the fixtures, 0.34 km, in meters.\"\"\""
+    }
+  ]
+}
