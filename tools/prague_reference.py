@@ -9,6 +9,8 @@ Usage (fetch needs the network; build needs a C++17 compiler, `c++` on the path)
     uv run python tools/prague_reference.py report           # the results tables, from the fixture
     uv run python tools/prague_reference.py fixture --sun 0  # the sun0.json fixture (#45)
     uv run python tools/prague_reference.py report --sun 0   # rules A and B at sun 0, from fixtures
+    uv run python tools/prague_reference.py fixture --sun -1 # the sun-1.json fixture (#49)
+    uv run python tools/prague_reference.py fixture --sun 1  # the sun1.json fixture (#49)
 
 Everything the model needs lives outside the repository, in `~/.cache/lastlight/prague/`
 (`--cache DIR` overrides it): the reference implementation of Wilkie et al. (2021) and Vevoda
@@ -59,7 +61,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -77,12 +79,14 @@ from lastlight.render.atmosphere import (
 )
 from lastlight.render.colorimetry import spectrum_to_xyz
 from lastlight.render.curve import sky_xyz
-from lastlight.render.v1 import multiple_scattering_xyz
+from lastlight.render.v1 import DOMAIN, default_table, multiple_scattering_xyz
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures" / "prague"
 FIXTURE = FIXTURE_DIR / "sun10.json"
 FIXTURE_SUN0 = FIXTURE_DIR / "sun0.json"
+FIXTURE_SUN_MINUS1 = FIXTURE_DIR / "sun-1.json"
+FIXTURE_SUN_PLUS1 = FIXTURE_DIR / "sun1.json"
 DEFAULT_CACHE = Path.home() / ".cache" / "lastlight" / "prague"
 
 MODEL_URL = "https://github.com/PetrVevoda/pragueskymodel.git"
@@ -138,6 +142,8 @@ class FixtureSpec:
     rel_azimuths_deg: tuple[float, ...]
     path: Path
     command: str
+    sun_must_be_node: bool = False
+    """The sun must be a node of Prague's sun axis and of v1's table (the offset fixtures, #49)."""
 
 
 SUN10 = FixtureSpec(
@@ -155,7 +161,24 @@ SUN0 = FixtureSpec(
     "uv run python tools/prague_reference.py fixture --sun 0",
 )
 """#45's fixture: the same eight views and two loads at sun 0, and relative azimuth 30 as well."""
-FIXTURE_SPECS = {spec.sun_elevation_deg: spec for spec in (SUN10, SUN0)}
+SUN_MINUS1 = FixtureSpec(
+    -1.0,
+    (0.0, 30.0, 90.0, 180.0),
+    FIXTURE_SUN_MINUS1,
+    "uv run python tools/prague_reference.py fixture --sun -1",
+    sun_must_be_node=True,
+)
+SUN_PLUS1 = FixtureSpec(
+    1.0,
+    (0.0, 30.0, 90.0, 180.0),
+    FIXTURE_SUN_PLUS1,
+    "uv run python tools/prague_reference.py fixture --sun 1",
+    sun_must_be_node=True,
+)
+"""#49's fixtures: sun 0 with its neighbours one degree either side. Same views, azimuths and loads
+as `sun0.json`. Both suns are nodes of Prague's sun axis and of v1's table, so neither model
+interpolates in the sun there, as at sun 0; the builder refuses to write either otherwise."""
+FIXTURE_SPECS = {spec.sun_elevation_deg: spec for spec in (SUN10, SUN0, SUN_MINUS1, SUN_PLUS1)}
 
 DRIVER = r"""// lastlight's evaluation driver for the Prague Sky Model reference implementation.
 // This file is lastlight's own code; it only calls the model's public API.
@@ -533,6 +556,26 @@ def check_sun_elevation(sun_elevation_deg: float, axes: Axes) -> None:
         )
 
 
+SUN_NODE_TOLERANCE = 1e-9
+"""A sun is a node of an axis when it is within this many degrees of one of its nodes."""
+
+
+def check_sun_node(sun_elevation_deg: float, nodes: Sequence[float], axis: str) -> None:
+    """Refuse a sun that is not a node of `axis` (to `SUN_NODE_TOLERANCE`), naming the axis.
+
+    At a node a model does not interpolate in the sun, which is what the offset fixtures need: the
+    curvature of the offset across sun -1, 0 and +1 is then not read through an interpolation.
+    """
+    on_a_node = math.isfinite(sun_elevation_deg) and any(
+        abs(float(node) - sun_elevation_deg) <= SUN_NODE_TOLERANCE for node in nodes
+    )
+    if not on_a_node:
+        raise PragueError(
+            f"sun elevation {sun_elevation_deg:g} is not a node of {axis}: the fixture would "
+            "interpolate in the sun there, so it is not made"
+        )
+
+
 def xyz_block(
     channels: np.ndarray,
     start: float,
@@ -646,6 +689,11 @@ def build_fixture(cache: Path, spec: FixtureSpec = SUN10) -> dict:
     sun = spec.sun_elevation_deg
     azimuths = spec.rel_azimuths_deg
     check_sun_elevation(sun, axes)
+    if spec.sun_must_be_node:
+        check_sun_node(sun, axes.elevations_deg, "Prague's sun axis")
+        check_sun_node(
+            sun, default_table().axes["sun_elevation_deg"], "renderer v1's table sun axis"
+        )
     views = view_elevations()
     queries = _queries(views, azimuths)
     low, high = axes.visibilities_km[0], axes.visibilities_km[-1]
@@ -875,7 +923,7 @@ def fixture_spec(sun_elevation_deg: float, output: Path | None = None) -> Fixtur
         )
     if output is None:
         return base
-    return FixtureSpec(base.sun_elevation_deg, base.rel_azimuths_deg, output, base.command)
+    return replace(base, path=output)
 
 
 def _shown(path: Path) -> Path:
@@ -1282,6 +1330,164 @@ def lobe_xyz(
         Atmosphere(aod_550=aod_550), sun_elevation_deg, views, rel_azimuth_deg
     )
     return single + multiple
+
+
+V1_OZONE_DU = float(Atmosphere(0.0).ozone_du)
+"""v1's ozone column, 280 DU: the table interpolates between 250 and 330 and v1 is run at this."""
+
+
+def ozone_xyz(
+    aod_550: float,
+    ozone_du: float,
+    sun_elevation_deg: float,
+    views: Sequence[float],
+    rel_azimuth_deg: float,
+) -> np.ndarray:
+    """XYZ_oz(O), the ozone diagnostic: v0's single scattering at O, plus v1's table continued.
+
+    v0's single scattering is the registered quadrature at `Atmosphere(aod_550, ozone_du)`, which
+    takes any ozone. The multiple scattering continues the table's own rule past its two ozone
+    nodes (the domain's bounds, 250 and 330 DU): per channel, exp((1 - t) ln MS_lo + t ln MS_hi)
+    with t = (O - lo) / (hi - lo), MS_x the table at ozone x. v1 interpolates log-linearly in
+    every axis and the ozone axis has exactly those two nodes, so at O = 280 this is v1's XYZ; at
+    O = 345 it carries v1's own line 15 DU past the last node. v1 itself is never asked for an
+    ozone outside its table.
+    """
+    low, high = DOMAIN["ozone_du"]
+    t = (ozone_du - low) / (high - low)
+    single = sky_xyz(
+        Atmosphere(aod_550=aod_550, ozone_du=ozone_du),
+        sun_elevation_deg,
+        views,
+        rel_azimuth_deg,
+        engine="v0",
+    )
+    at_low = multiple_scattering_xyz(
+        Atmosphere(aod_550=aod_550, ozone_du=low), sun_elevation_deg, views, rel_azimuth_deg
+    )
+    at_high = multiple_scattering_xyz(
+        Atmosphere(aod_550=aod_550, ozone_du=high), sun_elevation_deg, views, rel_azimuth_deg
+    )
+    return single + np.exp((1.0 - t) * np.log(at_low) + t * np.log(at_high))
+
+
+def _over_points(luminance, azimuths: Sequence[float]) -> np.ndarray:
+    """`luminance(azimuth)` (one value per view) at each relative azimuth, joined: the points.
+
+    The points are the given azimuths, all the views: chosen by value, never by position.
+    """
+    chosen = [float(azimuth) for azimuth in azimuths]
+    if not chosen:
+        raise ValueError("at least one relative azimuth is needed to take the points")
+    return np.concatenate([luminance(azimuth) for azimuth in chosen])
+
+
+def ozone_part(
+    aod_550: float, sun_elevation_deg: float, views: Sequence[float], azimuths: Sequence[float]
+) -> float:
+    """Delta_O: the mean over the points of ln(Y_v1 / Y_oz(345)): what goes with Prague's ozone."""
+    v1 = _over_points(
+        lambda az: engine_xyz(aod_550, sun_elevation_deg, views, az, "v1")[:, 1], azimuths
+    )
+    prague_ozone = _over_points(
+        lambda az: ozone_xyz(aod_550, US_STANDARD_OZONE_DU, sun_elevation_deg, views, az)[:, 1],
+        azimuths,
+    )
+    return offset_of(v1, prague_ozone)
+
+
+def _single_scattering_y(
+    aod_550: float,
+    ozone_du: float,
+    sun_elevation_deg: float,
+    views: Sequence[float],
+    azimuths: Sequence[float],
+) -> np.ndarray:
+    return _over_points(
+        lambda az: sky_xyz(
+            Atmosphere(aod_550=aod_550, ozone_du=ozone_du),
+            sun_elevation_deg,
+            views,
+            az,
+            engine="v0",
+        )[:, 1],
+        azimuths,
+    )
+
+
+def ozone_part_single_scattering(
+    aod_550: float, sun_elevation_deg: float, views: Sequence[float], azimuths: Sequence[float]
+) -> float:
+    """Delta_O from v0's single scattering alone: mean ln(Y_v0(280) / Y_v0(345)) over the points."""
+    at_v1 = _single_scattering_y(aod_550, V1_OZONE_DU, sun_elevation_deg, views, azimuths)
+    at_prague = _single_scattering_y(
+        aod_550, US_STANDARD_OZONE_DU, sun_elevation_deg, views, azimuths
+    )
+    return offset_of(at_v1, at_prague)
+
+
+def ozone_line_ratio(
+    aod_550: float, sun_elevation_deg: float, views: Sequence[float], azimuths: Sequence[float]
+) -> float:
+    """The check on the ozone line: v0's ln(Y(280) / Y(345)) over ln(Y(280) / Y(330)), as means.
+
+    v0 takes any ozone exactly. A straight line in ozone, which is what the continuation assumes
+    of the multiple scattering, gives 65 / 50 = 1.3. A check, not a rule.
+    """
+    at_v1 = _single_scattering_y(aod_550, V1_OZONE_DU, sun_elevation_deg, views, azimuths)
+    at_prague = _single_scattering_y(
+        aod_550, US_STANDARD_OZONE_DU, sun_elevation_deg, views, azimuths
+    )
+    at_node = _single_scattering_y(
+        aod_550, DOMAIN["ozone_du"][1], sun_elevation_deg, views, azimuths
+    )
+    return offset_of(at_v1, at_prague) / offset_of(at_v1, at_node)
+
+
+def v1_level(
+    aod_550: float, sun_elevation_deg: float, views: Sequence[float], azimuths: Sequence[float]
+) -> float:
+    """v1's own sky: the mean over the points of ln Y_v1 (no Prague)."""
+    y = _over_points(
+        lambda az: engine_xyz(aod_550, sun_elevation_deg, views, az, "v1")[:, 1], azimuths
+    )
+    return float(np.mean(np.log(y)))
+
+
+def slab_change(
+    aod_550: float, sun_elevation_deg: float, views: Sequence[float], azimuths: Sequence[float]
+) -> float:
+    """Rule 2's stand-in for the slab under Prague's observer: v1 with `aod_550` times SLAB_FACTOR.
+
+    The change it makes to the mean over the points of ln Y_v1. Reported, never ruled.
+    """
+    raised = v1_level(aod_550 * SLAB_FACTOR, sun_elevation_deg, views, azimuths)
+    return raised - v1_level(aod_550, sun_elevation_deg, views, azimuths)
+
+
+def deeper_layer_change(
+    aod_550: float, sun_elevation_deg: float, views: Sequence[float], azimuths: Sequence[float]
+) -> float:
+    """Rule 4's deeper aerosol layer: v0's single scattering at DEEPER_SCALE_HEIGHT_KM against v1's.
+
+    The change it makes to the mean over the points of ln Y (v0 on both sides, scale height 2.0
+    against 1.5 km). Reported, never ruled.
+    """
+
+    def level(scale_height_km: float) -> float:
+        y = _over_points(
+            lambda az: sky_xyz(
+                Atmosphere(aod_550=aod_550, aerosol_scale_height_km=scale_height_km),
+                sun_elevation_deg,
+                views,
+                az,
+                engine="v0",
+            )[:, 1],
+            azimuths,
+        )
+        return float(np.mean(np.log(y)))
+
+    return level(DEEPER_SCALE_HEIGHT_KM) - level(Atmosphere(0.0).aerosol_scale_height_km)
 
 
 def predicted_if_monte_carlo(
@@ -2193,7 +2399,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--sun",
         type=float,
         default=SUN_ELEVATION_DEG,
-        help="fixture, report: the sun elevation in degrees of a registered fixture (10 or 0)",
+        help="fixture, report: the sun elevation in degrees of a registered fixture (10, 0, -1, 1)",
     )
     parser.add_argument(
         "--output", type=Path, default=None, help="fixture: write or check this file instead"
