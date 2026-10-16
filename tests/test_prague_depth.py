@@ -1076,6 +1076,114 @@ def test_the_invariance_numbers_are_the_same_whatever_the_order_of_the_copies() 
     assert ratios[0] == pytest.approx(ratios[1], rel=1e-12)
 
 
+class StandardErrorCall(NamedTuple):
+    """The three arguments one call of `standard_error` received (copies, taken at the call)."""
+
+    jac: np.ndarray
+    q: np.ndarray
+    s2: float
+
+
+def spy_on_standard_error(
+    monkeypatch: pytest.MonkeyPatch, tool: ModuleType
+) -> list[StandardErrorCall]:
+    """Record what the tool hands `standard_error`, and still return its answer."""
+    calls: list[StandardErrorCall] = []
+    real = tool.standard_error
+
+    def spy(jac: np.ndarray, q: np.ndarray, s2: float) -> float:
+        calls.append(StandardErrorCall(np.array(jac, copy=True), np.array(q, copy=True), s2))
+        return real(jac, q, s2)
+
+    monkeypatch.setattr(tool, "standard_error", spy)
+    return calls
+
+
+def expected_q(number: int, parameters: int) -> np.ndarray:
+    """q from the criterion: rho-bar for a_R, kappa-bar for a_O, 0 for each aerosol parameter."""
+    _, ozone_free, rayleigh_free = ESTIMATES[number]
+    q = np.zeros(parameters)
+    index = 0
+    if rayleigh_free:
+        q[index], index = RHO_BAR, index + 1
+    if ozone_free:
+        q[index] = KAPPA_BAR
+    return q
+
+
+@pytest.mark.parametrize("factor", [0.5, 2.0])
+@pytest.mark.parametrize("number", FITTING_GAS)
+def test_the_amount_scaling_check_scales_the_pilots_aerosol_columns_and_only_those(
+    monkeypatch: pytest.MonkeyPatch, number: int, factor: float
+) -> None:
+    """Scaling by a power of two is exact, so a check that scaled nothing would still pass the
+    1e-9 bound on the ratio: this reads the Jacobian the check built, not the ratio it returned."""
+    tool = load_tool()
+    result = pilot()
+    fit = result.fits[number - 1]
+    gas = fit.estimate.gas_parameters
+    assert not np.array_equal(fit.jac[:, gas:], factor * fit.jac[:, gas:])  # scaling can be seen
+    calls = spy_on_standard_error(monkeypatch, tool)
+    tool.invariance_checks([fit], result.data)
+    scaled = [
+        c
+        for c in calls
+        if c.jac.shape == fit.jac.shape
+        and np.array_equal(c.jac[:, :gas], fit.jac[:, :gas])
+        and np.array_equal(c.jac[:, gas:], factor * fit.jac[:, gas:])
+    ]
+    assert len(scaled) == 1, (
+        f"estimate {number}: no standard error was computed from the pilot's Jacobian with its "
+        f"aerosol columns x {factor:g} and its gas columns unchanged "
+        f"({len(calls)} calls, shapes {[c.jac.shape for c in calls]})"
+    )
+    (call,) = scaled
+    assert call.s2 == fit.s2, "the pilot's s2 is held"
+    assert np.array_equal(call.q, expected_q(number, fit.theta.size))
+
+
+@pytest.mark.parametrize("number", FITTING_GAS)
+def test_the_three_copy_check_hands_the_standard_error_a_block_diagonal_sixty_row_jacobian(
+    monkeypatch: pytest.MonkeyPatch, number: int
+) -> None:
+    """Each copy has its own aerosol parameters (the criterion's construction): six nodes' aerosol
+    columns, each copy's rows nonzero in its own columns only, the pilot's gas columns tiled."""
+    tool = load_tool()
+    result = pilot()
+    fit = result.fits[number - 1]
+    gas, width = fit.estimate.gas_parameters, fit.estimate.aerosol_width
+    calls = spy_on_standard_error(monkeypatch, tool)
+    tool.invariance_checks([fit], result.data)
+    sixty = [c for c in calls if c.jac.shape[0] == 60]
+    assert len(sixty) == 1, f"estimate {number}: {[c.jac.shape for c in calls]}"
+    (call,) = sixty
+    jac = call.jac
+    assert jac.shape == (60, gas + 6 * width), (
+        f"estimate {number}: the six-node J is {jac.shape}: each of the six copies needs its own "
+        f"{width} aerosol columns after the {gas} gas columns"
+    )
+    assert np.array_equal(jac[:, :gas], np.tile(fit.jac[:, :gas], (3, 1))), "the gas columns"
+    pilot_blocks = [
+        fit.jac[10 * v : 10 * v + 10, gas + width * v : gas + width * (v + 1)] for v in (0, 1)
+    ]
+    copies_of_each_spectrum = [0, 0]
+    for node in range(6):
+        rows = slice(10 * node, 10 * node + 10)
+        own = slice(gas + width * node, gas + width * (node + 1))
+        elsewhere = np.ones(jac.shape[1], dtype=bool)
+        elsewhere[:gas] = False
+        elsewhere[own] = False
+        assert not jac[rows][:, elsewhere].any(), f"copy {node} has aerosol columns of its own"
+        spectra = [
+            v for v in (0, 1) if np.allclose(jac[rows, own], pilot_blocks[v], rtol=1e-12, atol=0)
+        ]
+        assert len(spectra) == 1, f"copy {node} is a copy of one pilot spectrum's aerosol"
+        copies_of_each_spectrum[spectra[0]] += 1
+    assert copies_of_each_spectrum == [3, 3], "three copies of each pilot spectrum"
+    assert call.s2 == fit.s2, "the pilot's s2 is held"
+    assert np.array_equal(call.q, expected_q(number, jac.shape[1]))
+
+
 # --- the report -----------------------------------------------------------------------------------
 
 
@@ -1194,6 +1302,55 @@ def test_the_report_prints_the_gas_bullets() -> None:
     assert_shown(values["of which the interpolation"], 0.0013, 4, "printed interpolation part")
     assert_shown(values["of which the pressure"], 0.0003, 4, "printed pressure part")
     assert_shown(values["G_paper - G_old"], 0.0016, 4, "printed difference")
+
+
+def test_the_printed_sentence_gives_the_papers_excess_and_the_old_one() -> None:
+    """'The paper's gas puts the excess at g_4 = ..., not the old g_old = ...': 0.0121, 0.0137."""
+    found = re.search(
+        r"The paper's gas puts the excess at g_4 = (\S+), not the old g_old = (\S+) \(Prague's",
+        report_text(),
+    )
+    assert found, "the sentence about g_4 and g_old is not in the report"
+    g_4, g_old = float(found.group(1)), float(found.group(2))
+    result = pilot()
+    assert_shown(g_4, 0.0121, 4, "the criterion's g_4 in the printed sentence")
+    assert_shown(g_old, 0.0137, 4, "the criterion's g_old in the printed sentence")
+    assert_shown(result.excess(result.fits[3]), g_4, 4, "estimate 4's excess, unrounded")
+    assert_shown(result.suns[0].g_old, g_old, 4, "the old excess, unrounded")
+
+
+def test_the_prose_labels_the_two_visibilities_with_the_criterions_values() -> None:
+    """V is the 0.03 load's visibility (123.8187 km) and V_p the 0.1 load's (49.9864 km)."""
+    found = re.search(
+        r"at V = (\S+) km \(the 0\.03 load's visibility\) and V_p = (\S+) km \(the 0\.1 load's\)",
+        report_text(),
+    )
+    assert found, "the sentence naming V and V_p is not in the report"
+    v, v_p = float(found.group(1)), float(found.group(2))
+    assert_shown(v, 123.8187, 4, "the criterion's V in the prose")
+    assert_shown(v_p, 49.9864, 4, "the criterion's V_p in the prose")
+    low, p = pilot().visibilities_km
+    assert_shown(low, v, 4, "the 0.03 load's visibility, unrounded")
+    assert_shown(p, v_p, 4, "V_p, unrounded")
+
+
+def test_the_prose_names_the_papers_pressure_not_v1s() -> None:
+    found = re.search(r"R_paper = (\S+) at (\S+) hPa \(the U\.S\. Standard pressure", report_text())
+    assert found, "the sentence naming the paper's Rayleigh and pressure is not in the report"
+    r_paper, hpa = float(found.group(1)), float(found.group(2))
+    assert_shown(hpa, 973.0664, 4, "the criterion's pressure in the prose")
+    assert_shown(P_PAPER, hpa, 4, "the paper's pressure, unrounded")
+    assert_shown(R_PAPER, r_paper, 5, "the paper's Rayleigh depth, unrounded")
+    assert hpa != Atmosphere(0.0).pressure_hpa  # 970 is v1's, the old estimate's
+
+
+def test_the_largest_of_the_eight_g_is_the_maximum() -> None:
+    found = re.search(r"The largest of the eight G is (\S+)\.", report_text())
+    assert found, "the sentence about the largest G is not in the report"
+    largest = float(found.group(1))
+    assert_shown(max(row[0] for row in SHOWN.values()), largest, 4, "the criterion's largest G")
+    assert_shown(max(f.gas for f in pilot().fits), largest, 4, "the largest G, unrounded")
+    assert not shown(min(f.gas for f in pilot().fits), largest, 4)
 
 
 def test_the_report_prints_the_crossings_at_each_sun() -> None:
