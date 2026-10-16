@@ -1,0 +1,382 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "env",
+    "PYTHONDONTWRITEBYTECODE=1",
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-x",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_prague_offset.py",
+    "tests/test_prague_sun0.py",
+    "tests/test_prague_control.py",
+    "-m",
+    "not network"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_prague_offset.py",
+    "tests/test_prague_sun0.py",
+    "tests/test_prague_control.py",
+    "-m",
+    "not network"
+  ],
+  "mutants": [
+    {
+      "label": "1 carries holds at exactly half the offset: >= against L/2 becomes >",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "removed >= CARRIES_SHARE * offset else CONTRIBUTES",
+      "replace": "removed > CARRIES_SHARE * offset else CONTRIBUTES"
+    },
+    {
+      "label": "2 carries also needs the removed part above the bar: drop the bar requirement from carries",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if removed > bar:\n        return CARRIES if removed >= CARRIES_SHARE * offset else CONTRIBUTES\n    return NOT_THIS\n",
+      "replace": "    if removed >= CARRIES_SHARE * offset:\n        return CARRIES\n    if removed > bar:\n        return CONTRIBUTES\n    return NOT_THIS\n"
+    },
+    {
+      "label": "3 contributes needs the removed part strictly above the bar: > becomes >=",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if removed > bar:\n        return CARRIES if",
+      "replace": "    if removed >= bar:\n        return CARRIES if"
+    },
+    {
+      "label": "4 rule branch 1 needs every condition to carry: all becomes any",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if all(verdict == CARRIES for verdict in seen):",
+      "replace": "    if any(verdict == CARRIES for verdict in seen):"
+    },
+    {
+      "label": "5 rule branch 3 needs every condition to be not this: all becomes any",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if all(verdict == NOT_THIS for verdict in seen):",
+      "replace": "    if any(verdict == NOT_THIS for verdict in seen):"
+    },
+    {
+      "label": "6 rule branch numbers: contributes and not this swap 2 and 3",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        return CONTRIBUTES, 2\n    if all(verdict == NOT_THIS for verdict in seen):\n        return NOT_THIS, 3\n",
+      "replace": "        return CONTRIBUTES, 3\n    if all(verdict == NOT_THIS for verdict in seen):\n        return NOT_THIS, 2\n"
+    },
+    {
+      "label": "7 the reading noise is an absolute value: drop abs",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    return abs(offset_inv - offset)",
+      "replace": "    return offset_inv - offset"
+    },
+    {
+      "label": "8 rule 1's bar is 2m: the bar factor 2.0 becomes 1.0",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "OFFSET_BAR_FACTOR = 2.0",
+      "replace": "OFFSET_BAR_FACTOR = 1.0"
+    },
+    {
+      "label": "9 rule 3's bar has a floor of 0.05: the floor becomes 0.0",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "FIT_FLOOR = 0.05",
+      "replace": "FIT_FLOOR = 0.0"
+    },
+    {
+      "label": "10 rule 3's m_F is the largest m over sun -1, 0, +1: it takes only m at sun 0",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    return max(OFFSET_BAR_FACTOR * max(m_minus, m_zero, m_plus), FIT_FLOOR)",
+      "replace": "    return max(OFFSET_BAR_FACTOR * m_zero, FIT_FLOOR)"
+    },
+    {
+      "label": "11 rule 3 calls a fault only if both readings show it: min(kappa, kappa_A) becomes kappa",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "min(kappa, kappa_a), at[1].L",
+      "replace": "kappa, at[1].L"
+    },
+    {
+      "label": "12 the bend is L(0) - (L(-1) + L(+1)) / 2: the neighbours' sum is divided by 3",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    return at_zero - (at_minus + at_plus) / 2.0",
+      "replace": "    return at_zero - (at_minus + at_plus) / 3.0"
+    },
+    {
+      "label": "13 the ozone engine equals v1 at 280 DU: t's denominator (hi - lo) becomes (hi - lo + 20)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    t = (ozone_du - low) / (high - low)",
+      "replace": "    t = (ozone_du - low) / (high - low + 20)"
+    },
+    {
+      "label": "14 Delta_O uses Prague's 345 DU: the column used for Delta_O in the report path becomes 330",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    ozone = model(lambda az: ozone_xyz(aod, US_STANDARD_OZONE_DU, sun, views, az)[:, 1])",
+      "replace": "    ozone = model(lambda az: ozone_xyz(aod, 330.0, sun, views, az)[:, 1])"
+    },
+    {
+      "label": "15 P is relative azimuths 90 and 180: P becomes azimuths 0 and 90",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "OFFSET_AZIMUTHS_DEG = (90.0, 180.0)",
+      "replace": "OFFSET_AZIMUTHS_DEG = (0.0, 90.0)"
+    },
+    {
+      "label": "16 the refusal fires at L <= 0: <= 0 becomes < 0",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if not (math.isfinite(offset) and offset > 0.0):",
+      "replace": "    if not (math.isfinite(offset) and offset >= 0.0):"
+    },
+    {
+      "label": "17 the new fixtures' suns must be nodes of both axes: the node check is removed",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if spec.sun_must_be_node:",
+      "replace": "    if False:"
+    },
+    {
+      "label": "18 Delta_H = mean ln(Y_alt0 / Y_primary): the ratio is flipped",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        return self.L - self.L_A",
+      "replace": "        return self.L_A - self.L"
+    },
+    {
+      "label": "19 Delta_M's range uses a depth error of 0.01: 0.01 becomes 0.005",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "DEPTH_ERROR = 0.01",
+      "replace": "DEPTH_ERROR = 0.005"
+    },
+    {
+      "label": "20 [control] carries compares with half the offset: CARRIES_SHARE * offset becomes offset / 2.0",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "expect": "survived",
+      "why": "For every finite float x, 0.5 * x and x / 2.0 are both the correctly rounded value of the real number x / 2 (the exponent drops by one, and an underflow to a subnormal rounds the same exact quotient to nearest-even either way), so the two comparisons never differ; this holds for any offset condition_verdict is given, and fails only if the interpreter stopped following IEEE-754 binary64 or CARRIES_SHARE stopped being 0.5 (a test pins it at 0.5).",
+      "find": "removed >= CARRIES_SHARE * offset else CONTRIBUTES",
+      "replace": "removed >= offset / 2.0 else CONTRIBUTES"
+    },
+    {
+      "label": "X1 the node check on Prague's sun axis alone is removed",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        check_sun_node(sun, axes.elevations_deg, \"Prague's sun axis\")\n",
+      "replace": "        pass\n"
+    },
+    {
+      "label": "X2 the node check on v1's table sun axis alone is removed",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        check_sun_node(\n            sun, default_table().axes[\"sun_elevation_deg\"], \"renderer v1's table sun axis\"\n        )\n",
+      "replace": "        pass\n"
+    },
+    {
+      "label": "X3 the node tolerance 1e-9 is loosened to 1e-6",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "SUN_NODE_TOLERANCE = 1e-9",
+      "replace": "SUN_NODE_TOLERANCE = 1e-6"
+    },
+    {
+      "label": "X4 rule 1's bar alone is m, not 2m (the shared constant stays 2.0)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "p.delta_o, p.L, OFFSET_BAR_FACTOR * p.m)",
+      "replace": "p.delta_o, p.L, p.m)"
+    },
+    {
+      "label": "X5 rule 3's bar alone drops the factor 2 on m_F (the shared constant stays 2.0)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    return max(OFFSET_BAR_FACTOR * max(m_minus, m_zero, m_plus), FIT_FLOOR)",
+      "replace": "    return max(max(m_minus, m_zero, m_plus), FIT_FLOOR)"
+    },
+    {
+      "label": "X6 rule 3's offset is L(+1) read at the wrong index: at[1].L becomes at[2].L",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "min(kappa, kappa_a), at[1].L",
+      "replace": "min(kappa, kappa_a), at[2].L"
+    },
+    {
+      "label": "X7 kappa_A is computed from L, not L_A",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        kappa_a = bend(*(p.L_A for p in at))",
+      "replace": "        kappa_a = bend(*(p.L for p in at))"
+    },
+    {
+      "label": "X8 the refusal skips sun 0 in rule 3's loop (sun -1 and +1 only)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        for sun in (minus, 0.0, plus):\n            c = conditions[sun, aod]",
+      "replace": "        for sun in (minus, plus):\n            c = conditions[sun, aod]"
+    },
+    {
+      "label": "X9 the refusal skips L_A (the altitude-0 reading)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "            refuse_no_excess(c.p.L_A, label, OFFSET_ALTITUDE_READING)",
+      "replace": "            pass"
+    },
+    {
+      "label": "X10 the pilot verdict beside rule 1 is taken over all four pilot conditions, not the two at sun 0",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "c.verdict for (sun, _), c in pilot.items() if sun == 0.0",
+      "replace": "c.verdict for (sun, _), c in pilot.items()"
+    },
+    {
+      "label": "X11 rule 1's offset is L_A, not L",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "p.delta_o, p.L, OFFSET_BAR_FACTOR * p.m)",
+      "replace": "p.delta_o, p.L_A, OFFSET_BAR_FACTOR * p.m)"
+    },
+    {
+      "label": "X12 the standalone ozone_part helper uses 330 DU (the report path does not call it)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        lambda az: ozone_xyz(aod_550, US_STANDARD_OZONE_DU, sun_elevation_deg, views, az)[:, 1],",
+      "replace": "        lambda az: ozone_xyz(aod_550, 330.0, sun_elevation_deg, views, az)[:, 1],"
+    },
+    {
+      "label": "X13 report at sun +10 is written with a trailing newline added (byte identity with main)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        sys.stdout.write(report(data))",
+      "replace": "        sys.stdout.write(report(data) + \"\\n\")"
+    },
+    {
+      "label": "X14 report --sun 0 is written with a trailing newline added (byte identity with main)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        sys.stdout.write(report_sun0(json.loads(SUN10.path.read_text()), data))",
+      "replace": "        sys.stdout.write(report_sun0(json.loads(SUN10.path.read_text()), data) + \"\\n\")"
+    },
+    {
+      "label": "X15 the deeper layer's scale height 2.0 becomes 2.5",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "DEEPER_SCALE_HEIGHT_KM = 2.0",
+      "replace": "DEEPER_SCALE_HEIGHT_KM = 2.5"
+    },
+    {
+      "label": "X16 the slab factor drops the observer height: exp(0.34 / 1.5) becomes exp(0.34 / 3.0)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "SLAB_FACTOR = math.exp(OBSERVER_ALTITUDE_KM / Atmosphere(0.0).aerosol_scale_height_km)",
+      "replace": "SLAB_FACTOR = math.exp(OBSERVER_ALTITUDE_KM / 3.0)"
+    },
+    {
+      "label": "X17 the reading noise m reads the binned reading, not the inverse-visibility one",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "L_inv=offset_of(v1, prague(OFFSET_INVERSE_READING)),",
+      "replace": "L_inv=offset_of(v1, prague(OFFSET_BINNED_READING)),"
+    },
+    {
+      "label": "X18 rule 4's range is computed with the sign of the error flipped",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    return delta_m * (1.0 - error / gap), delta_m * (1.0 + error / gap)",
+      "replace": "    return delta_m * (1.0 + error / gap), delta_m * (1.0 - error / gap)"
+    },
+    {
+      "label": "X19 branch 1 number: carries returns branch 4",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        return CARRIES, 1",
+      "replace": "        return CARRIES, 4"
+    },
+    {
+      "label": "X20 branch 2 number: contributes returns branch 3 (branch 3 left alone)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        return CONTRIBUTES, 2",
+      "replace": "        return CONTRIBUTES, 3"
+    },
+    {
+      "label": "X21 branch 3 number: not this returns branch 2 (branch 2 left alone)",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        return NOT_THIS, 3",
+      "replace": "        return NOT_THIS, 2"
+    },
+    {
+      "label": "X22 branch 4 number: cannot tell returns branch 3",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        return NOT_THIS, 3\n    return CANNOT_TELL, 4\n",
+      "replace": "        return NOT_THIS, 3\n    return CANNOT_TELL, 3\n"
+    },
+    {
+      "label": "X23 Delta_O from v0 alone is flipped in the report path (ln(Y_v0(345) / Y_v0(280)))",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "delta_o_v0=offset_of(at_v1, at_prague),",
+      "replace": "delta_o_v0=offset_of(at_prague, at_v1),"
+    },
+    {
+      "label": "X24 the ozone line check in the report path divides by the 250 DU node, not 330",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        single(DOMAIN[\"ozone_du\"][1]),",
+      "replace": "        single(DOMAIN[\"ozone_du\"][0]),"
+    },
+    {
+      "label": "X25 the ozone engine hard-codes the table's ozone nodes 250 and 330 instead of reading DOMAIN",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    low, high = DOMAIN[\"ozone_du\"]\n    t = (ozone_du - low) / (high - low)",
+      "replace": "    low, high = 250.0, 330.0\n    t = (ozone_du - low) / (high - low)"
+    },
+    {
+      "label": "X26 the verdict compares values rounded to 4 decimals, not the unrounded ones",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    return RuleCondition(label, removed, offset, bar, condition_verdict(removed, offset, bar))",
+      "replace": "    return RuleCondition(\n        label,\n        removed,\n        offset,\n        bar,\n        condition_verdict(round(removed, 4), round(offset, 4), round(bar, 4)),\n    )"
+    },
+    {
+      "label": "X27 the sun -1 spec drops its node requirement",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    \"uv run python tools/prague_reference.py fixture --sun -1\",\n    sun_must_be_node=True,\n",
+      "replace": "    \"uv run python tools/prague_reference.py fixture --sun -1\",\n"
+    },
+    {
+      "label": "X28 the sun +1 spec drops its node requirement",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    \"uv run python tools/prague_reference.py fixture --sun 1\",\n    sun_must_be_node=True,\n",
+      "replace": "    \"uv run python tools/prague_reference.py fixture --sun 1\",\n"
+    },
+    {
+      "label": "X29 moving a registered fixture with --output rebuilds the spec without its node requirement",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    return replace(base, path=output)",
+      "replace": "    return FixtureSpec(base.sun_elevation_deg, base.rel_azimuths_deg, output, base.command)"
+    }
+  ]
+}
