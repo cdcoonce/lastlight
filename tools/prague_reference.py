@@ -9,6 +9,9 @@ Usage (fetch needs the network; build needs a C++17 compiler, `c++` on the path)
     uv run python tools/prague_reference.py report           # the results tables, from the fixture
     uv run python tools/prague_reference.py fixture --sun 0  # the sun0.json fixture (#45)
     uv run python tools/prague_reference.py report --sun 0   # rules A and B at sun 0, from fixtures
+    uv run python tools/prague_reference.py fixture --sun -1 # the sun-1.json fixture (#49)
+    uv run python tools/prague_reference.py fixture --sun 1  # the sun1.json fixture (#49)
+    uv run python tools/prague_reference.py report --offset  # the offset rules, from all four
 
 Everything the model needs lives outside the repository, in `~/.cache/lastlight/prague/`
 (`--cache DIR` overrides it): the reference implementation of Wilkie et al. (2021) and Vevoda
@@ -58,8 +61,8 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -77,12 +80,14 @@ from lastlight.render.atmosphere import (
 )
 from lastlight.render.colorimetry import spectrum_to_xyz
 from lastlight.render.curve import sky_xyz
-from lastlight.render.v1 import multiple_scattering_xyz
+from lastlight.render.v1 import DOMAIN, default_table, multiple_scattering_xyz
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures" / "prague"
 FIXTURE = FIXTURE_DIR / "sun10.json"
 FIXTURE_SUN0 = FIXTURE_DIR / "sun0.json"
+FIXTURE_SUN_MINUS1 = FIXTURE_DIR / "sun-1.json"
+FIXTURE_SUN_PLUS1 = FIXTURE_DIR / "sun1.json"
 DEFAULT_CACHE = Path.home() / ".cache" / "lastlight" / "prague"
 
 MODEL_URL = "https://github.com/PetrVevoda/pragueskymodel.git"
@@ -138,6 +143,8 @@ class FixtureSpec:
     rel_azimuths_deg: tuple[float, ...]
     path: Path
     command: str
+    sun_must_be_node: bool = False
+    """The sun must be a node of Prague's sun axis and of v1's table (the offset fixtures, #49)."""
 
 
 SUN10 = FixtureSpec(
@@ -155,7 +162,24 @@ SUN0 = FixtureSpec(
     "uv run python tools/prague_reference.py fixture --sun 0",
 )
 """#45's fixture: the same eight views and two loads at sun 0, and relative azimuth 30 as well."""
-FIXTURE_SPECS = {spec.sun_elevation_deg: spec for spec in (SUN10, SUN0)}
+SUN_MINUS1 = FixtureSpec(
+    -1.0,
+    (0.0, 30.0, 90.0, 180.0),
+    FIXTURE_SUN_MINUS1,
+    "uv run python tools/prague_reference.py fixture --sun -1",
+    sun_must_be_node=True,
+)
+SUN_PLUS1 = FixtureSpec(
+    1.0,
+    (0.0, 30.0, 90.0, 180.0),
+    FIXTURE_SUN_PLUS1,
+    "uv run python tools/prague_reference.py fixture --sun 1",
+    sun_must_be_node=True,
+)
+"""#49's fixtures: sun 0 with its neighbours one degree either side. Same views, azimuths and loads
+as `sun0.json`. Both suns are nodes of Prague's sun axis and of v1's table, so neither model
+interpolates in the sun there, as at sun 0; the builder refuses to write either otherwise."""
+FIXTURE_SPECS = {spec.sun_elevation_deg: spec for spec in (SUN10, SUN0, SUN_MINUS1, SUN_PLUS1)}
 
 DRIVER = r"""// lastlight's evaluation driver for the Prague Sky Model reference implementation.
 // This file is lastlight's own code; it only calls the model's public API.
@@ -533,6 +557,26 @@ def check_sun_elevation(sun_elevation_deg: float, axes: Axes) -> None:
         )
 
 
+SUN_NODE_TOLERANCE = 1e-9
+"""A sun is a node of an axis when it is within this many degrees of one of its nodes."""
+
+
+def check_sun_node(sun_elevation_deg: float, nodes: Sequence[float], axis: str) -> None:
+    """Refuse a sun that is not a node of `axis` (to `SUN_NODE_TOLERANCE`), naming the axis.
+
+    At a node a model does not interpolate in the sun, which is what the offset fixtures need: the
+    curvature of the offset across sun -1, 0 and +1 is then not read through an interpolation.
+    """
+    on_a_node = math.isfinite(sun_elevation_deg) and any(
+        abs(float(node) - sun_elevation_deg) <= SUN_NODE_TOLERANCE for node in nodes
+    )
+    if not on_a_node:
+        raise PragueError(
+            f"sun elevation {sun_elevation_deg!r} is not a node of {axis}: the fixture would "
+            "interpolate in the sun there, so it is not made"
+        )
+
+
 def xyz_block(
     channels: np.ndarray,
     start: float,
@@ -646,6 +690,11 @@ def build_fixture(cache: Path, spec: FixtureSpec = SUN10) -> dict:
     sun = spec.sun_elevation_deg
     azimuths = spec.rel_azimuths_deg
     check_sun_elevation(sun, axes)
+    if spec.sun_must_be_node:
+        check_sun_node(sun, axes.elevations_deg, "Prague's sun axis")
+        check_sun_node(
+            sun, default_table().axes["sun_elevation_deg"], "renderer v1's table sun axis"
+        )
     views = view_elevations()
     queries = _queries(views, azimuths)
     low, high = axes.visibilities_km[0], axes.visibilities_km[-1]
@@ -870,12 +919,12 @@ def fixture_spec(sun_elevation_deg: float, output: Path | None = None) -> Fixtur
     if base is None:
         known = ", ".join(f"{sun:g}" for sun in FIXTURE_SPECS)
         raise PragueError(
-            f"no fixture is registered for sun elevation {sun_elevation_deg:g} "
+            f"no fixture is registered for sun elevation {sun_elevation_deg!r} "
             f"(registered: {known})"
         )
     if output is None:
         return base
-    return FixtureSpec(base.sun_elevation_deg, base.rel_azimuths_deg, output, base.command)
+    return replace(base, path=output)
 
 
 def _shown(path: Path) -> Path:
@@ -1119,6 +1168,126 @@ def port_bound_rms(total_y: Sequence[float], multiple_y: Sequence[float]) -> flo
     return float(np.sqrt(np.mean(port_bound(total_y, multiple_y) ** 2)))
 
 
+# --- the offset decision rules (#49) --------------------------------------------------------------
+#
+# Registered in `docs/renderer/prague-offset-criterion.md`, in the commit that landed that file and
+# before Prague had been evaluated at sun -1 or +1. The functions below take numbers and return the
+# verdict and the branch that produced it; they read no fixture and run no model. A disagreement
+# between that file and this code is a defect in this code.
+
+OFFSET_AZIMUTHS_DEG = (90.0, 180.0)
+"""The offset's point set P: these relative azimuths, all eight views: 16 points."""
+OFFSET_RULED_SUNS_DEG = (-1.0, 1.0)
+"""The suns at which Prague was first evaluated for rules 1 and 3; sun 0 and +10 are the pilot."""
+OFFSET_BAR_FACTOR = 2.0
+"""The noise bar is this many times the reading noise m (rule 1: 2m; rule 3: 2 m_F)."""
+CARRIES_SHARE = 0.5
+"""A candidate carries a condition when the part it removes is at least this share of the offset."""
+FIT_FLOOR = 0.05
+"""Rule 3's floor under its noise bar: smooth causes bend the offset by up to about 0.042."""
+DEPTH_ERROR = 0.01
+"""Rule 4's reported range: the aerosol depth estimate off by this much either way (no rule)."""
+SLAB_FACTOR = math.exp(OBSERVER_ALTITUDE_KM / Atmosphere(0.0).aerosol_scale_height_km)
+"""Rule 2's stand-in for the 340 m slab of air and aerosol under Prague's observer (no rule)."""
+DEEPER_SCALE_HEIGHT_KM = 2.0
+"""Rule 4's reported growth: v0's aerosol layer deepened from v1's 1.5 km to this (no rule)."""
+
+CARRIES = "carries"
+CONTRIBUTES = "contributes"
+NOT_THIS = "not this"
+CONDITION_VERDICTS = (CARRIES, CONTRIBUTES, NOT_THIS)
+"""What one condition can say. A rule adds `CANNOT_TELL` (above) when its conditions disagree."""
+
+
+def condition_verdict(removed: float, offset: float, bar: float) -> str:
+    """One condition's verdict for a removed part, an offset and a bar, in the registered order.
+
+    1. carries, if removed >= offset / 2 and removed > bar;
+    2. else contributes, if removed > bar;
+    3. else not this: removed <= bar, which includes every removed <= 0 (the candidate moves the
+       models apart, or does not move them by more than the noise).
+
+    The bar is strict (a part exactly at the bar is not over it) and the half is inclusive (a
+    part exactly half the offset carries). `0.5 * offset` is exact.
+    """
+    if removed > bar:
+        return CARRIES if removed >= CARRIES_SHARE * offset else CONTRIBUTES
+    return NOT_THIS
+
+
+def rule_verdict(verdicts: Iterable[str]) -> tuple[str, int]:
+    """A rule's verdict over its conditions and the branch (1 to 4) that produced it, in order.
+
+    1. every condition carries: carries.
+    2. else every condition carries or contributes: contributes.
+    3. else every condition is not this: not this.
+    4. else: cannot tell, because the conditions disagree.
+
+    It does not depend on the order of the conditions, and refuses an empty sequence.
+    """
+    seen = list(verdicts)
+    if not seen:
+        raise ValueError("a rule's verdict needs at least one condition: no conditions were given")
+    for verdict in seen:
+        if verdict not in CONDITION_VERDICTS:
+            allowed = ", ".join(CONDITION_VERDICTS)
+            raise ValueError(f"{verdict!r} is not a condition's verdict (one of: {allowed})")
+    if all(verdict == CARRIES for verdict in seen):
+        return CARRIES, 1
+    if all(verdict in (CARRIES, CONTRIBUTES) for verdict in seen):
+        return CONTRIBUTES, 2
+    if all(verdict == NOT_THIS for verdict in seen):
+        return NOT_THIS, 3
+    return CANNOT_TELL, 4
+
+
+def bend(at_minus: float, at_zero: float, at_plus: float) -> float:
+    """How far the centre sits above the straight line through its neighbours: kappa.
+
+    kappa = at_zero - (at_minus + at_plus) / 2, the neighbours 1 degree of sun either side.
+    """
+    return at_zero - (at_minus + at_plus) / 2.0
+
+
+def reading_noise(offset: float, offset_inv: float) -> float:
+    """m: how far the offset moves when Prague's aerosol is interpolated in 1 / V instead of V."""
+    return abs(offset_inv - offset)
+
+
+def fit_bar(m_minus: float, m_zero: float, m_plus: float) -> float:
+    """Rule 3's bar: max(2 m_F, 0.05), m_F the largest reading noise at sun -1, 0 and +1."""
+    return max(OFFSET_BAR_FACTOR * max(m_minus, m_zero, m_plus), FIT_FLOOR)
+
+
+def offset_of(model_y: Sequence[float], prague_y: Sequence[float]) -> float:
+    """The offset L over the given points: the mean of ln(model / Prague), in luminance.
+
+    Signed, and a mean (logarithms of opposite sign cancel). Refuses a luminance that is not
+    finite and above 0, and a different number of points on the two sides.
+    """
+    model = _vector("model luminance", model_y)
+    prague = _vector("Prague luminance", prague_y)
+    if model.size != prague.size or model.size == 0:
+        raise ValueError("model and Prague luminance need the same, non-zero number of points")
+    for name, values in (("model", model), ("Prague", prague)):
+        if not (np.isfinite(values).all() and (values > 0.0).all()):
+            raise ValueError(f"{name} luminance must be finite and above 0 at every point")
+    return float(np.mean(np.log(model / prague)))
+
+
+def refuse_no_excess(offset: float, condition: str, reading: str) -> None:
+    """Refuse an offset that is not above 0: there is no excess to attribute.
+
+    No condition is ever dropped, so the report is not written at all: the error names the
+    condition and the reading.
+    """
+    if not (math.isfinite(offset) and offset > 0.0):
+        raise PragueError(
+            f"the offset L under reading {reading} at {condition} is {offset!r}, not above 0: "
+            "there is no excess to attribute, so the report is not written"
+        )
+
+
 # --- the engines: v1 as it is, and the lobe diagnostic --------------------------------------------
 #
 # The sun elevation is always an argument. The fixture being evaluated says what it is; the module's
@@ -1162,6 +1331,164 @@ def lobe_xyz(
         Atmosphere(aod_550=aod_550), sun_elevation_deg, views, rel_azimuth_deg
     )
     return single + multiple
+
+
+V1_OZONE_DU = float(Atmosphere(0.0).ozone_du)
+"""v1's ozone column, 280 DU: the table interpolates between 250 and 330 and v1 is run at this."""
+
+
+def ozone_xyz(
+    aod_550: float,
+    ozone_du: float,
+    sun_elevation_deg: float,
+    views: Sequence[float],
+    rel_azimuth_deg: float,
+) -> np.ndarray:
+    """XYZ_oz(O), the ozone diagnostic: v0's single scattering at O, plus v1's table continued.
+
+    v0's single scattering is the registered quadrature at `Atmosphere(aod_550, ozone_du)`, which
+    takes any ozone. The multiple scattering continues the table's own rule past its two ozone
+    nodes (the domain's bounds, 250 and 330 DU): per channel, exp((1 - t) ln MS_lo + t ln MS_hi)
+    with t = (O - lo) / (hi - lo), MS_x the table at ozone x. v1 interpolates log-linearly in
+    every axis and the ozone axis has exactly those two nodes, so at O = 280 this is v1's XYZ; at
+    O = 345 it carries v1's own line 15 DU past the last node. v1 itself is never asked for an
+    ozone outside its table.
+    """
+    low, high = DOMAIN["ozone_du"]
+    t = (ozone_du - low) / (high - low)
+    single = sky_xyz(
+        Atmosphere(aod_550=aod_550, ozone_du=ozone_du),
+        sun_elevation_deg,
+        views,
+        rel_azimuth_deg,
+        engine="v0",
+    )
+    at_low = multiple_scattering_xyz(
+        Atmosphere(aod_550=aod_550, ozone_du=low), sun_elevation_deg, views, rel_azimuth_deg
+    )
+    at_high = multiple_scattering_xyz(
+        Atmosphere(aod_550=aod_550, ozone_du=high), sun_elevation_deg, views, rel_azimuth_deg
+    )
+    return single + np.exp((1.0 - t) * np.log(at_low) + t * np.log(at_high))
+
+
+def _over_points(luminance, azimuths: Sequence[float]) -> np.ndarray:
+    """`luminance(azimuth)` (one value per view) at each relative azimuth, joined: the points.
+
+    The points are the given azimuths, all the views: chosen by value, never by position.
+    """
+    chosen = [float(azimuth) for azimuth in azimuths]
+    if not chosen:
+        raise ValueError("at least one relative azimuth is needed to take the points")
+    return np.concatenate([luminance(azimuth) for azimuth in chosen])
+
+
+def ozone_part(
+    aod_550: float, sun_elevation_deg: float, views: Sequence[float], azimuths: Sequence[float]
+) -> float:
+    """Delta_O: the mean over the points of ln(Y_v1 / Y_oz(345)): what goes with Prague's ozone."""
+    v1 = _over_points(
+        lambda az: engine_xyz(aod_550, sun_elevation_deg, views, az, "v1")[:, 1], azimuths
+    )
+    prague_ozone = _over_points(
+        lambda az: ozone_xyz(aod_550, US_STANDARD_OZONE_DU, sun_elevation_deg, views, az)[:, 1],
+        azimuths,
+    )
+    return offset_of(v1, prague_ozone)
+
+
+def _single_scattering_y(
+    aod_550: float,
+    ozone_du: float,
+    sun_elevation_deg: float,
+    views: Sequence[float],
+    azimuths: Sequence[float],
+) -> np.ndarray:
+    return _over_points(
+        lambda az: sky_xyz(
+            Atmosphere(aod_550=aod_550, ozone_du=ozone_du),
+            sun_elevation_deg,
+            views,
+            az,
+            engine="v0",
+        )[:, 1],
+        azimuths,
+    )
+
+
+def ozone_part_single_scattering(
+    aod_550: float, sun_elevation_deg: float, views: Sequence[float], azimuths: Sequence[float]
+) -> float:
+    """Delta_O from v0's single scattering alone: mean ln(Y_v0(280) / Y_v0(345)) over the points."""
+    at_v1 = _single_scattering_y(aod_550, V1_OZONE_DU, sun_elevation_deg, views, azimuths)
+    at_prague = _single_scattering_y(
+        aod_550, US_STANDARD_OZONE_DU, sun_elevation_deg, views, azimuths
+    )
+    return offset_of(at_v1, at_prague)
+
+
+def ozone_line_ratio(
+    aod_550: float, sun_elevation_deg: float, views: Sequence[float], azimuths: Sequence[float]
+) -> float:
+    """The check on the ozone line: v0's ln(Y(280) / Y(345)) over ln(Y(280) / Y(330)), as means.
+
+    v0 takes any ozone exactly. A straight line in ozone, which is what the continuation assumes
+    of the multiple scattering, gives 65 / 50 = 1.3. A check, not a rule.
+    """
+    at_v1 = _single_scattering_y(aod_550, V1_OZONE_DU, sun_elevation_deg, views, azimuths)
+    at_prague = _single_scattering_y(
+        aod_550, US_STANDARD_OZONE_DU, sun_elevation_deg, views, azimuths
+    )
+    at_node = _single_scattering_y(
+        aod_550, DOMAIN["ozone_du"][1], sun_elevation_deg, views, azimuths
+    )
+    return offset_of(at_v1, at_prague) / offset_of(at_v1, at_node)
+
+
+def v1_level(
+    aod_550: float, sun_elevation_deg: float, views: Sequence[float], azimuths: Sequence[float]
+) -> float:
+    """v1's own sky: the mean over the points of ln Y_v1 (no Prague)."""
+    y = _over_points(
+        lambda az: engine_xyz(aod_550, sun_elevation_deg, views, az, "v1")[:, 1], azimuths
+    )
+    return float(np.mean(np.log(y)))
+
+
+def slab_change(
+    aod_550: float, sun_elevation_deg: float, views: Sequence[float], azimuths: Sequence[float]
+) -> float:
+    """Rule 2's stand-in for the slab under Prague's observer: v1 with `aod_550` times SLAB_FACTOR.
+
+    The change it makes to the mean over the points of ln Y_v1. Reported, never ruled.
+    """
+    raised = v1_level(aod_550 * SLAB_FACTOR, sun_elevation_deg, views, azimuths)
+    return raised - v1_level(aod_550, sun_elevation_deg, views, azimuths)
+
+
+def deeper_layer_change(
+    aod_550: float, sun_elevation_deg: float, views: Sequence[float], azimuths: Sequence[float]
+) -> float:
+    """Rule 4's deeper aerosol layer: v0's single scattering at DEEPER_SCALE_HEIGHT_KM against v1's.
+
+    The change it makes to the mean over the points of ln Y (v0 on both sides, scale height 2.0
+    against 1.5 km). Reported, never ruled.
+    """
+
+    def level(scale_height_km: float) -> float:
+        y = _over_points(
+            lambda az: sky_xyz(
+                Atmosphere(aod_550=aod_550, aerosol_scale_height_km=scale_height_km),
+                sun_elevation_deg,
+                views,
+                az,
+                engine="v0",
+            )[:, 1],
+            azimuths,
+        )
+        return float(np.mean(np.log(y)))
+
+    return level(DEEPER_SCALE_HEIGHT_KM) - level(Atmosphere(0.0).aerosol_scale_height_km)
 
 
 def predicted_if_monte_carlo(
@@ -2052,7 +2379,850 @@ def report_sun0(pilot: dict, sun0: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+# --- the offset rules, run on the fixtures (#49) --------------------------------------------------
+#
+# `evaluate_offset` takes the four fixtures keyed by their sun elevation (+10, 0, -1, +1) and runs
+# the registered rules on them; `report_offset` prints every quantity the criterion lists. Rules 2
+# and 4 are registered as "no test": they have evidence printed, and no verdict.
+
+OFFSET_LOADS = AEROSOL_OPTICAL_DEPTHS
+OFFSET_FIXTURE_SUNS_DEG = (10.0, 0.0, -1.0, 1.0)
+"""The four fixtures in the order the report lists them: the pilot suns, then the ruled ones."""
+OFFSET_PILOT_SUNS_DEG = (10.0, 0.0)
+OFFSET_PRIMARY_READING = "xyz"
+OFFSET_ALTITUDE_READING = "xyz_altitude_0"
+OFFSET_INVERSE_READING = "xyz_inverse_visibility"
+OFFSET_BINNED_READING = "xyz_binned"
+OFFSET_MATCHED_READING = "xyz_matched_aerosol_depth"
+OFFSET_READINGS = (
+    OFFSET_PRIMARY_READING,
+    OFFSET_ALTITUDE_READING,
+    OFFSET_INVERSE_READING,
+    OFFSET_BINNED_READING,
+    OFFSET_MATCHED_READING,
+)
+OFFSET_POINT_TOLERANCE = 1e-9
+"""An azimuth of the fixture is the rule set's when it is within this many degrees of it."""
+OZONE_COLUMN_TOLERANCE_DU = 1e-9
+
+
+def _sun_label(sun: float) -> str:
+    return "0" if sun == 0 else f"{sun:+g}"
+
+
+def _condition_label(sun: float, aod: float) -> str:
+    return f"(sun {_sun_label(sun)}, {aod:g})"
+
+
+def _refusal_label(sun: float, aod: float) -> str:
+    return f"sun {_sun_label(sun)}, aod_550 {aod:g}"
+
+
+def _ratio(numerator: float, denominator: float, spec: str) -> str:
+    """`numerator / denominator` formatted by `spec`, or "n/a" where the denominator is 0."""
+    return "n/a" if denominator == 0 else format(numerator / denominator, spec)
+
+
+def _is_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _require(condition: bool, where: str, what: str) -> None:
+    if not condition:
+        raise PragueError(f"the fixture {where} is malformed: {what}")
+
+
+def _check_block(block: object, views: int, where: str) -> None:
+    _require(isinstance(block, list) and len(block) == views, where, f"not a list of {views} rows")
+    for row in block:  # type: ignore[union-attr]
+        _require(
+            isinstance(row, list) and len(row) == 3 and all(_is_number(x) for x in row),
+            where,
+            "a row is not three finite numbers",
+        )
+        _require(row[1] > 0.0, where, "a luminance is not above 0")
+
+
+def check_offset_fixture(data: object, sun: float) -> None:
+    """Refuse a fixture whose fields are not what the rules read: it is another tool's output.
+
+    Types, finiteness, shapes and the sun are checked before any value is used. A bool is not a
+    number; a luminance must be finite and above 0.
+    """
+    where = f"for sun {_sun_label(sun)}"
+    _require(isinstance(data, dict), where, "not a JSON object")
+    assert isinstance(data, dict)
+    _require(data.get("format") == "lastlight-prague-control", where, "wrong format")
+    recorded = data.get("sun_elevation_deg")
+    _require(_is_number(recorded), where, "sun_elevation_deg is not a finite number")
+    _require(
+        abs(recorded - sun) <= OFFSET_POINT_TOLERANCE,  # type: ignore[operator]
+        where,
+        f"it records sun {recorded!r}, not {sun:g}",
+    )
+    views = data.get("view_elevations_deg")
+    _require(
+        isinstance(views, list) and bool(views) and all(_is_number(v) for v in views),
+        where,
+        "view_elevations_deg is not a list of finite numbers",
+    )
+    azimuths = data.get("rel_azimuths_deg")
+    _require(
+        isinstance(azimuths, list) and bool(azimuths) and all(_is_number(a) for a in azimuths),
+        where,
+        "rel_azimuths_deg is not a list of finite numbers",
+    )
+    keys = [f"{a:g}" for a in azimuths]  # type: ignore[union-attr]
+    _require(len(set(keys)) == len(keys), where, "a relative azimuth is listed twice")
+    for wanted in OFFSET_AZIMUTHS_DEG:
+        _require(
+            any(abs(a - wanted) <= OFFSET_POINT_TOLERANCE for a in azimuths),  # type: ignore[union-attr]
+            where,
+            f"it lacks relative azimuth {wanted:g}",
+        )
+    centres = data.get("channel_centres_nm")
+    _require(
+        isinstance(centres, list) and len(centres) >= 2 and all(_is_number(c) for c in centres),
+        where,
+        "channel_centres_nm is not a list of finite numbers",
+    )
+    atmospheres = data.get("atmospheres")
+    _require(isinstance(atmospheres, dict), where, "atmospheres is not an object")
+    for aod in OFFSET_LOADS:
+        name = f"{where}, aod_550 {aod:g}"
+        entry = atmospheres.get(f"{aod:g}")  # type: ignore[union-attr]
+        _require(isinstance(entry, dict), name, "that atmosphere is missing")
+        _require(entry.get("aod_550") == aod, name, "aod_550 does not match its key")
+        diagnostics = entry.get("diagnostics")
+        _require(isinstance(diagnostics, dict), name, "diagnostics is not an object")
+        for reading in OFFSET_READINGS:
+            block = (
+                entry.get("xyz") if reading == OFFSET_PRIMARY_READING else diagnostics.get(reading)  # type: ignore[union-attr]
+            )
+            _require(isinstance(block, dict), f"{name}, reading {reading}", "not an object")
+            for key in keys:
+                _check_block(
+                    block.get(key), len(views), f"{name}, reading {reading}, azimuth {key}"
+                )  # type: ignore[arg-type]
+        transmittance = diagnostics.get("zenith_transmittance")
+        _require(
+            isinstance(transmittance, list)
+            and len(transmittance) == len(centres)  # type: ignore[arg-type]
+            and all(_is_number(t) and t > 0.0 for t in transmittance),
+            name,
+            "zenith_transmittance is not a list of finite numbers above 0, one per channel",
+        )
+        matched = diagnostics.get("matched_aerosol_depth")
+        _require(
+            isinstance(matched, dict)
+            and _is_number(matched.get("prague_aerosol_depth"))
+            and isinstance(matched.get("clamped_at_largest_visibility"), bool),
+            name,
+            "matched_aerosol_depth lacks a finite depth or a clamp flag",
+        )
+
+
+@dataclass(frozen=True)
+class OffsetPoint:
+    """The offset's quantities at one condition over one set of points (all views of each azimuth).
+
+    L is the offset under the primary reading; L_A under `xyz_altitude_0`, L_inv under
+    `xyz_inverse_visibility`, L_binned under `xyz_binned`, L_matched under the matched depth.
+    `delta_o` is the part that goes with Prague's ozone, `delta_o_v0` the same from v0's single
+    scattering alone, `line` the ozone line check.
+    """
+
+    points: int
+    L: float
+    L_A: float
+    L_inv: float
+    L_binned: float
+    L_matched: float
+    delta_o: float
+    delta_o_v0: float
+    line: float
+
+    @property
+    def m(self) -> float:
+        """The reading noise at this condition."""
+        return reading_noise(self.L, self.L_inv)
+
+    @property
+    def delta_h(self) -> float:
+        """Delta_H = L - L_A: the mean of ln(Y_Prague,alt0 / Y_Prague)."""
+        return self.L - self.L_A
+
+
+def _chosen_azimuths(data: dict, wanted: Sequence[float]) -> list[float]:
+    """The fixture's own azimuth values that are in `wanted`, chosen by value, in fixture order."""
+    chosen = [
+        float(a)
+        for a in data["rel_azimuths_deg"]
+        if any(abs(a - w) <= OFFSET_POINT_TOLERANCE for w in wanted)
+    ]
+    if len(chosen) != len(wanted):
+        raise PragueError(f"the fixture lacks some of the relative azimuths {list(wanted)}")
+    return chosen
+
+
+def offset_point(data: dict, aod: float, azimuths: Sequence[float]) -> OffsetPoint:
+    """The offset's quantities over the given azimuths of a fixture, all views of each.
+
+    v1, the ozone engine and v0 are evaluated at the fixture's sun and views; Prague's luminance
+    comes from the fixture. The points are chosen by azimuth value, never by position.
+    """
+    sun = float(data["sun_elevation_deg"])
+    views = [float(v) for v in data["view_elevations_deg"]]
+    entry = data["atmospheres"][f"{aod:g}"]
+    chosen = _chosen_azimuths(data, azimuths)
+
+    def model(luminance) -> np.ndarray:
+        return np.concatenate([luminance(az) for az in chosen])
+
+    def prague(reading: str) -> np.ndarray:
+        return np.concatenate([_fixture_xyz(entry, az, reading)[:, 1] for az in chosen])
+
+    def single(ozone_du: float) -> np.ndarray:
+        return model(
+            lambda az: sky_xyz(
+                Atmosphere(aod_550=aod, ozone_du=ozone_du), sun, views, az, engine="v0"
+            )[:, 1]
+        )
+
+    v1 = model(lambda az: engine_xyz(aod, sun, views, az, "v1")[:, 1])
+    ozone = model(lambda az: ozone_xyz(aod, US_STANDARD_OZONE_DU, sun, views, az)[:, 1])
+    at_v1, at_prague, at_node = (
+        single(V1_OZONE_DU),
+        single(US_STANDARD_OZONE_DU),
+        single(DOMAIN["ozone_du"][1]),
+    )
+    return OffsetPoint(
+        points=v1.size,
+        L=offset_of(v1, prague(OFFSET_PRIMARY_READING)),
+        L_A=offset_of(v1, prague(OFFSET_ALTITUDE_READING)),
+        L_inv=offset_of(v1, prague(OFFSET_INVERSE_READING)),
+        L_binned=offset_of(v1, prague(OFFSET_BINNED_READING)),
+        L_matched=offset_of(v1, prague(OFFSET_MATCHED_READING)),
+        delta_o=offset_of(v1, ozone),
+        delta_o_v0=offset_of(at_v1, at_prague),
+        line=offset_of(at_v1, at_prague) / offset_of(at_v1, at_node),
+    )
+
+
+def depth_range(delta_m: float, gap: float, error: float = DEPTH_ERROR) -> tuple[float, float]:
+    """Rule 4's reported range of Delta_M if the depth estimate is `error` off either way.
+
+    Delta_M x (1 - error / g) to Delta_M x (1 + error / g), g being Prague's aerosol depth at the
+    primary reading minus its depth at the match. Printed as computed, even where the lower end is
+    negative; the match is linear in the depth, which is the criterion's scaling.
+    """
+    return delta_m * (1.0 - error / gap), delta_m * (1.0 + error / gap)
+
+
+@dataclass(frozen=True)
+class OffsetCondition:
+    """Everything the report prints for one condition (sun, load) of one fixture."""
+
+    sun: float
+    aod: float
+    p: OffsetPoint  # over the rule set P
+    by_azimuth: dict[float, OffsetPoint]  # each fixture azimuth alone, in the fixture's order
+    slab: float  # rule 2's stand-in: the change it makes to the mean over P of ln Y_v1
+    deeper: float  # rule 4's deeper layer: the change it makes to the mean over P of ln Y
+    depth: float  # Prague's aerosol depth at the primary reading
+    depth_matched: float  # and at the match
+    clamped: bool  # the match is clamped at Prague's clearest visibility
+
+    @property
+    def label(self) -> str:
+        return _condition_label(self.sun, self.aod)
+
+    @property
+    def delta_m(self) -> float | None:
+        """L - L_matched, or None where the match is clamped (no range then)."""
+        return None if self.clamped else self.p.L - self.p.L_matched
+
+
+def offset_condition(data: dict, aod: float) -> OffsetCondition:
+    sun = float(data["sun_elevation_deg"])
+    views = [float(v) for v in data["view_elevations_deg"]]
+    entry = data["atmospheres"][f"{aod:g}"]
+    p_azimuths = _chosen_azimuths(data, OFFSET_AZIMUTHS_DEG)
+    matched = entry["diagnostics"]["matched_aerosol_depth"]
+    return OffsetCondition(
+        sun=sun,
+        aod=aod,
+        p=offset_point(data, aod, OFFSET_AZIMUTHS_DEG),
+        by_azimuth={
+            float(az): offset_point(data, aod, (float(az),)) for az in data["rel_azimuths_deg"]
+        },
+        slab=slab_change(aod, sun, views, p_azimuths),
+        deeper=deeper_layer_change(aod, sun, views, p_azimuths),
+        depth=aerosol_depth_from_transmittance(
+            entry["diagnostics"]["zenith_transmittance"], data["channel_centres_nm"]
+        ),
+        depth_matched=float(matched["prague_aerosol_depth"]),
+        clamped=bool(matched["clamped_at_largest_visibility"]),
+    )
+
+
+@dataclass(frozen=True)
+class RuleCondition:
+    """One ruled condition: the removed part, the offset and the bar, and the verdict they give."""
+
+    label: str
+    removed: float
+    offset: float
+    bar: float
+    verdict: str
+
+    @property
+    def share(self) -> float:
+        """The removed part as a share of the offset (not a number where the offset is 0)."""
+        return self.removed / self.offset if self.offset else math.nan
+
+
+def _rule_condition(label: str, removed: float, offset: float, bar: float) -> RuleCondition:
+    return RuleCondition(label, removed, offset, bar, condition_verdict(removed, offset, bar))
+
+
+@dataclass(frozen=True)
+class Rule1:
+    """Rule 1 (ozone): its four ruled conditions, its verdict and branch, and the pilot's beside."""
+
+    conditions: dict[tuple[float, float], RuleCondition]  # keyed (sun, aod_550): -1 then +1
+    verdict: str
+    branch: int
+    pilot: dict[tuple[float, float], RuleCondition]  # the pilot's four: sun +10 then sun 0
+    pilot_verdict: str  # rule 1's rule-level verdict over the two sun-0 conditions (not a ruling)
+    pilot_branch: int
+
+
+@dataclass(frozen=True)
+class FitCondition:
+    """Rule 3 at one load: the three offsets, kappa under both readings, and the verdict."""
+
+    aod: float
+    L: tuple[float, float, float]  # primary reading, at sun -1, 0, +1
+    L_A: tuple[float, float, float]  # altitude 0
+    m: tuple[float, float, float]
+    kappa: float
+    kappa_a: float
+    condition: RuleCondition  # removed = min(kappa, kappa_a), offset = L(0), bar = fit_bar(m)
+
+
+@dataclass(frozen=True)
+class Rule3:
+    """Rule 3 (Prague's fit near the horizon sun): its two loads, its verdict and branch."""
+
+    conditions: tuple[FitCondition, ...]
+    verdict: str
+    branch: int
+
+
+@dataclass(frozen=True)
+class Kappas:
+    """The bends reported beside rule 3 at one load (never ruled)."""
+
+    delta_o: float  # kappa for Delta_O
+    L: float
+    L_A: float
+    left: float  # kappa for L - Delta_O
+    left_a: float  # kappa_A for L_A - Delta_O
+
+
+@dataclass(frozen=True)
+class OffsetResult:
+    """The four fixtures run under the registered rules."""
+
+    conditions: dict[tuple[float, float], OffsetCondition]  # keyed (sun, aod_550)
+    rule1: Rule1
+    rule3: Rule3
+    kappas: dict[float, Kappas]  # keyed by aod_550
+    v1_bend: dict[float, float]  # v1's own sky: sun 0 above the line through -1 and +1
+    ozone_columns: dict[tuple[float, float], float | None]  # pilot: Prague's column at the bar
+    left_after_ozone: dict[tuple[float, float], float]  # rule 1's ruled conditions
+
+
+def _ozone_column_at_bar(data: dict, aod: float, bar: float) -> float | None:
+    """The Prague ozone column at which Delta_O falls to `bar`, if one lies in v1's 280 to 345.
+
+    Delta_O grows with the column from 0 at v1's own. Below the returned column the condition
+    would read "not this". None where the bar is not over 0 or is already above Delta_O(345).
+    """
+    from scipy.optimize import brentq
+
+    sun = float(data["sun_elevation_deg"])
+    views = [float(v) for v in data["view_elevations_deg"]]
+    p_azimuths = _chosen_azimuths(data, OFFSET_AZIMUTHS_DEG)
+
+    def delta(ozone_du: float) -> float:
+        v1 = np.concatenate([engine_xyz(aod, sun, views, az, "v1")[:, 1] for az in p_azimuths])
+        engine = np.concatenate(
+            [ozone_xyz(aod, ozone_du, sun, views, az)[:, 1] for az in p_azimuths]
+        )
+        return offset_of(v1, engine)
+
+    top = delta(US_STANDARD_OZONE_DU)
+    if not 0.0 < bar < top:
+        return None
+    return float(
+        brentq(
+            lambda column: delta(column) - bar,
+            V1_OZONE_DU,
+            US_STANDARD_OZONE_DU,
+            xtol=OZONE_COLUMN_TOLERANCE_DU,
+        )
+    )
+
+
+def evaluate_offset(fixtures: dict[float, dict]) -> OffsetResult:
+    """The four rules' machinery on the four fixtures: rule 1, rule 3 and what is reported.
+
+    `fixtures` maps the sun elevation (+10, 0, -1, +1) to the fixture's contents. Every field is
+    checked before it is read. If an offset a rule uses is not above 0 the rules are not run:
+    `PragueError` names the condition and reading, and nothing is reported.
+    """
+    if set(fixtures) != set(OFFSET_FIXTURE_SUNS_DEG):
+        raise PragueError(f"the offset rules need the fixtures at suns {OFFSET_FIXTURE_SUNS_DEG}")
+    for sun in OFFSET_FIXTURE_SUNS_DEG:
+        check_offset_fixture(fixtures[sun], sun)
+    conditions = {
+        (sun, aod): offset_condition(fixtures[sun], aod)
+        for sun in OFFSET_FIXTURE_SUNS_DEG
+        for aod in OFFSET_LOADS
+    }
+
+    # No excess to attribute: refuse before any verdict. Rule 1 uses L at the four ruled
+    # conditions; rule 3 uses L and L_A at sun -1, 0 and +1, under both loads.
+    minus, plus = OFFSET_RULED_SUNS_DEG
+    for aod in OFFSET_LOADS:
+        for sun in (minus, plus):
+            refuse_no_excess(
+                conditions[sun, aod].p.L, _refusal_label(sun, aod), OFFSET_PRIMARY_READING
+            )
+        for sun in (minus, 0.0, plus):
+            c = conditions[sun, aod]
+            label = _refusal_label(sun, aod)
+            refuse_no_excess(c.p.L, label, OFFSET_PRIMARY_READING)
+            refuse_no_excess(c.p.L_A, label, OFFSET_ALTITUDE_READING)
+
+    def ozone_condition(sun: float, aod: float) -> RuleCondition:
+        p = conditions[sun, aod].p
+        return _rule_condition(_condition_label(sun, aod), p.delta_o, p.L, OFFSET_BAR_FACTOR * p.m)
+
+    ruled = {
+        (sun, aod): ozone_condition(sun, aod)
+        for sun in OFFSET_RULED_SUNS_DEG
+        for aod in OFFSET_LOADS
+    }
+    verdict, branch = rule_verdict(c.verdict for c in ruled.values())
+    pilot = {
+        (sun, aod): ozone_condition(sun, aod)
+        for sun in OFFSET_PILOT_SUNS_DEG
+        for aod in OFFSET_LOADS
+    }
+    pilot_verdict, pilot_branch = rule_verdict(
+        c.verdict for (sun, _), c in pilot.items() if sun == 0.0
+    )
+    rule1 = Rule1(ruled, verdict, branch, pilot, pilot_verdict, pilot_branch)
+
+    fits = []
+    for aod in OFFSET_LOADS:
+        at = [conditions[sun, aod].p for sun in (minus, 0.0, plus)]
+        kappa = bend(*(p.L for p in at))
+        kappa_a = bend(*(p.L_A for p in at))
+        m = (at[0].m, at[1].m, at[2].m)
+        fits.append(
+            FitCondition(
+                aod=aod,
+                L=(at[0].L, at[1].L, at[2].L),
+                L_A=(at[0].L_A, at[1].L_A, at[2].L_A),
+                m=m,
+                kappa=kappa,
+                kappa_a=kappa_a,
+                condition=_rule_condition(
+                    f"a = {aod:g}", min(kappa, kappa_a), at[1].L, fit_bar(*m)
+                ),
+            )
+        )
+    verdict3, branch3 = rule_verdict(f.condition.verdict for f in fits)
+    rule3 = Rule3(tuple(fits), verdict3, branch3)
+
+    kappas = {}
+    v1_bend = {}
+    for aod in OFFSET_LOADS:
+        at = [conditions[sun, aod].p for sun in (minus, 0.0, plus)]
+        kappas[aod] = Kappas(
+            delta_o=bend(*(p.delta_o for p in at)),
+            L=bend(*(p.L for p in at)),
+            L_A=bend(*(p.L_A for p in at)),
+            left=bend(*(p.L - p.delta_o for p in at)),
+            left_a=bend(*(p.L_A - p.delta_o for p in at)),
+        )
+        levels = [
+            v1_level(
+                aod,
+                sun,
+                [float(v) for v in fixtures[sun]["view_elevations_deg"]],
+                _chosen_azimuths(fixtures[sun], OFFSET_AZIMUTHS_DEG),
+            )
+            for sun in (minus, 0.0, plus)
+        ]
+        v1_bend[aod] = bend(*levels)
+
+    columns = {
+        key: _ozone_column_at_bar(fixtures[key[0]], key[1], c.bar) for key, c in pilot.items()
+    }
+    left = {
+        key: c.offset - c.removed if c.verdict in (CARRIES, CONTRIBUTES) else c.offset
+        for key, c in ruled.items()
+    }
+    return OffsetResult(conditions, rule1, rule3, kappas, v1_bend, columns, left)
+
+
+def _fixture_file(sun: float) -> str:
+    return FIXTURE_SPECS[sun].path.name
+
+
+def _pilot_section(result: OffsetResult) -> list[str]:
+    lines: list[str] = []
+    out = lines.append
+    c = result.conditions
+    pilot = result.rule1.pilot
+    biggest_m = max(c[key].p.m for key in pilot)
+    out(
+        "### The pilot (not a test): the numbers the criterion printed before it landed, recomputed"
+    )
+    out("")
+    out(
+        "The criterion computed these from the two earlier fixtures (sun +10 and sun 0), v0 and "
+        "v1 before any ruled number existed. The rules rule only on Prague at sun -1 and +1. "
+        "Over the 16 points P (relative azimuths 90 and 180, all eight views): L is the mean of "
+        "ln(Y_v1 / Y_Prague), m = |L_inv - L| the reading noise, 2m the bar, Delta_O the part "
+        f"that goes when v1 is given Prague's ozone ({US_STANDARD_OZONE_DU:g} DU instead of "
+        f"{V1_OZONE_DU:g}), Delta_H = L - L_A the part that goes with Prague's observer on its "
+        "ground."
+    )
+    out("")
+    out("| condition | L | m | 2m | Delta_O, ozone | Delta_H, altitude 0 |")
+    out("| --- | --- | --- | --- | --- | --- |")
+    for key in pilot:
+        p = c[key].p
+        out(
+            f"| {c[key].label} | {p.L:.4f} | {p.m:.4f} | {OFFSET_BAR_FACTOR * p.m:.4f} "
+            f"| {p.delta_o:.4f} | {p.delta_h:+.4f} |"
+        )
+    out("")
+    out("Ozone at the pilot conditions, under the per-condition verdict (not a ruling):")
+    out("")
+    out(
+        "| condition | share Delta_O / L | margin over the bar, Delta_O / 2m | verdict "
+        '| a Prague column under (DU) turns it into "not this" | left after ozone, L - Delta_O |'
+    )
+    out("| --- | --- | --- | --- | --- | --- |")
+    for key, rc in pilot.items():
+        p = c[key].p
+        column = result.ozone_columns[key]
+        shown_column = "none in 280 to 345" if column is None else f"{column:.2f}"
+        out(
+            f"| {rc.label} | {_ratio(rc.removed, rc.offset, '.3f')} "
+            f"| {_ratio(rc.removed, rc.bar, '.2f')} | {rc.verdict} "
+            f"| {shown_column} | {p.L - p.delta_o:.4f} |"
+        )
+    out("")
+    out("Rule 1's bars at the ruled conditions, from v0 and v1 alone (no Prague):")
+    out("")
+    out(
+        "| condition | Delta_O | carries only if L is at most 2 Delta_O "
+        '| "not this" only if m is at least Delta_O / 2 '
+        f"| that m in multiples of the pilot's largest m ({biggest_m:.4f}) |"
+    )
+    out("| --- | --- | --- | --- | --- |")
+    for rc in result.rule1.conditions.values():
+        out(
+            f"| {rc.label} | {rc.removed:.4f} | {2 * rc.removed:.4f} | {rc.removed / 2:.4f} "
+            f"| {_ratio(rc.removed / 2, biggest_m, '.1f')} |"
+        )
+    out("")
+    bends = "; ".join(f"{aod:g}: {result.v1_bend[aod]:+.4f}" for aod in OFFSET_LOADS)
+    out(
+        "v1's own sky across sun -1, 0 and +1: the mean over P of ln Y_v1 at sun 0, minus the "
+        f"mean of its values at -1 and +1 ({bends})."
+    )
+    out("")
+    return lines
+
+
+def _rule1_section(result: OffsetResult) -> list[str]:
+    lines: list[str] = []
+    out = lines.append
+    rule = result.rule1
+    out("### Rule 1: ozone (v1 280 DU, Prague about 345 DU)")
+    out("")
+    out(
+        "Removed part Delta_O, offset L, bar 2m, at the four ruled conditions (sun -1 and +1, "
+        "both loads). The share is Delta_O / L."
+    )
+    out("")
+    out("| condition | Delta_O | L | bar 2m | share Delta_O / L | verdict |")
+    out("| --- | --- | --- | --- | --- | --- |")
+    for rc in rule.conditions.values():
+        out(
+            f"| {rc.label} | {rc.removed:.4f} | {rc.offset:.4f} | {rc.bar:.4f} "
+            f"| {_ratio(rc.removed, rc.offset, '.3f')} | {rc.verdict} |"
+        )
+    out("")
+    out(f"Verdict: **{rule.verdict}** (branch {rule.branch}).")
+    out("")
+    out(
+        "Beside it, the pilot's two sun-0 conditions under the same rule-level verdict (not a "
+        f"ruling): {rule.pilot_verdict} (branch {rule.pilot_branch})."
+    )
+    out("")
+    return lines
+
+
+def _rule2_section(result: OffsetResult) -> list[str]:
+    lines: list[str] = []
+    out = lines.append
+    out("### Rule 2: no test")
+    out("")
+    out(
+        "The criterion registers no rule for the observer's altitude and the ground, and says "
+        "why: the only reading that moves Prague's observer, `xyz_altitude_0`, also puts it under "
+        "340 m more air and aerosol, so Delta_H = L - L_A measures that slab, not the ground. The "
+        f"slab's stand-in is v1 with its `aod_550` raised by exp(0.34 / 1.5) = {SLAB_FACTOR:.4f}. "
+        "At every condition of all four fixtures, over P:"
+    )
+    out("")
+    out(
+        "| condition | Delta_H | slab stand-in, change in the mean of ln Y_v1 "
+        "| Delta_H minus stand-in |"
+    )
+    out("| --- | --- | --- | --- |")
+    for c in result.conditions.values():
+        out(f"| {c.label} | {c.p.delta_h:+.4f} | {c.slab:+.4f} | {c.p.delta_h - c.slab:+.4f} |")
+    out("")
+    out(
+        "No verdict is printed. What would tell: Prague with its ground raised to the observer, "
+        "which the model cannot do; or a reference with v1's own geometry (libRadtran, run "
+        "offline; GPL, never vendored or imported)."
+    )
+    out("")
+    return lines
+
+
+def _rule3_section(result: OffsetResult) -> list[str]:
+    lines: list[str] = []
+    out = lines.append
+    rule = result.rule3
+    out("### Rule 3: Prague's fit near the horizon sun")
+    out("")
+    out(
+        "kappa(a) = L(0, a) - (L(-1, a) + L(+1, a)) / 2, and kappa_A(a) the same from L_A: how "
+        "far sun 0's offset sits above the straight line through its two neighbours. Removed "
+        "part min(kappa, kappa_A), offset L(0, a), bar max(2 m_F, 0.05) with m_F the largest of "
+        'm(-1, a), m(0, a) and m(+1, a). A negative kappa reads "not this".'
+    )
+    out("")
+    out("| `aod_550` | L(-1) | L(0) | L(+1) | L_A(-1) | L_A(0) | L_A(+1) | m(-1) | m(0) | m(+1) |")
+    out("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+    for f in rule.conditions:
+        out(f"| {f.aod:g} | " + " | ".join(f"{x:.4f}" for x in (*f.L, *f.L_A, *f.m)) + " |")
+    out("")
+    out(
+        "| `aod_550` | kappa | kappa_A | removed, min(kappa, kappa_A) | offset L(0) "
+        "| bar max(2 m_F, 0.05) | share removed / L(0) | verdict |"
+    )
+    out("| --- | --- | --- | --- | --- | --- | --- | --- |")
+    for f in rule.conditions:
+        rc = f.condition
+        out(
+            f"| {f.aod:g} | {f.kappa:+.4f} | {f.kappa_a:+.4f} | {rc.removed:+.4f} "
+            f"| {rc.offset:.4f} | {rc.bar:.4f} | {_ratio(rc.removed, rc.offset, '+.3f')} "
+            f"| {rc.verdict} |"
+        )
+    out("")
+    out(f"Verdict: **{rule.verdict}** (branch {rule.branch}).")
+    if rule.verdict in (CARRIES, CONTRIBUTES):
+        out("")
+        out(
+            "This says one of the two models has a kink at its sun-0 node, most likely Prague's "
+            "(v1's single scattering is exact in the sun), but kappa cannot tell which: v1's "
+            "table has a node at 0 too."
+        )
+    out("")
+    return lines
+
+
+def _rule4_section(result: OffsetResult) -> list[str]:
+    lines: list[str] = []
+    out = lines.append
+    out("### Rule 4: no test")
+    out("")
+    out(
+        "The criterion registers no rule for the aerosol's amount and profile, and says why: the "
+        "depth estimate's error is nearly the whole gap, and the load response does not separate "
+        "the aerosol from the air. At every condition of all four fixtures, over P:"
+    )
+    out("")
+    out(
+        "| condition | Delta_M = L - L_matched | Prague's depth, primary | Prague's depth at the "
+        f"match | Delta_M if the depth estimate is {DEPTH_ERROR:g} off either way |"
+    )
+    out("| --- | --- | --- | --- | --- |")
+    for c in result.conditions.values():
+        if c.clamped:
+            out(
+                f"| {c.label} | clamped | {c.depth:.4f} | {c.depth_matched:.4f} "
+                "| clamped (no range) |"
+            )
+            continue
+        gap = c.depth - c.depth_matched
+        delta_m = c.delta_m
+        assert delta_m is not None
+        if gap > 0.0:
+            low, high = depth_range(delta_m, gap)
+            span = f"{low:.4f} to {high:.4f}"
+        else:
+            span = "n/a (Prague's depth is not above the match)"
+        out(f"| {c.label} | {delta_m:+.4f} | {c.depth:.4f} | {c.depth_matched:.4f} | {span} |")
+    out("")
+    out(
+        f"The load step L(s, 0.1) - L(s, 0.03) at each sun, and the change a deeper aerosol layer "
+        f"(scale height {Atmosphere(0.0).aerosol_scale_height_km:g} to "
+        f"{DEEPER_SCALE_HEIGHT_KM:g} km, v0's single scattering) makes to the mean over P of ln Y "
+        "at both loads, with its ratio between them:"
+    )
+    out("")
+    low, high = OFFSET_LOADS
+    out(
+        f"| sun | load step L({high:g}) - L({low:g}) | deeper layer at {low:g} "
+        f"| deeper layer at {high:g} | ratio {high:g} to {low:g} |"
+    )
+    out("| --- | --- | --- | --- | --- |")
+    for sun in OFFSET_FIXTURE_SUNS_DEG:
+        a, b = result.conditions[sun, low], result.conditions[sun, high]
+        ratio = f"{b.deeper / a.deeper:.2f}" if a.deeper != 0.0 else "n/a"
+        out(
+            f"| {_sun_label(sun)} | {b.p.L - a.p.L:+.4f} | {a.deeper:+.4f} | {b.deeper:+.4f} "
+            f"| {ratio} |"
+        )
+    out("")
+    out(
+        "No verdict is printed. What would tell: the depth estimate's error, derived from "
+        "Prague's own gas depths (fitted from its spectral transmittance), which may make the "
+        "amount testable; and a reference with v1's own aerosol (libRadtran, run offline)."
+    )
+    out("")
+    return lines
+
+
+def _reported_section(result: OffsetResult) -> list[str]:
+    lines: list[str] = []
+    out = lines.append
+    out("### Reported, never ruled")
+    out("")
+    out(
+        "For every condition of the four fixtures, over P and at each relative azimuth the "
+        "fixture has (the azimuths toward the sun are in the same table as those away from it). "
+        "m is |L_inv - L| over the same points; L_binned is L under `xyz_binned`, a spectral "
+        "reading, never part of m; Delta_O (v0) is Delta_O from v0's single scattering alone; the "
+        "line check is Delta_O (v0) over the same quantity at 330 DU, the table's last node (65 / "
+        "50 = 1.3 on a straight line in ozone)."
+    )
+    out("")
+    for sun in OFFSET_FIXTURE_SUNS_DEG:
+        out(f"#### Sun {_sun_label(sun)} (`{_fixture_file(sun)}`)")
+        out("")
+        out(
+            "| `aod_550` | points | L | L_A | m | Delta_O | Delta_H | Delta_O / L | Delta_H / L "
+            "| Delta_O (v0) | line check | L_binned |"
+        )
+        out("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+        for aod in OFFSET_LOADS:
+            c = result.conditions[sun, aod]
+            rows = [("P (azimuths 90, 180)", c.p)]
+            rows += [(f"azimuth {az:g} alone", p) for az, p in c.by_azimuth.items()]
+            for name, p in rows:
+                out(
+                    f"| {aod:g} | {name} ({p.points}) | {p.L:.4f} | {p.L_A:.4f} | {p.m:.4f} "
+                    f"| {p.delta_o:.4f} | {p.delta_h:+.4f} | {_ratio(p.delta_o, p.L, '.3f')} "
+                    f"| {_ratio(p.delta_h, p.L, '+.3f')} | {p.delta_o_v0:.4f} | {p.line:.4f} "
+                    f"| {p.L_binned:.4f} |"
+                )
+        out("")
+    out(
+        "What is left of L after ozone at each ruled condition of rule 1 (L - Delta_O where that "
+        "condition's verdict is carries or contributes, otherwise L):"
+    )
+    out("")
+    out("| condition | left |")
+    out("| --- | --- |")
+    for key, rc in result.rule1.conditions.items():
+        out(f"| {rc.label} | {result.left_after_ozone[key]:.4f} |")
+    out("")
+    out("The bends across sun -1, 0 and +1 (kappa; kappa_A under `xyz_altitude_0`):")
+    out("")
+    out(
+        "| `aod_550` | kappa for Delta_O | kappa for L | kappa_A for L_A "
+        "| kappa for L - Delta_O | kappa_A for L_A - Delta_O |"
+    )
+    out("| --- | --- | --- | --- | --- | --- |")
+    for aod in OFFSET_LOADS:
+        k = result.kappas[aod]
+        out(
+            f"| {aod:g} | {k.delta_o:+.4f} | {k.L:+.4f} | {k.L_A:+.4f} | {k.left:+.4f} "
+            f"| {k.left_a:+.4f} |"
+        )
+    out("")
+    return lines
+
+
+def format_offset(result: OffsetResult) -> str:
+    """Every quantity the criterion lists, in its order: the pilot, rules 1 to 4, the reported."""
+    lines: list[str] = []
+    for section in (
+        _pilot_section,
+        _rule1_section,
+        _rule2_section,
+        _rule3_section,
+        _rule4_section,
+        _reported_section,
+    ):
+        lines.extend(section(result))
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def report_offset(fixtures: dict[float, dict]) -> str:
+    """The offset rules on the four fixtures, as the report text; refuses before any output."""
+    return format_offset(evaluate_offset(fixtures))
+
+
+def read_offset_fixtures() -> dict[float, dict]:
+    """The four committed fixtures, keyed by sun elevation; unreadable or malformed ones refused."""
+    fixtures = {}
+    for sun in OFFSET_FIXTURE_SUNS_DEG:
+        path = FIXTURE_SPECS[sun].path
+        try:
+            fixtures[sun] = json.loads(path.read_text())
+        except (OSError, ValueError) as error:
+            raise PragueError(f"{_shown(path)} cannot be read as a fixture: {error}") from error
+    return fixtures
+
+
+def cmd_report_offset() -> None:
+    """Print the offset report; the text is complete before anything is written to stdout."""
+    sys.stdout.write(report_offset(read_offset_fixtures()))
+
+
 def cmd_report(spec: FixtureSpec = SUN10) -> None:
+    if spec.sun_elevation_deg not in (SUN_ELEVATION_DEG, 0.0):
+        raise PragueError(
+            f"there is no report for the sun {spec.sun_elevation_deg:g} fixture alone: "
+            "`report --offset` reads all four fixtures"
+        )
     data = json.loads(spec.path.read_text())
     if spec.sun_elevation_deg == SUN_ELEVATION_DEG:
         sys.stdout.write(report(data))
@@ -2073,16 +3243,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--sun",
         type=float,
         default=SUN_ELEVATION_DEG,
-        help="fixture, report: the sun elevation in degrees of a registered fixture (10 or 0)",
+        help="fixture, report: the sun elevation in degrees of a registered fixture (10, 0, -1, 1)",
     )
     parser.add_argument(
         "--output", type=Path, default=None, help="fixture: write or check this file instead"
+    )
+    parser.add_argument(
+        "--offset",
+        action="store_true",
+        help="report: the offset rules of #49, from all four fixtures (--sun is not used)",
     )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.offset and "report" not in args.command:
+        parser.error("--offset is an option of `report`")
     status = 0
     for command in args.command:
         try:
@@ -2093,6 +3271,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             elif command == "fixture":
                 spec = fixture_spec(args.sun, args.output)
                 status = max(status, cmd_fixture(args.cache, spec, check=args.check))
+            elif args.offset:
+                cmd_report_offset()
             else:
                 cmd_report(fixture_spec(args.sun))
         except (PragueError, urllib.error.URLError, subprocess.CalledProcessError) as error:
