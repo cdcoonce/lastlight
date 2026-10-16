@@ -572,7 +572,7 @@ def check_sun_node(sun_elevation_deg: float, nodes: Sequence[float], axis: str) 
     )
     if not on_a_node:
         raise PragueError(
-            f"sun elevation {sun_elevation_deg:g} is not a node of {axis}: the fixture would "
+            f"sun elevation {sun_elevation_deg!r} is not a node of {axis}: the fixture would "
             "interpolate in the sun there, so it is not made"
         )
 
@@ -919,7 +919,7 @@ def fixture_spec(sun_elevation_deg: float, output: Path | None = None) -> Fixtur
     if base is None:
         known = ", ".join(f"{sun:g}" for sun in FIXTURE_SPECS)
         raise PragueError(
-            f"no fixture is registered for sun elevation {sun_elevation_deg:g} "
+            f"no fixture is registered for sun elevation {sun_elevation_deg!r} "
             f"(registered: {known})"
         )
     if output is None:
