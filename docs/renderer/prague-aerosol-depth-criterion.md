@@ -1,31 +1,39 @@
-# Prague's aerosol amount, from Prague's own gas depths (pre-registered)
+# Prague's aerosol amount, from Prague's own gas depths: no test (pre-registered)
 
-Registered in the commit that lands this file on `main`, on 2026-10-16, for issue #55. At that commit Prague's zenith transmittance has been recorded at two visibilities only, 123.8187 and 49.9864 km, both between its nodes (the same eleven numbers in all four committed fixtures). #49's fixture builds also evaluated it inside the matched-depth search, which starts at Prague's clearest and haziest nodes (131.8 and 20 km). Only one of those evaluations was recorded: the aerosol depth at 131.8 km under the old estimate, 0.036851, as the 0.03 load's clamped match. Nobody has fitted Prague's transmittance at its six visibility nodes, or evaluated Prague's sky at a visibility matched under any estimate in this file. The builder implements this file in `tools/prague_reference.py` exactly as written; a disagreement between this file and the tool is a defect in the tool.
+Registered in the commit that lands this file on `main`, on 2026-10-16, for issue #55.
+
+At that commit Prague's zenith transmittance has been recorded at two visibilities only, 123.8187 and 49.9864 km, both between its nodes (the same eleven numbers in all four committed fixtures). #49's fixture builds also evaluated it inside the matched-depth search. That search starts at Prague's clearest and haziest nodes (131.8 and 20 km), and two of its results were recorded: the 0.1 load's match at 55.5320 km (depth 0.0999986), and the 0.03 load's clamped match at 131.8 km (depth 0.036851), both under the old estimate. Nobody has fitted Prague's transmittance at its six visibility nodes, and nothing under this file does. The builder implements in `tools/prague_reference.py` exactly what this file says the tool prints; a disagreement between this file and the tool is a defect in the tool.
 
 Nothing in this issue changes renderer v1. v1's physics is pre-registered (`docs/gates/renderer-v1/criterion.md`, definition 8).
 
-**The question.** #49 registered the aerosol amount as "no test" (rule 4 of `docs/renderer/prague-offset-criterion.md`). At the 0.1 load's visibility (Koschmieder, 49.9864 km) Prague's aerosol is deeper than v1's 0.1, and moving Prague to the visibility where the two match removes part of v1's offset over Prague: Δ_M, 0.0401, 0.0521, 0.0639 and 0.0375 at sun -1, 0, +1 and +10. The match rests on an estimate of Prague's aerosol depth, its zenith transmittance minus its gas. The tool subtracts v1's gas, not Prague's, so the excess it finds (0.0137) carries an error that was never derived and was put at about ±0.01. This file estimates Prague's gas from its own transmittance at its six visibility nodes, derives the estimate's error, and rules on whether the amount contributes to the offset.
+**The question.** #49 registered the aerosol amount as "no test" (rule 4 of `docs/renderer/prague-offset-criterion.md`). At the 0.1 load's visibility (Koschmieder, 49.9864 km) Prague's aerosol is deeper than v1's 0.1, and moving Prague to the visibility where the two match removes part of v1's offset over Prague: Δ_M is 0.0401, 0.0521, 0.0639 and 0.0375 at sun -1, 0, +1 and +10. The match rests on an estimate of Prague's aerosol depth, its zenith transmittance minus its gas. The tool subtracts v1's gas, not Prague's, so the excess it finds (0.0137) carries an error never derived, put at about ±0.01. #55 proposed estimating Prague's gas from its own transmittance fitted across its six visibility nodes, "where the aerosol varies and the gas does not", deriving the estimate's error, and ruling.
 
-**The answer this can give, in one line.** The amount contributes if every one of the eight gas estimates below, after twice its own fitting error, leaves Prague's aerosol at the 0.1 load's visibility more than about 0.0095 deeper than v1's (the excess at which the amount's part equals the bar). Otherwise the derived error still spans the bar. The two other outcomes, "carries" and "not this", cannot fire on data already in hand (see the pilot).
+**What this file registers.** That route has no test of the amount. A rule was drafted for it. Its pilot, and two cold reads of the draft on this file's pull request (none running Prague), showed three things:
 
-## Definitions
+- the six nodes add no information about the gas beyond repeating the same spectral fit;
+- the drafted rule's verdict was set by its design, not by the sky;
+- the ozone cross-section used as a stand-in can by itself move single estimates by several times the margin.
 
-### Prague's gas, estimated eight ways
+This file says so, with the evidence, instead of registering a rule whose outcome is already fixed. No six-node fit is run under it. The tool prints the evidence that data in hand can give (below). A route that may have a test is filed as #57.
 
-**Data.** y(c, V) = -ln T(c, V), where T is Prague's zenith transmittance in channel c at visibility V, computed exactly as the tool computes `zenith_transmittance` for the fixtures: `evaluate` in transmittance mode, the zenith query, observer altitude 0.34 km. The fit uses the ten channels centred at 380, 420, ..., 740 nm and Prague's six visibility nodes, 20, 27.6, 40, 59.4, 90 and 131.8 km, as read from the dataset's header: 60 values.
+## The route that was drafted
+
+The definitions below are kept because the evidence and the tool's printed pilot refer to them.
+
+**Data.** y(c, V) = -ln T(c, V), where T is Prague's zenith transmittance in channel c at visibility V, computed as the tool computes `zenith_transmittance` for the fixtures: `evaluate` in transmittance mode, the zenith query, observer altitude 0.34 km. Transmittance does not depend on the sun, and the four fixtures hold the same spectra. The fit uses the ten channels centred at 380, 420, ..., 740 nm. The 340 nm channel is left out: SPCTRL2's ozone table starts at 380 nm, while the paper's ozone absorbs strongly in the Huggins band across 320 to 360 nm.
 
 **Model.** ŷ(c, V_i) = a_R ρ_c + a_O κ_c + exp(u_i - α_i x_c + γ_i x_c²), with x_c = ln(λ_c / 550 nm), where:
 
-- ρ_c is v1's Rayleigh depth at λ_c over its depth at 550 nm (`rayleigh_optical_depth`, which is proportional to pressure, so any one pressure gives the same shape);
+- ρ_c is v1's Rayleigh depth at λ_c over its depth at 550 nm (`rayleigh_optical_depth`);
 - κ_c is v1's ozone coefficient at λ_c per atm cm (`ozone_absorption_per_atm_cm`, the SPCTRL2 table);
-- a_R (the Rayleigh depth at 550 nm) and a_O (the ozone column in atm cm) are shared by all six nodes;
-- u_i, α_i and γ_i are node i's aerosol: exp(u_i) is its depth at 550 nm, α_i its Ångström exponent, γ_i its curvature in log wavelength.
+- a_R (the Rayleigh depth at 550 nm) and a_O (the ozone column in atm cm) are shared by every visibility fitted;
+- u_i, α_i and γ_i are the aerosol at visibility i: exp(u_i) is its depth at 550 nm, α_i its Ångström exponent and γ_i its curvature in log wavelength.
 
 **The eight estimates.** Three assumptions, each either fitted or fixed:
 
 - the aerosol's form: a power law (every γ_i = 0) or curved (every γ_i free);
 - the ozone column: free, or the paper's U.S. Standard column, a_O = 0.345 atm cm (the tool's `US_STANDARD_OZONE_DU`);
-- the Rayleigh depth: free, or the paper's, a_R = R_paper = `rayleigh_optical_depth(550, p)` at p = 1013.25 (1 - 0.0065 × 340 / 288.15)^5.25588 = 973.07 hPa, the U.S. Standard pressure at 0.34 km.
+- the Rayleigh depth: free, or the paper's, a_R = R_paper = `rayleigh_optical_depth(550, p)`, with p = 1013.25 (1 - 0.0065 × 340 / 288.15)^5.25588 computed unrounded (973.0664 hPa), the U.S. Standard pressure at 0.34 km.
 
 They are numbered with the form varying slowest:
 
@@ -40,158 +48,115 @@ They are numbered with the form varying slowest:
 | 7 | curved | paper | free |
 | 8 | curved | paper | paper |
 
-Estimate 1 is Prague's own gas, the issue's estimate. Estimates 4 and 8 are the paper's gas: they fit no gas parameter.
+**The fit.** Unweighted least squares of ŷ - y, with `scipy.optimize.least_squares`: method `trf`, the analytic Jacobian, `xtol`, `ftol` and `gtol` all 1e-15, at most 20000 evaluations, and every other argument at its default. The start is a_R = R_paper and a_O = 0.345, and at each visibility u_i = ln max(ȳ(V_i) - G_paper, 0.001), α_i = 1.3 and γ_i = 0. A fit with `status` ≤ 0 is a refusal: the tool prints which estimate failed to standard error and exits 1.
 
-**The fit.** Unweighted least squares of ŷ - y over the 60 values, with `scipy.optimize.least_squares` (method `trf`), the analytic Jacobian, `xtol`, `ftol` and `gtol` all 1e-15, and at most 20000 evaluations. The start is a_R = R_paper, a_O = 0.345, and at each node u_i = ln max(ȳ(V_i) - G_paper, 0.001), α_i = 1.3 and γ_i = 0. A fit whose `status` is not positive is a refusal (below).
+**Gas, error, excess.**
 
-**G and its error.** G_k = a_R ρ̄ + a_O κ̄ is estimate k's gas depth at 550 nm. The bar is the interpolation the tool already applies to y: linear at 550 nm between the 540 and 580 nm channel centres, so ρ̄ = 1.00968 and κ̄ = 0.086141 per atm cm. G_paper is G for estimate 4, 0.12367.
+- **The gas.** G_k = a_R ρ̄ + a_O κ̄ is estimate k's gas depth at 550 nm. ρ̄ and κ̄ are ρ and κ interpolated linearly at 550 nm between the 540 and 580 nm channel centres, the interpolation the tool already applies to y: 1.00968 and 0.086141 per atm cm. G_paper, estimate 4's gas, is 0.12367.
+- **Its error.** SE_k = sqrt(qᵀ C q), where:
+  - C = s² (JᵀJ)⁻¹, with J the Jacobian at the solution;
+  - s² is the sum of squared residuals over (number of values minus number of fitted parameters);
+  - q is the derivative of G with respect to the parameters: ρ̄ for a_R, κ̄ for a_O, and 0 for every aerosol parameter.
 
-SE_k = sqrt(qᵀ C q), where:
+  SE is 0 when no gas parameter is fitted (estimates 4 and 8). It is infinite if `numpy.linalg.inv` raises, or if qᵀ C q is not a positive finite number.
+- **Residuals and conditioning.** The residual rms is sqrt(sum of squared residuals / number of values). The condition number is the 2-norm condition number of the unscaled J.
+- **The excess.** ȳ(V) is y interpolated linearly at 550 nm between channel centres. V_p = 49.9864309567 km and V_0.03 = 123.8187372 km are the two loads' visibilities. g_k = ȳ(V_p) - G_k - 0.1 is Prague's aerosol depth at V_p minus v1's, under estimate k.
 
-- C = s² (JᵀJ)⁻¹, with J the Jacobian at the solution;
-- s² is the sum of squared residuals over (60 minus the number of fitted parameters);
-- q is the derivative of G with respect to the parameters: ρ̄ for a_R, κ̄ for a_O, and 0 for every aerosol parameter.
-
-SE is 0 for estimates 4 and 8. If JᵀJ cannot be inverted, SE is infinite.
-
-**The excess.** ȳ(V) is y interpolated linearly at 550 nm between the channel centres, over all eleven channels, as the tool does. V_p = 49.9864309567 km is the 0.1 load's visibility; T(V_p) is the 0.1 `zenith_transmittance` of the committed fixtures. Then g_k = ȳ(V_p) - G_k - 0.1: Prague's aerosol depth at V_p minus v1's, under estimate k.
-
-**The envelope.** g_lo = the smallest of g_k - 2 SE_k, and g_hi = the largest of g_k + 2 SE_k, over the eight estimates.
-
-### The amount's part of the offset
-
-For an excess g, V_g is the visibility where ȳ(V) = ȳ(V_p) - g. That is Prague's air with g less aerosol depth than at V_p, whatever its gas, because the gas cancels in the difference. The tool finds V_g as `matched_visibility_km` does: 16 bisections over [20, 131.8] km, with the model's own interpolation in visibility.
-
-Δ_M(g), at a sun s and the 0.1 load, is the mean over P of ln(Y_Prague(V_g) / Y_Prague(V_p)). That is L - L_matched with the match at V_g. Both are Prague's primary reading, at the stored views and azimuths of the sun's fixture, observer 0.34 km, albedo 0.2. P is #49's 16 points: relative azimuths 90 and 180, all eight views, selected by value. Δ_M(0) = 0, and #49's Δ_M is Δ_M at the old estimate's excess, 0.01367.
-
-g_max = ȳ(V_p) - ȳ(131.8) is the largest excess Prague's clearest node can remove.
-
-**The ends of the amount's range.**
-
-- Δ_lo is 0 if g_lo ≤ 0, with no Prague run. Otherwise it is Δ_M(min(g_lo, g_max)). When g_lo > g_max the clamped value is below the unclamped one, so the clamp can only understate.
-- Δ_hi is Δ_M(g_hi) if 0 < g_hi ≤ g_max, 0 if g_hi ≤ 0, and unbounded if g_hi > g_max.
-
-Between the ends Δ_M is taken to increase with g, the premise #49's linear scaling also used. The report prints Δ_M at the excesses of estimates 1 and 4, which lie inside the envelope, so a departure would show.
-
-### Conditions, bar and verdicts
-
-**Conditions:** (-1, 0.1), (0, 0.1), (+1, 0.1) and (+10, 0.1). The offset L and the reading noise m at each come from the committed fixtures, exactly as #49 computes them (`offset_condition`). **Bar:** b = 2m.
-
-**The per-condition verdict:**
-
-1. **carries** if Δ_lo ≥ L / 2 and Δ_lo > b;
-2. else **contributes** if Δ_lo > b;
-3. else **not this** if Δ_hi ≤ b;
-4. else **spans**: the bar lies inside the amount's range.
-
-**The rule's verdict over its conditions,** in this order:
-
-1. If every condition carries: **carries**.
-2. Else if every condition carries or contributes: **contributes**.
-3. Else if every condition is not this: **not this**.
-4. Else if any condition spans: **the derived error still spans the bar**.
-5. Else: **cannot tell**, because the conditions disagree.
-
-For every condition the report prints Δ_lo, Δ_hi, L, b, the share Δ_lo / L and the condition's verdict. It then prints the rule's verdict and its branch number (1 to 5, above). Every comparison uses unrounded values computed by the tool; the four-digit values in this file are what it must reproduce, never thresholds it reads.
-
-**Refusal.** The report is not written, and the tool prints the reason to standard error and exits 1, if any of the eight fits ends with a status that is not positive, or if the targets stored in the new fixture differ from the ones the tool recomputes from the fixture's transmittance. No estimate and no condition is ever dropped.
+**The drafted rule** (not registered). With six nodes, the envelope g_lo = min over k of (g_k - 2 SE_k) and g_hi = max over k of (g_k + 2 SE_k) would have been carried into Prague as matched skies at the excesses g_lo and g_hi. The amount's part Δ_M at those ends would have been ruled against #49's bar 2m at the 0.1 load at sun -1, 0, +1 and +10, on #49's ladder plus a fourth per-condition outcome, "spans", for a bar inside the amount's range.
 
 ## What was seen before this file landed, said plainly
 
-Everything in this section is computed from data in hand: the two transmittance spectra in the committed fixtures (at V_p and at the 0.03 load's 123.8187 km), the fixtures' skies and v1. The fixtures hold two visibilities, not six, so the pilot fits each of the eight estimates to those two (20 values), with the model, start and settings above. It is a **pilot, not a test**: no ruled number uses it. The report prints every number in this section under a heading containing the word "pilot", and each must agree with the value shown here to within half a unit in its last digit.
+Everything in this section is computed from data in hand: the two transmittance spectra in the committed fixtures, the fixtures' skies through #49's `offset_condition`, and v1. The fixtures hold two visibilities, not six, so each of the eight estimates is fitted to those two (20 values) with the model, start and settings above. The tool prints the numbers in this section's table and in the bullets marked "printed" under a heading containing the word "pilot", each within half a unit in its last digit. The synthetic checks and the cold reads' figures quoted further down are not printed by the tool.
 
 The pilot's eight estimates:
 
-| estimate | G | 2SE | g | g - 2SE | g + 2SE | residual rms | a_R | ozone (DU) |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 0.1149 | 0.0032 | 0.0208 | 0.0176 | 0.0241 | 0.00096 | 0.0859 | 327.4 |
-| 2 | 0.1233 | 0.0022 | 0.0124 | 0.0102 | 0.0147 | 0.00182 | 0.0930 | 341.0 |
-| 3 | 0.1171 | 0.0030 | 0.0186 | 0.0156 | 0.0216 | 0.00114 | 0.0866 | 345.0 |
-| 4 | 0.1237 | 0 | 0.0121 | 0.0121 | 0.0121 | 0.00182 | 0.0930 | 345.0 |
-| 5 | 0.1144 | 0.0280 | 0.0214 | -0.0066 | 0.0494 | 0.00081 | 0.0853 | 327.9 |
-| 6 | 0.1214 | 0.0013 | 0.0144 | 0.0131 | 0.0156 | 0.00083 | 0.0930 | 318.5 |
-| 7 | 0.0990 | 0.0601 | 0.0367 | -0.0234 | 0.0969 | 0.00092 | 0.0686 | 345.0 |
-| 8 | 0.1237 | 0 | 0.0121 | 0.0121 | 0.0121 | 0.00117 | 0.0930 | 345.0 |
+| estimate | G | 2SE | g | g - 2SE | g + 2SE | residual rms | a_R | ozone (DU) | condition number |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 0.1149 | 0.0032 | 0.0208 | 0.0176 | 0.0241 | 0.00096 | 0.0859 | 327.4 | 882 |
+| 2 | 0.1233 | 0.0022 | 0.0124 | 0.0102 | 0.0147 | 0.00182 | 0.0930 | 341.0 | 17.5 |
+| 3 | 0.1171 | 0.0030 | 0.0186 | 0.0156 | 0.0216 | 0.00114 | 0.0866 | 345.0 | 912 |
+| 4 | 0.1237 | 0 | 0.0121 | 0.0121 | 0.0121 | 0.00182 | 0.0930 | 345.0 | 14.1 |
+| 5 | 0.1144 | 0.0280 | 0.0214 | -0.0066 | 0.0494 | 0.00081 | 0.0853 | 327.9 | 1.470e4 |
+| 6 | 0.1214 | 0.0013 | 0.0144 | 0.0131 | 0.0156 | 0.00083 | 0.0930 | 318.5 | 87.2 |
+| 7 | 0.0990 | 0.0601 | 0.0367 | -0.0234 | 0.0969 | 0.00092 | 0.0686 | 345.0 | 1.033e4 |
+| 8 | 0.1237 | 0 | 0.0121 | 0.0121 | 0.0121 | 0.00117 | 0.0930 | 345.0 | 76.9 |
 
 What it shows:
 
-- **The old estimate is not consistent with itself.** It subtracts v1's gas at 550 nm from a total interpolated between the 540 and 580 nm channel centres. The same gas interpolated the same way is 0.12367, not 0.12208. Of the difference, 0.0013 is the interpolation (neither λ⁻⁴ nor the Chappuis band is straight between 540 and 580 nm) and 0.0003 is the pressure (v1's 970 hPa against 973.07). So the paper's gas puts the excess at 0.0121 (estimates 4 and 8), not 0.0137.
-- **The power law's low Rayleigh comes from the form.** Under a power law the fit wants a Rayleigh depth 8 percent under the paper's (0.0859 against 0.0930), and fixing the paper's doubles the residual (0.00182 against 0.00096). Under the curved form the paper's Rayleigh fits as well as a free one (0.00083 against 0.00081).
-- **Two visibilities cannot separate the gas from a curved aerosol.** Estimates 5 and 7, curved with a free Rayleigh, have Jacobian condition numbers of 1.5e4 and 1.0e4 and 2SE of 0.0280 and 0.0601. The other six have condition numbers of 14 to 910.
-- The pilot's envelope runs from -0.0234 to 0.0969, both ends from estimate 7.
+- **The old estimate is not consistent with itself** (printed). It subtracts v1's gas at 550 nm from a total interpolated between the 540 and 580 nm channel centres. The same gas interpolated the same way is 0.12367, not 0.12208. Of the difference, 0.0013 is the interpolation (neither λ⁻⁴ nor the Chappuis band is straight between 540 and 580 nm) and 0.0003 is the pressure (v1's 970 hPa against 973.07). The paper's gas puts the excess at 0.0121, not 0.0137.
+- **The power law's low Rayleigh comes from the form.** Under a power law the fit wants a Rayleigh depth 8 percent under the paper's (0.0859 against 0.0930), and fixing the paper's doubles the residual. Under the curved form the paper's Rayleigh fits as well as a free one (0.00083 against 0.00081).
+- **Two spectra cannot separate the gas from a curved aerosol** when the Rayleigh is free: estimates 5 and 7 have 2SE 0.0280 and 0.0601.
+- **The crossing** (printed). Scaled linearly in g from #49's matched reading (Δ_M at the old excess 0.01367), the amount's part equals the bar at g* = 0.01367 b / Δ_M: 0.0094, 0.0095, 0.0095 and 0.0095 at sun -1, 0, +1 and +10. #49's Δ_M is 1.435 to 1.447 times the bar at all four suns, so the four conditions move together. A condition would carry only if the excess reached 0.0541, 0.0351, 0.0263 or 0.0242. At the paper's excess, Δ_M scaled linearly is 1.268 to 1.279 times the bar.
+- **The clearest node** (printed). From the recorded clamped match, ȳ(131.8) = 0.036851 + 0.12208 = 0.15893, so g_max = ȳ(V_p) - ȳ(131.8) = 0.0768. A match at the 0.03 load would need G ≥ ȳ(131.8) - 0.03 = 0.1289. No estimate comes near it.
+- The 340 nm channel, if included, would move estimate 1's G from 0.1149 to 0.1285 and triple its residual (0.0010 to 0.0030).
 
-**The crossing.** Scaled linearly in g from #49's matched reading (Δ_M at 0.01367), the amount's part equals the bar at an excess g* = 0.01367 b / Δ_M: 0.0094 at sun -1 and 0.0095 at sun 0, +1 and +10. It is nearly the same at every sun because Δ_M and m both measure how Prague responds to visibility: #49's Δ_M is 1.435 to 1.447 times the bar at all four. So the four conditions move together. Scaled the same way, a condition carries only if g_lo is at least 0.0541, 0.0351, 0.0263 or 0.0242 (sun -1, 0, +1, +10).
+Earlier looks at the same question, disclosed: #34's "about ±0.01" (from v1's gas, never derived); #49's first cold read, ±0.003 to ±0.005; #49's third cold read, a gas fit to one visibility's eleven channels (estimator error 0.003 to 0.006, fit rms 0.0034; method not recorded).
 
-**What the pilot predicts, branch by branch.**
+## Why the route has no test
 
-- **"Not this" cannot fire.** Estimates 4 and 8 fit no gas parameter, so their excess, 0.0121, is fixed by data in hand and lies inside every envelope: g_hi ≥ 0.0121. Scaled linearly, Δ_M(0.0121) is 1.268 to 1.279 times the bar at the four suns, so Δ_hi > b at every condition. Branch 3 is dead, per condition and for the rule, and so is the rule's branch 5, which needs a "not this" condition beside a contributing one.
-- **"Carries" cannot fire.** For the same reason g_lo ≤ 0.0121, which is under every condition's linear carrying excess (0.0242 at the least). No condition carries, so branch 1 is dead too.
-- **The live outcomes are "contributes" (branch 2) and "spans" (branch 4).** The rule says "contributes" only if g_lo exceeds about 0.0095: all eight estimates, after twice their errors, must leave Prague at least that much deeper than v1.
-- **On the pilot's two visibilities the rule would say "spans"** (g_lo = -0.0234).
-- **With six nodes the outcome is open.** A synthetic check (six power-law aerosols with depths near 6 / V at 550 nm and Ångström exponents from 0.8 to 1.6, residuals of rms 0.001 as in the pilot, linearised at the truth) puts 2SE at 0.010 to 0.014 for estimate 5 and 0.006 to 0.008 for estimate 7. Estimate 5's pilot margin over the crossing is 0.012. So "contributes" is reachable but is not the expected outcome. Estimate 2's pilot margin is only 0.0007 (its lower end is 0.0102).
-- **The family decides the pilot's verdict, and the author saw that before fixing it.** With power laws only (estimates 1 to 4) the pilot's envelope would be 0.0102 to 0.0241 and the pilot's verdict "contributes", by 0.0007. The curved estimates are in the family for two reasons. Prague's aerosol changes type across its nodes: the paper's Fig. 4 labels 131.8 km continental clean, 59.4 km continental average and 27.6 km continental polluted, with the others interpolated or extrapolated between them, and the depth of a changing mixture of types is not in general a power law in wavelength. And the power law's low Rayleigh is a property of the form (above). A family of power laws alone would assume the separation that the issue asks the six nodes to show.
+**1. The six nodes add no information about the gas beyond repeating the fit.** With each visibility's u_i, α_i and γ_i free, the columns of J that belong to visibility i are A_i, x A_i and x² A_i (A_i its aerosol depth by channel). Their span does not depend on u_i. So the precision of a_R and a_O does not depend on how much aerosol each node holds, only on each node's spectral shape. More nodes of the same shape only repeat the information: three copies of each pilot spectrum (six nodes) divide the SE of every estimate that fits a gas parameter by exactly √3 at the same s.
 
-Earlier looks at the same question, also disclosed: #34's "about ±0.01" (from v1's gas, never derived); #49's first cold read, ±0.003 to ±0.005; and #49's third cold read, which fitted gas depths to one visibility's eleven channels (an estimator error of 0.003 to 0.006, fit rms 0.0034; its method is not recorded).
+#55's mechanism, gas and aerosol separating because the amount varies and the gas does not, needs a constraint that ties the nodes' aerosol shapes together; one shared shape is the simplest. Prague's do not: the paper's Fig. 4 labels 131.8 km continental clean, 59.4 km continental average and 27.6 km continental polluted, with the others interpolated or extrapolated between them. A family that imposed one shape, or one curvature, across the nodes would impose what Prague's documentation says is not there. A family without it has only the spectral slopes, which is #49's problem again.
 
-## What is compared
+The tool prints (under "pilot"):
 
-- **Prague:** the reference implementation, dataset and driver pinned for #49: commit `2385c912e9051c1258013ff8c3ce2e19e10fb917`, the full dataset (SHA-256 `33832f99525e7833cb83ac4369026f07e7d403db2fe01b5e9fedbe92ce898727`), observer altitude 0.34 km, ground albedo 0.2, the model's own interpolation in visibility, and the primary reading (`xyz`, linear interpolation between channel centres).
-- **One new fixture,** `tests/fixtures/prague/aerosol-depth.json`. It holds:
-  - the zenith transmittance at the six nodes, all eleven channels, so ȳ(131.8) is in it;
-  - the four targets g_lo, g_hi, g_1 and g_4;
-  - for each target that the rule or the report evaluates, the matched visibility V_g, whether the match is clamped, and Prague's `xyz` at V_g at each of the four suns, at the stored views and azimuths of that sun's fixture.
+- for every estimate that fits a gas parameter (all but 4 and 8), its 2SE recomputed from J at the pilot solution with every node's amount multiplied by 0.5, and by 2, at the pilot's s. Each equals the pilot's 2SE to within 1e-9 relative;
+- for the same six estimates, the 2SE with each pilot spectrum's fitted aerosol taken three times (six nodes) at the pilot's s. Each, divided by the pilot's 2SE, is 1/√3 = 0.5774.
 
-  A target is evaluated only where it is needed: g_lo only if g_lo > 0, and g_hi, g_1 and g_4 only if they lie in (0, g_max]. The tool refuses to write the fixture unless the six visibilities in the dataset's header are the six above. The four existing fixtures are not regenerated or edited, and `fixture --check` for each must still pass.
-- **v1** enters only through L and m, which come from the committed fixtures as #49 computes them. The amount's part Δ_M compares Prague with Prague.
+**2. The drafted rule's verdict was set by its design.**
 
-## Reported, never ruled
+- **Three of its outcomes could not fire.**
+  - Estimates 4 and 8 fit no gas, so their excess, 0.0121, lies in every envelope. That gives g_lo ≤ 0.0121 and g_hi ≥ 0.0121.
+  - Inside Prague's visibility segment from 40 to 59.4 km, which holds V_p and every visibility of excess 0 to about 0.023, Prague interpolates its radiance coefficients and √T linearly in visibility (the reference implementation's source). So Δ_M is close to linear in g there, and the scaled figures above hold.
+  - "Not this" needed Δ_M at g_hi to be at most the bar. Δ_M(0.0121) is 1.27 times it, so it was dead. With it went the rule's "cannot tell", which needs a "not this" condition.
+  - "Carries" needed Δ_M at g_lo to be at least L / 2. Even Δ_M(0.01367) is under L / 2 at every sun, so it was dead too.
+  - Estimate 8 duplicates estimate 4 by construction. The upper end mattered only to the dead branches.
+- **"Contributes" needed every estimate's lower end above about 0.0095.** Estimate 4 sits only 0.0026 above that. A synthetic six-node check by the author (six power-law aerosols, Ångström exponents from 0.8 to 1.6, residual rms 0.001, linearised at the truth) puts estimate 5's 2SE at 0.010 to 0.014. Cold read 2, linearising at the pilot's fitted shapes, puts it at 0.0155. So estimate 5 alone gives "spans" unless it lands 0.004 to 0.009 below the paper's gas, and the curved form gives no reason to expect it to land low.
+- **"Contributes" was not more likely as the true excess grew.** Cold read 2 generated six-node data from the model's own families, 100 trials per cell. It found P(contributes) of 0.00 to 0.06 when the truth's Rayleigh is the paper's or up to 5 percent under it, 0.23 at 7 percent under with power-law aerosol (0 with curved), and 0 at 10 percent under, where the true excess is largest (0.0215). As the truth's Rayleigh falls, estimate 2 (paper Rayleigh, free ozone) is misspecified and its lower end falls from 0.0116 to 0.0083 while the true excess rises. Where it had any power, the power came from the residual scale (P of 0.33 to 0.67 at rms 0.0003, for power-law and two-mode aerosols only), that is from how smoothly Prague stores its transmittance, not from the aerosol amount.
 
-- The pilot section, recomputed.
-- For each of the eight estimates on the six nodes:
-  - a_R, a_O in DU, and each node's exp(u_i), α_i and γ_i;
-  - the residual rms, the largest residual, and the condition number of J;
-  - G_k, SE_k, g_k, g_k - 2SE_k and g_k + 2SE_k.
-- Prague's aerosol depth at each node, ȳ(V_i) - G_k, under estimates 1 and 4.
-- g_max, with the old estimate's excess (0.01367) and the paper's (0.0121) beside the envelope.
-- At each condition:
-  - Δ_M at the excesses of estimates 1 and 4, beside its linear scaling from #49's matched reading;
-  - the shares Δ / L and Δ / (L - Δ_O), where Δ_O is #49's ozone part.
-- At the 0.03 load, each estimate's excess there, ȳ(V_0.03) - G_k - 0.03, and whether a match exists (whether that excess is at most ȳ(V_0.03) - ȳ(131.8)). No matched sky is evaluated at 0.03.
+**3. The ozone stand-in is neither small nor common to the estimates.** SPCTRL2's table stands in for the paper's Gorshelev cross-sections at 223 K. Cold read 2 checked plausible departures of the true ozone shape from SPCTRL2's on noise-free data: 10 percent more at 600 nm, a 5 percent tilt, or the band 5 nm redder. These moved single estimates' G by -0.016 to +0.007, up to six times the 0.0026 margin, while their residuals stayed at the pilot's level. No fit statistic would flag it. An earlier draft listed the ozone shape among the things common to all estimates that no envelope could see. That was wrong: it moves the estimates differently, and on its own it could set the verdict.
 
-## What is not decided here, and what this cannot tell
+**Rescues considered, each rejected or a different test.**
 
-- This attributes v1's offset from Prague. It does not say which model is right: both are models.
-- These are common to all eight estimates, so no envelope can see them:
-  - the ozone cross-section's shape: SPCTRL2's table (v1's) stands in for the paper's Gorshelev cross-sections at 223 K;
-  - the Rayleigh cross-section's shape: v1's (with argon and CO2) stands in for the paper's Bodhaine cross-section for N2 and O2. Only its amplitude is fitted or fixed;
-  - the channels: everything is read at the channel centres, as the tool reads Prague;
-  - Prague's fit of its own transmittance. The supplement gives that rank-12 fit's largest error over the whole dataset as 0.014, without saying whether in T or in its square root, and nothing for the zenith. A smooth part of that error biases every estimate alike.
-- The depths compared are Prague's above its 0.34 km observer and v1's whole column above its ground observer, as in #34 and #49: the air above the two observers matches (#49, rule 2).
-- Δ_M moves Prague along its own visibility axis, so it changes Prague's aerosol type with its depth (the nodes change type). It measures "Prague with as much aerosol as v1", not "Prague with v1's aerosol".
-- The aerosol's profile and the observer and ground stay as #49 registered them (no test), with everything else #49 listed as untested.
-- If the error still spans the bar, what would tell is the paper's own gas computed per channel from its cross-sections (a table not in hand), or a reference with v1's own atmosphere (libRadtran, run offline; GPL, never vendored or imported).
+- **Power laws only (estimates 1 to 4).** The pilot's envelope would be 0.0102 to 0.0241, and the pilot's verdict "contributes" by 0.0007. But the power law's low Rayleigh belongs to the form, not to the data, and when the truth's Rayleigh is low the binding estimate's lower end falls as the excess grows (problem 2).
+- **One shape, or one curvature, shared across the nodes.** It would restore #55's mechanism by asserting what the paper says is not so (problem 1).
+- **A gate that drops poorly fitting estimates.** The verdict would then turn on Prague's residual scale, which is what set the power (problem 2). The ozone stand-in's bias leaves the residuals unchanged (problem 3).
+- **A physical tolerance on the Rayleigh depth instead of free or fixed** (the paper's air is Bodhaine's N2 and O2 for U.S. Standard air, known to about 1 percent). That is a different test: the paper's Rayleigh with Prague's own ozone. It is only a test if Prague's own ozone shape replaces SPCTRL2's (problem 3), and Prague can give that from its transmittance aloft. That is #57.
+
+## What the tool prints
+
+Under a heading containing "#55" and "no test", with a "pilot" heading for its numbers:
+
+- the eight-row pilot table above;
+- the bullets marked "printed": G_paper and the old G with the split, the crossings, the carrying excesses, the two ratios, ȳ(131.8), g_max and the 0.03 load's G threshold;
+- the two invariance checks under problem 1.
+
+It runs no Prague evaluation, writes no fixture, and reads only the four committed fixtures and v1. The four fixtures are not regenerated or edited, and `fixture --check` for each must still pass. The report command's output is the report function's output.
+
+## What would tell
+
+- **#57, the paper's Rayleigh with Prague's own ozone:**
+  - Rayleigh from the paper's air within a stated tolerance;
+  - Prague's own ozone shape from its zenith transmittance at its highest observer altitude, with any aerosol aloft bounded from the channels where ozone does not absorb;
+  - the ozone column at 0.34 km fitted across the six nodes with the Rayleigh fixed (estimate 6's analogue: condition number 87 and 2SE 0.0013 on two spectra);
+  - a rule whose "contributes" grows more likely with the true excess, checked at the verdict level in its pilot before it is registered.
+- The paper's own gas, computed per channel from its cross-sections (a table not in hand).
+- A reference with v1's own atmosphere (libRadtran, run offline; GPL, never vendored or imported).
+
+## What is not decided here
+
+- Whether the amount contributes: no rule is registered. #49's "no test" for the aerosol stands, now with this file's evidence beside rule 4's.
+- Which model is right: both are models.
+- The depths compared, if a successor rules, are Prague's above its 0.34 km observer and v1's whole column above its ground observer, as in #34 and #49: the air above the two observers matches (#49, rule 2).
 - A change to v1 for any of this is a new renderer with its own registration (#50), never a change to v1.
 
 ## Decisions, each with its rejected alternative
 
-- **The error is the envelope of eight estimates, each widened by twice its own fitting error.** Rejected:
-  - one estimate with its fitting error alone. In the pilot estimate 1's 2SE is 0.0032 while the estimates' excesses differ by 0.025;
-  - a centre plus or minus one error, which privileges one estimate. Among the power laws alone the centre's choice moves the excess from 0.0121 to 0.0208;
-  - the issue's own proposal, a fraction of the gap fixed before any fit. Any fraction chosen now would be chosen with the pilot's numbers in view, while the envelope takes its threshold from the bar, which has a reason of its own;
-  - the spread over the six nodes left out one at a time, which cannot see a form error shared by every node;
-  - the spread of the eight excesses without their fitting errors, which would make an undetermined fit look certain.
-- **The family is three assumptions the transmittance cannot settle by itself, each fitted or fixed.** Rejected:
-  - power laws only (see the pilot);
-  - a free shape at each node (ten numbers per node, in which the gas can hide);
-  - one shape, or one curvature, shared by all nodes, because Prague's aerosol changes type across its nodes;
-  - the paper's own ozone cross-sections, which are not in hand. That table is what would tell.
-- **The 340 nm channel is left out.** SPCTRL2's table starts at 380 nm (v1's function gives 0 below it), while the paper's ozone absorbs strongly in the Huggins band, across 320 to 360 nm. The fit would read that absorption as Rayleigh. In the pilot, including the channel moved estimate 1's G from 0.1149 to 0.1285 and tripled its residual, from 0.0010 to 0.0030. Rejected: also leaving out 740 nm, where the paper lists no absorber.
-- **The paper's gas uses v1's cross-sections at the paper's column and pressure.** Rejected: v1's own 970 hPa, which is v1's air, not Prague's air above 0.34 km.
-- **The amount's part is evaluated in Prague at the envelope's ends, not scaled.** Rejected: #49's linear scaling, which holds near the old match only and has no account of the clamp or of an excess at or below zero.
-- **The rule rules at the 0.1 load, at all four suns.** Rejected:
-  - the 0.03 load, where whether a match exists at all depends on the estimate, so the set of ruled conditions would depend on the fit. #49's match there was clamped;
-  - sun 0 alone. The four suns move together, but each is a separate Prague evaluation, and a fault at one would show as a condition that spans.
-- **The bar is 2m, as in #49.** Rejected: m plus the matched reading's own inverse-visibility shift. The tool defines no inverse-visibility matched reading, and its match would sit at a different visibility.
-- **The fit is unweighted, in -ln T.** Rejected: weights from the transmittance's error, which nobody has per channel.
-- **Twice the fitting error,** the same factor of two as every bar since #45. Rejected: a factor chosen against the pilot's margins.
-- **An excess at or below zero gives Δ_lo = 0 without a run, and a clamp at the upper end leaves Δ_hi unbounded.** Rejected: evaluating Prague at negative excesses, which costs runs for a branch whose outcome the sign already sets.
+- **The six-node route is registered as "no test", with its evidence.** Rejected:
+  - landing the drafted envelope rule. Its verdict would be "spans" whatever the sky, nearly, and its "contributes" would not become more likely as the excess grew;
+  - restoring its power by a smaller factor than 2 or by dropping estimates. Either would be chosen with the pilot and cold read 2's power table in view;
+  - imposing a shared aerosol shape across the nodes (problem 1).
+- **No six-node fit is run, even as a diagnostic.** Its numbers are what #57 needs, and computing them first would make them #57's pilot. Rejected: running it because the transmittance is cheap to evaluate.
+- **The tool prints the pilot, the crossings and the invariance; cold read 2's verdict-level and ozone-shape synthetics are quoted, not rebuilt.** The truths and noise in those synthetics were the reader's choices, and pinning them in the tool would register a reader's design as the project's. Both reads are posted on this file's pull request. Rejected: committing them as tests.
+- **The 340 nm channel is left out of every fit, and the fit is unweighted in -ln T.** These are kept from the draft as definitions of the printed pilot. Rejected: weights from the transmittance's error, which nobody has per channel.
+- **#57 is filed, not registered here.** Its pilot must include a verdict-level power check, the lesson of this file, and that is a design of its own. Rejected: rewriting this file into #57 on the day its draft failed, with the failure's numbers in view.
