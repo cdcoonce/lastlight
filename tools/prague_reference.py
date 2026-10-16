@@ -58,7 +58,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -1117,6 +1117,126 @@ def port_bound(total_y: Sequence[float], multiple_y: Sequence[float]) -> np.ndar
 def port_bound_rms(total_y: Sequence[float], multiple_y: Sequence[float]) -> float:
     """B: the root mean square of `port_bound` over the views."""
     return float(np.sqrt(np.mean(port_bound(total_y, multiple_y) ** 2)))
+
+
+# --- the offset decision rules (#49) --------------------------------------------------------------
+#
+# Registered in `docs/renderer/prague-offset-criterion.md`, in the commit that landed that file and
+# before Prague had been evaluated at sun -1 or +1. The functions below take numbers and return the
+# verdict and the branch that produced it; they read no fixture and run no model. A disagreement
+# between that file and this code is a defect in this code.
+
+OFFSET_AZIMUTHS_DEG = (90.0, 180.0)
+"""The offset's point set P: these relative azimuths, all eight views: 16 points."""
+OFFSET_RULED_SUNS_DEG = (-1.0, 1.0)
+"""The suns at which Prague was first evaluated for rules 1 and 3; sun 0 and +10 are the pilot."""
+OFFSET_BAR_FACTOR = 2.0
+"""The noise bar is this many times the reading noise m (rule 1: 2m; rule 3: 2 m_F)."""
+CARRIES_SHARE = 0.5
+"""A candidate carries a condition when the part it removes is at least this share of the offset."""
+FIT_FLOOR = 0.05
+"""Rule 3's floor under its noise bar: smooth causes bend the offset by up to about 0.042."""
+DEPTH_ERROR = 0.01
+"""Rule 4's reported range: the aerosol depth estimate off by this much either way (no rule)."""
+SLAB_FACTOR = math.exp(OBSERVER_ALTITUDE_KM / Atmosphere(0.0).aerosol_scale_height_km)
+"""Rule 2's stand-in for the 340 m slab of air and aerosol under Prague's observer (no rule)."""
+DEEPER_SCALE_HEIGHT_KM = 2.0
+"""Rule 4's reported growth: v0's aerosol layer deepened from v1's 1.5 km to this (no rule)."""
+
+CARRIES = "carries"
+CONTRIBUTES = "contributes"
+NOT_THIS = "not this"
+CONDITION_VERDICTS = (CARRIES, CONTRIBUTES, NOT_THIS)
+"""What one condition can say. A rule adds `CANNOT_TELL` (above) when its conditions disagree."""
+
+
+def condition_verdict(removed: float, offset: float, bar: float) -> str:
+    """One condition's verdict for a removed part, an offset and a bar, in the registered order.
+
+    1. carries, if removed >= offset / 2 and removed > bar;
+    2. else contributes, if removed > bar;
+    3. else not this: removed <= bar, which includes every removed <= 0 (the candidate moves the
+       models apart, or does not move them by more than the noise).
+
+    The bar is strict (a part exactly at the bar is not over it) and the half is inclusive (a
+    part exactly half the offset carries). `0.5 * offset` is exact.
+    """
+    if removed > bar:
+        return CARRIES if removed >= CARRIES_SHARE * offset else CONTRIBUTES
+    return NOT_THIS
+
+
+def rule_verdict(verdicts: Iterable[str]) -> tuple[str, int]:
+    """A rule's verdict over its conditions and the branch (1 to 4) that produced it, in order.
+
+    1. every condition carries: carries.
+    2. else every condition carries or contributes: contributes.
+    3. else every condition is not this: not this.
+    4. else: cannot tell, because the conditions disagree.
+
+    It does not depend on the order of the conditions, and refuses an empty sequence.
+    """
+    seen = list(verdicts)
+    if not seen:
+        raise ValueError("a rule's verdict needs at least one condition: no conditions were given")
+    for verdict in seen:
+        if verdict not in CONDITION_VERDICTS:
+            allowed = ", ".join(CONDITION_VERDICTS)
+            raise ValueError(f"{verdict!r} is not a condition's verdict (one of: {allowed})")
+    if all(verdict == CARRIES for verdict in seen):
+        return CARRIES, 1
+    if all(verdict in (CARRIES, CONTRIBUTES) for verdict in seen):
+        return CONTRIBUTES, 2
+    if all(verdict == NOT_THIS for verdict in seen):
+        return NOT_THIS, 3
+    return CANNOT_TELL, 4
+
+
+def bend(at_minus: float, at_zero: float, at_plus: float) -> float:
+    """How far the centre sits above the straight line through its neighbours: kappa.
+
+    kappa = at_zero - (at_minus + at_plus) / 2, the neighbours 1 degree of sun either side.
+    """
+    return at_zero - (at_minus + at_plus) / 2.0
+
+
+def reading_noise(offset: float, offset_inv: float) -> float:
+    """m: how far the offset moves when Prague's aerosol is interpolated in 1 / V instead of V."""
+    return abs(offset_inv - offset)
+
+
+def fit_bar(m_minus: float, m_zero: float, m_plus: float) -> float:
+    """Rule 3's bar: max(2 m_F, 0.05), m_F the largest reading noise at sun -1, 0 and +1."""
+    return max(OFFSET_BAR_FACTOR * max(m_minus, m_zero, m_plus), FIT_FLOOR)
+
+
+def offset_of(model_y: Sequence[float], prague_y: Sequence[float]) -> float:
+    """The offset L over the given points: the mean of ln(model / Prague), in luminance.
+
+    Signed, and a mean (logarithms of opposite sign cancel). Refuses a luminance that is not
+    finite and above 0, and a different number of points on the two sides.
+    """
+    model = _vector("model luminance", model_y)
+    prague = _vector("Prague luminance", prague_y)
+    if model.size != prague.size or model.size == 0:
+        raise ValueError("model and Prague luminance need the same, non-zero number of points")
+    for name, values in (("model", model), ("Prague", prague)):
+        if not (np.isfinite(values).all() and (values > 0.0).all()):
+            raise ValueError(f"{name} luminance must be finite and above 0 at every point")
+    return float(np.mean(np.log(model / prague)))
+
+
+def refuse_no_excess(offset: float, condition: str, reading: str) -> None:
+    """Refuse an offset that is not above 0: there is no excess to attribute.
+
+    No condition is ever dropped, so the report is not written at all: the error names the
+    condition and the reading.
+    """
+    if not (math.isfinite(offset) and offset > 0.0):
+        raise PragueError(
+            f"the offset L under reading {reading} at {condition} is {offset!r}, not above 0: "
+            "there is no excess to attribute, so the report is not written"
+        )
 
 
 # --- the engines: v1 as it is, and the lobe diagnostic --------------------------------------------
