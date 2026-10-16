@@ -10,14 +10,14 @@ Nothing in this issue changes renderer v1. v1's physics is pre-registered (`docs
 
 | rule | candidate | status |
 | --- | --- | --- |
-| 1 | ozone, 280 DU against about 345 DU | a test at sun -1 and +1; the pilot predicts "contributes" |
+| 1 | ozone, 280 DU against about 345 DU | a test at sun -1 and +1 of whether ozone carries the offset or only contributes; the pilot predicts "contributes" |
 | 2 | observer altitude and ground | no test: the only reading that moves Prague's observer measures 340 m of air and aerosol, not the ground |
 | 3 | Prague's fit at its sun-0 node | a test, the only one whose outcome is open |
 | 4 | the aerosol, its amount and profile | no test: the amount's reading error is nearly the whole gap, and the load response does not separate the aerosol from the air |
 
 ## What was seen before this file landed, said plainly
 
-Every candidate except Prague's fit can be computed at sun 0 and sun +10 from data already committed: the two fixtures, v0 and v1. The conductor computed all of it before writing the rules, read-only, so the sun 0 and sun +10 numbers in this section are a **pilot, not a test**. The rules rule only on Prague at sun -1 and +1, which nobody has computed. Two independent cold reads of earlier drafts (on this file's pull request, before it landed, neither running Prague) recomputed every pilot number and found two that were wrong; both are corrected here. They also found that the first draft's rules 2 and 4 could not test their candidates; the evidence is under each rule.
+Every candidate except Prague's fit can be computed at sun 0 and sun +10 from data already committed: the two fixtures, v0 and v1. The conductor computed all of it before writing the rules, read-only, so the sun 0 and sun +10 numbers in this section are a **pilot, not a test**. The rules rule only on Prague at sun -1 and +1, which nobody has computed. Three independent cold reads (on this file's pull request, before it landed, none running Prague) recomputed every pilot number. They found three that were wrong, all corrected here. The first two reads showed that the first draft's rules 2 and 4 could not test their candidates (the evidence is under each rule). The third read the revision and asked for the disclosures under rules 1, 2, 3 and 4 that cite it.
 
 The report prints every number in this section under a heading containing the word "pilot". Each must agree with the value shown here to within half a unit in its last digit.
 
@@ -30,7 +30,7 @@ The pilot, over the 16 points P defined below (the symbols are defined under "St
 | sun 0, 0.03 | 0.3022 | 0.0072 | 0.0144 | 0.0963 | -0.0683 |
 | sun 0, 0.1 | 0.2675 | 0.0181 | 0.0362 | 0.0951 | -0.0962 |
 
-- **Ozone contributes** at all four, under the per-condition verdict below: a third of the offset at sun 0 (shares 0.319 and 0.356), and 0.29 and 0.22 at sun +10. Its margin over the bar is 6.68 and 2.63 times at sun 0, but only 1.12 times at (sun +10, 0.1), where a Prague column under 337.9 DU would turn it into "not this".
+- **Ozone contributes** at all four, under the per-condition verdict below: a third of the offset at sun 0 (shares 0.319 and 0.356), and 0.29 and 0.22 at sun +10. Its margin over the bar is 6.68 and 2.63 times at sun 0 and 4.08 at (sun +10, 0.03), but only 1.12 times at (sun +10, 0.1), where a Prague column under 337.94 DU would turn it into "not this".
 - After ozone, 0.2059 (at 0.03) and 0.1724 (at 0.1) of the sun-0 offset is left.
 - The evidence that rules 2 and 4 have no test is under each rule.
 
@@ -39,7 +39,7 @@ Also computed before landing, from v0 and v1 alone (no Prague):
 - Δ_O at the ruled suns is 0.1084 and 0.1075 at sun -1 (loads 0.03 and 0.1), and 0.0847 and 0.0832 at sun +1.
 - v1's own sky curves across sun -1, 0 and +1. The mean over P of ln Y_v1 at sun 0, minus the mean of its values at -1 and +1, is +0.0996 at 0.03 and +0.0543 at 0.1. This is why rule 3 has a floor beside its noise bar.
 
-**What the pilot predicts.** If the sky at sun -1 and +1 behaves like the sky at sun 0, rule 1 says "contributes". It can say otherwise only if sun 0 is unlike its neighbours, which is rule 3's question, and nothing in hand answers that. Beside rule 1's verdict the report prints the verdict the pilot gave at sun 0.
+**What the pilot predicts.** If the sky at sun -1 and +1 behaves like the sky at sun 0, rule 1 says "contributes". The margin at sun +1 is not wide. Rule 1 carries a condition there if L(+1) is at most 0.1695 (0.03) or 0.1664 (0.1). A third cold read modelled the offset's change with the sun as a shift of the sun, which puts L(+1) near 0.215 and 0.222, 0.045 and 0.056 above those bars. So "cannot tell" (sun +1 carries, sun -1 contributes) is a realistic outcome with no fault anywhere. Beside rule 1's verdict the report prints the verdict the pilot's two sun-0 conditions give under rule 1's rule-level verdict.
 
 ## What is compared
 
@@ -65,7 +65,7 @@ At a condition c = (sun s, load a):
 
 Every comparison uses unrounded values, computed by the tool; the four-digit values in this file are what it must reproduce, never thresholds it reads.
 
-**Refusal.** If any L or L_A a rule uses is <= 0 (in rule 3, at sun -1, 0 and +1 under both readings), the report stops with exit 1 and names the condition and reading: there is no excess to attribute. No condition is ever dropped. From the pilot this can happen at sun -1 or +1 only if both sun 0 and sun +10 are unlike their neighbours, so it is a refusal, not a branch.
+**Refusal.** If any L or L_A a rule uses is <= 0 (in rule 3, at sun -1, 0 and +1 under both readings), the report is not written: the tool prints the condition and reading to standard error and exits 1, because there is no excess to attribute. No condition is ever dropped. From the pilot this can happen at sun -1 or +1 only if both sun 0 and sun +10 are unlike their neighbours, so it is a refusal, not a branch.
 
 **The per-condition verdict.** For a removed part Δ, an offset L and a bar b:
 
@@ -93,7 +93,7 @@ From v1 alone, Δ_O at these conditions is 0.1084, 0.1075, 0.0847 and 0.0832.
 - Ozone carries a condition only if its L is at most twice that: 0.2168, 0.2150, 0.1695 or 0.1664, against 0.30 and 0.27 at sun 0.
 - It is "not this" only if m is at least half of Δ_O: 0.0542, 0.0538, 0.0424 or 0.0416. That is 3.0, 3.0, 2.3 and 2.3 times the largest m in the pilot.
 
-Either needs sun 0's neighbours to be unlike it. Prague's column is the U.S. Standard profile's, about 345 DU. If it is 10 DU either side, Δ_O moves by about 15 percent: no sun-0 pilot verdict changes, and (sun +10, 0.1) is the pilot condition whose verdict could.
+**Rule 1's "not this" cannot fire in practice.** Δ_O is fixed and positive from v1 alone. m is about 0.05 (at 0.03) and 0.1 (at 0.1) times the change in Prague's luminance between its two bracketing visibility nodes, which is 0.14 and 0.19 in the pilot. Reaching m = Δ_O / 2 would need that change to be 0.81 to 1.04 at 0.03 and 0.43 to 0.56 at 0.1. The rule-level "not this" (branch 3) is therefore dead too. Rule 1's live outcomes are "carries", "contributes" and "cannot tell"; it asks whether ozone carries the offset or only contributes to it, never whether ozone is part of it. Prague's column is the U.S. Standard profile's, about 345 DU. If it is 10 DU either side, Δ_O moves by about 15 percent: no sun-0 pilot verdict changes, and (sun +10, 0.1) is the pilot condition whose verdict could.
 
 ## Rule 2: observer altitude and ground: no test, and why
 
@@ -105,7 +105,7 @@ The only reading that moves Prague's observer is `xyz_altitude_0`, which puts it
 - That stand-in moves the mean over P of ln Y_v1 by -0.0684 and -0.0894 at sun 0 (loads 0.03 and 0.1), and -0.0265 and -0.0597 at sun +10.
 - The reading's own Δ_H was -0.0683 and -0.0962 at sun 0, and -0.0188 and -0.0618 at sun +10.
 
-Δ_H is the slab's extinction, not the ground's position, so no rule on it can attribute anything to the ground.
+Δ_H minus the stand-in leaves +0.0001 and -0.0068 at sun 0, and +0.0077 and -0.0021 at sun +10 (cold read 3). Δ_H is the slab's extinction, not the ground's position, so no rule on it can attribute anything to the ground.
 
 The ground's position by itself works the other way. Raising Prague's ground to its observer would remove the slab below the observer and the light it scatters upward. That makes Prague's sky no brighter, so the offset cannot shrink. The geometry can hide part of the offset, not cause it.
 
@@ -117,7 +117,7 @@ What would tell: Prague with its ground raised to the observer, which the model 
 
 The dataset's sun nodes near the horizon are -1.0, -0.5, 0 and 1.0. The fitted model's accuracy there is not documented, and its fit at each node is separate. A cause in the physics changes smoothly with the sun. A fault in the fit at the sun-0 node would put sun 0's offset off the line through its neighbours.
 
-**Two readings, because the geometry has a kink of its own.** v1's observer is on the ground, so its horizon, and with it the edge of Earth's shadow on the air beside it, is at sun 0. Prague's observer at 0.34 km sees the sun until -0.59 degrees. Between -0.59 and 0 the air beside Prague's observer is lit and the air beside v1's is not, so under the primary reading the offset can bend at sun 0 for a reason that is not a fault. Under `xyz_altitude_0` both observers are on the ground and the two horizons coincide, at the cost of the slab (rule 2), whose stand-in bends by -0.0125 at 0.03 and -0.0008 at 0.1 (from v1 alone). A fault in the fit at the sun-0 node shows under both readings. A kink from the observer's height shows under the primary reading only.
+**Two readings, because the geometry has a kink of its own.** v1's observer is on the ground, so its horizon, and with it the edge of Earth's shadow on the air beside it, is at sun 0. Prague's observer at 0.34 km sees the sun until -0.59 degrees. Between -0.59 and 0 the air beside Prague's observer is lit and the air beside v1's is not, so under the primary reading the offset can bend at sun 0 for a reason that is not a fault. Under `xyz_altitude_0` both observers are on the ground and the two horizons coincide, at the cost of the slab (rule 2), whose stand-in bends by -0.0125 at 0.03 and -0.0008 at 0.1 (from v1 alone). A fault in the fit at the sun-0 node shows under both readings. A kink from the observer's height shows under the primary reading only. A third cold read emulated the elevated observer in v0's single scattering and put its effect on κ at only +0.004 (0.03) and +0.002 (0.1), so the second reading is a guard more than a correction.
 
 **Statistic.** κ(a) = L(0, a) - (L(-1, a) + L(+1, a)) / 2, and κ_A(a), the same from L_A: how far sun 0's offset sits above the straight line through its two neighbours, 1 degree on either side.
 
@@ -127,15 +127,17 @@ The dataset's sun nodes near the horizon are -1.0, -0.5, 0 and 1.0. The fitted m
 
 - a deeper aerosol layer (scale height), at most 0.025;
 - Prague's extra aerosol amount, +0.0167 at 0.03 and +0.0006 at 0.1;
-- refraction in one model and not the other, +0.0178 at 0.03 and +0.0105 at 0.1;
 - ozone, -0.0003 at 0.03 (0.0963 - (0.1084 + 0.0847) / 2).
 
-The floor is twice the largest of them. The noise bar alone (2m is 0.0144 at 0.03 in the pilot) would read such a bend as a fault.
+The floor is twice the largest of them. Stacked in the same direction they reach at most 0.042 at 0.03, still under it. The noise bar alone (2m is 0.0144 at 0.03 in the pilot) would read such a bend as a fault.
+
+Refraction does not enter. Neither model refracts: v1's sun elevation is geometric by design, and Prague's reference implementation (cached source at the pinned commit) builds the sun's direction straight from the elevation it is given, with no refraction term anywhere in its source. An earlier draft listed "refraction in one model and not the other" as a confound; it is not one between these two models.
 
 **What it cannot see.**
 
 - A fault shared by every near-horizon node bends nothing.
 - A fault in the fit at one observer altitude and not the other is not called.
+- κ cannot tell a fault in Prague's fit from a kink in v1 at its own sun-0 node: v1's table has a node at 0 too, and its multiple scattering makes 0.065 of v1's 0.0996 bend at 0.03 (cold read 3). "Carries" or "contributes" says one of the two models has a kink at sun 0, most likely Prague's (v1's single scattering is exact in the sun, and its table interpolates log-linearly between nodes 1 degree apart), but not which.
 - A negative κ (sun 0 below its neighbours' line) reads "not this".
 
 The report prints κ and κ_A with their signs.
@@ -147,7 +149,8 @@ Prague's aerosol at the Koschmieder visibilities is deeper than v1's, 0.0407 and
 - **The amount.** Matching the depth (`xyz_matched_aerosol_depth`) removes Δ_M = 0.0521 of the offset at (sun 0, 0.1) and 0.0375 at (sun +10, 0.1); at 0.03 the match is clamped at Prague's clearest visibility (depth 0.0369).
   - The tool's depth estimate subtracts v1's Rayleigh and ozone depths, not Prague's. #34 put its error at about ±0.01, nearly the whole gap of 0.0137.
   - Scaled linearly, ±0.01 puts Δ_M at (sun 0, 0.1) anywhere from 0.0140 to 0.0903, on both sides of the bar 0.0362. A rule on Δ_M would be decided by that ratio, not by the sky.
-  - The ±0.01 is #34's statement and was never derived. Cold read 1 estimated ±0.003 to ±0.005. At ±0.003 Δ_M's whole range would clear the bar; at ±0.005 it would not (0.0331 to 0.0711). Choosing the error now, with this in view, would decide the verdict, so it is not chosen.
+  - The ±0.01 is #34's statement and was never derived. Cold read 1 estimated ±0.003 to ±0.005. At ±0.003 Δ_M's whole range would clear the bar; at ±0.005 it would not (0.0331 to 0.0712). Choosing the error now, with this in view, would decide the verdict, so it is not chosen.
+  - Cold read 3 fitted Prague's own gas depths from the fixtures' 11-channel zenith transmittance (fit rms 0.0034). It put the estimator's error at 0.003 to 0.006, against the crossing of 0.0042 at (sun 0, 0.1): a derived error would still decide the verdict. That look was taken before this file landed and is disclosed here; it is why no error is chosen.
 - **The profile.** A first draft tested it by the offset's growth when the load doubles (from 0.1 to 0.2), on the premise that an aerosol-made offset grows in proportion to the load. Both cold reads showed the premise false in v1's own sky.
   - A deeper aerosol layer (scale height 1.5 to 2.0 km, v0's single scattering) changes the mean over P of ln Y by an amount that grows ×1.41, ×1.35 and ×0.80 from 0.1 to 0.2 at sun -1, 0 and +1. From 0.03 to 0.1 it grows ×3.31, ×3.68 and ×1.89. At sun +10 it has the other sign (+0.0405 at 0.1, against -0.0576 at sun 0).
   - A constant extra aerosol amount makes a part of the offset that shrinks with the load, of the size of the bar.
@@ -172,7 +175,7 @@ What would tell: the depth estimate's error, derived from Prague's own gas depth
   - L, L_A, m, Δ_O, Δ_H, and the shares of L;
   - Δ_O from v0's single scattering alone, the mean over P of ln(Y_v0(280) / Y_v0(345));
   - the ozone line check.
-- κ and κ_A at 0.03 and 0.1, for L, for Δ_O and for L - Δ_O.
+- At 0.03 and 0.1: κ for Δ_O; κ and κ_A for L; and κ for L - Δ_O with κ_A for L_A - Δ_O.
 - L under `xyz_binned` (a spectral reading). It is never part of m.
 - At each ruled condition of rule 1, what is left: L minus Δ_O where that condition's verdict is "carries" or "contributes", otherwise L.
 
@@ -182,7 +185,7 @@ What would tell: the depth estimate's error, derived from Prague's own gas depth
 - No rule tests these:
   - the observer and ground (rule 2) and the aerosol (rule 4);
   - Prague's Rayleigh profile against v1's;
-  - refraction;
+  - refraction, which neither model includes (it matters against the camera, not between these two models);
   - the extraterrestrial solar spectrum each model uses (a common scale factor at every sun);
   - water vapour;
   - Prague's ozone column and profile (taken as the U.S. Standard 345 DU) and its ozone cross-sections, against v1's Gaussian layer at 22 km and v1's own cross-sections, which Δ_O uses;
