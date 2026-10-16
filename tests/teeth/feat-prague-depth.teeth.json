@@ -228,7 +228,7 @@
       "replace": "scaled[:, :gas] *= factor"
     },
     {
-      "label": "I31 the three-copy check ties one set of aerosol columns across the copies (J tiled) -> none (expect SURVIVED)",
+      "label": "I31 the three-copy check ties one set of aerosol columns across the copies (J tiled) -> test_the_three_copy_check_hands_the_standard_error_a_block_diagonal_sixty_row_jacobian",
       "file": "../../tools/prague_reference.py",
       "oracle": "real",
       "find": "        triple[estimate.number] = standard_error(wide, q_wide, fit.s2) / fit.se",
@@ -305,7 +305,7 @@
       "replace": "        return self.m"
     },
     {
-      "label": "X5 the amount-scaling check scales nothing -> none (expect SURVIVED)",
+      "label": "X5 the amount-scaling check scales nothing -> test_the_amount_scaling_check_scales_the_pilots_aerosol_columns_and_only_those",
       "file": "../../tools/prague_reference.py",
       "oracle": "real",
       "find": "scaled[:, gas:] *= factor",
@@ -347,35 +347,35 @@
       "replace": "        return float(self.data.y_bar[0])"
     },
     {
-      "label": "X11 the printed g_4 sentence prints g_1 -> none (expect SURVIVED)",
+      "label": "X11 the printed g_4 sentence prints g_1 -> test_the_printed_sentence_gives_the_papers_excess_and_the_old_one",
       "file": "../../tools/prague_reference.py",
       "oracle": "real",
       "find": "f\"The paper's gas puts the excess at g_4 = {result.excess(paper):.4f}, not the old \"",
       "replace": "f\"The paper's gas puts the excess at g_4 = {result.excess(result.fits[0]):.4f}, not the old \""
     },
     {
-      "label": "X12 the printed g_old in that sentence is the paper's excess -> none (expect SURVIVED)",
+      "label": "X12 the printed g_old in that sentence is the paper's excess -> test_the_printed_sentence_gives_the_papers_excess_and_the_old_one",
       "file": "../../tools/prague_reference.py",
       "oracle": "real",
       "find": "f\"g_old = {result.suns[0].g_old:.4f} (Prague's depth at V_p less its depth at the \"",
       "replace": "f\"g_old = {result.suns[0].g_paper:.4f} (Prague's depth at V_p less its depth at the \""
     },
     {
-      "label": "X13 the prose swaps the two spectra's visibilities -> none (expect SURVIVED)",
+      "label": "X13 the prose swaps the two spectra's visibilities -> test_the_prose_labels_the_two_visibilities_with_the_criterions_values",
       "file": "../../tools/prague_reference.py",
       "oracle": "real",
       "find": "    low_km, p_km = result.visibilities_km",
       "replace": "    p_km, low_km = result.visibilities_km"
     },
     {
-      "label": "X14 the prose prints v1's 970 hPa as the paper's pressure -> none (expect SURVIVED)",
+      "label": "X14 the prose prints v1's 970 hPa as the paper's pressure -> test_the_prose_names_the_papers_pressure_not_v1s",
       "file": "../../tools/prague_reference.py",
       "oracle": "real",
       "find": "at {PAPER_PRESSURE_HPA:.4f} \"",
       "replace": "at {Atmosphere(0.0).pressure_hpa:.4f} \""
     },
     {
-      "label": "X15 the printed 'largest of the eight G' is the smallest -> none (expect SURVIVED)",
+      "label": "X15 the printed 'largest of the eight G' is the smallest -> test_the_largest_of_the_eight_g_is_the_maximum",
       "file": "../../tools/prague_reference.py",
       "oracle": "real",
       "find": "    largest = max(fit.gas for fit in result.fits)",
@@ -403,7 +403,7 @@
       "replace": "    rayleigh, ozone = v1_gas_depth_at_550(PAPER_PRESSURE_HPA)"
     },
     {
-      "label": "X19 the channel-count guard is dropped (any consistent centres are fitted) -> none (expect SURVIVED)",
+      "label": "X19 the channel-count guard is dropped (any consistent centres are fitted) -> test_centres_that_are_not_the_registered_ones_are_refused_not_fitted",
       "file": "../../tools/prague_reference.py",
       "oracle": "real",
       "find": "    if all_centres.shape != registered.shape or not np.all(\n        np.abs(all_centres - registered) <= GAS_CENTRE_TOLERANCE_NM\n    ):",
