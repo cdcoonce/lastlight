@@ -2552,3 +2552,27 @@ def test_the_older_reports_still_run_and_the_34_and_45_reports_are_unchanged_in_
     second = capsys.readouterr().out
     assert second.startswith("### Rule A at sun 0")
     assert "Rule 1" not in first and "Rule 1" not in second
+
+
+def test_the_older_reports_are_written_to_stdout_exactly_as_the_report_functions_build_them(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The command line adds nothing and drops nothing: stdout is the report function's text.
+
+    The byte identity of the #34 and #45 reports with origin/main's is checked against main's own
+    output in the build log. What a test can hold is the thing the command line could break: the
+    text the report function builds is the text written, with one newline at the end and no more.
+    This compares the command line with the function that builds the report, never with a stored
+    copy of report text or a hash of it (the project pins numbers by value).
+    """
+    tool = load_tool()
+    cases = {
+        ("report",): tool.report(committed(10.0)),
+        ("report", "--sun", "0"): tool.report_sun0(committed(10.0), committed(0.0)),
+        ("report", "--offset"): tool.report_offset({sun: committed(sun) for sun in FOUR_SUNS}),
+    }
+    for argv, built in cases.items():
+        assert tool.main(list(argv)) == 0, argv
+        written = capsys.readouterr().out
+        assert written == built, argv
+        assert written.endswith("\n") and not written.endswith("\n\n"), argv
