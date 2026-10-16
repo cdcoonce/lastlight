@@ -12,6 +12,7 @@ Usage (fetch needs the network; build needs a C++17 compiler, `c++` on the path)
     uv run python tools/prague_reference.py fixture --sun -1 # the sun-1.json fixture (#49)
     uv run python tools/prague_reference.py fixture --sun 1  # the sun1.json fixture (#49)
     uv run python tools/prague_reference.py report --offset  # the offset rules, from all four
+    uv run python tools/prague_reference.py report --depth   # the aerosol amount's evidence (#55)
 
 Everything the model needs lives outside the repository, in `~/.cache/lastlight/prague/`
 (`--cache DIR` overrides it): the reference implementation of Wilkie et al. (2021) and Vevoda
@@ -51,6 +52,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import itertools
 import json
 import math
 import re
@@ -66,6 +68,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
+from scipy.optimize import least_squares
 
 from lastlight.g0.collect import build_views
 from lastlight.g0.contrast import log_chromaticity
@@ -74,6 +77,7 @@ from lastlight.render import Atmosphere
 from lastlight.render.atmosphere import (
     RAYLEIGH_SCALE_HEIGHT_KM,
     REFERENCE_WAVELENGTH_NM,
+    STANDARD_PRESSURE_HPA,
     WAVELENGTHS_NM,
     ozone_absorption_per_atm_cm,
     rayleigh_optical_depth,
@@ -613,6 +617,18 @@ def _bracket(nodes: Sequence[float], value: float) -> tuple[float, float]:
     return below, above
 
 
+def v1_gas_depth_at_550(pressure_hpa: float) -> tuple[float, float]:
+    """v1's gas depth at 550 nm: its Rayleigh depth at `pressure_hpa` and its ozone depth.
+
+    The ozone depth is for the 345 DU column of the U.S. Standard profile Prague uses, from v1's
+    own absorption table. Returned as the pair (Rayleigh, ozone), never summed, so the callers
+    keep their own order of subtraction.
+    """
+    rayleigh = float(rayleigh_optical_depth(REFERENCE_WAVELENGTH_NM, pressure_hpa))
+    ozone = float(ozone_absorption_per_atm_cm(REFERENCE_WAVELENGTH_NM)) * US_STANDARD_OZONE_DU / 1e3
+    return rayleigh, ozone
+
+
 def aerosol_depth_from_transmittance(
     transmittance: Sequence[float], centres: Sequence[float]
 ) -> float:
@@ -625,8 +641,7 @@ def aerosol_depth_from_transmittance(
     """
     tau = -np.log(np.asarray(transmittance, dtype=float))
     total = float(np.interp(REFERENCE_WAVELENGTH_NM, centres, tau))
-    rayleigh = float(rayleigh_optical_depth(REFERENCE_WAVELENGTH_NM, Atmosphere(0.0).pressure_hpa))
-    ozone = float(ozone_absorption_per_atm_cm(REFERENCE_WAVELENGTH_NM)) * US_STANDARD_OZONE_DU / 1e3
+    rayleigh, ozone = v1_gas_depth_at_550(Atmosphere(0.0).pressure_hpa)
     return total - rayleigh - ozone
 
 
@@ -3217,6 +3232,821 @@ def cmd_report_offset() -> None:
     sys.stdout.write(report_offset(read_offset_fixtures()))
 
 
+# --- #55: Prague's aerosol amount from Prague's own gas depths (registered as "no test") ---------
+#
+# `docs/renderer/prague-aerosol-depth-criterion.md` registers the six-node route as "no test" and
+# says what this tool prints instead: the pilot, eight gas estimates fitted to the two spectra the
+# fixtures hold, the crossings of #49's amount part, the clearest node, and the two invariance
+# checks of the criterion's problem 1. No six-node fit is run. The report reads only the four
+# committed fixtures and v1, evaluates no Prague model and writes no file. Where this code and the
+# criterion disagree, the code is the defect.
+
+PAPER_ALTITUDE_M = 340.0
+"""The observer's height in the fixtures, 0.34 km, in metres."""
+PAPER_PRESSURE_HPA = STANDARD_PRESSURE_HPA * (1 - 0.0065 * PAPER_ALTITUDE_M / 288.15) ** 5.25588
+"""The U.S. Standard pressure at 0.34 km, unrounded (973.0664 hPa as the criterion prints it)."""
+GAS_FIT_FIRST_NM = 380.0
+"""The fit uses the channels centred from here up; SPCTRL2's ozone table starts at 380 nm."""
+GAS_FIT_CHANNELS = 10
+GAS_OZONE_START = US_STANDARD_OZONE_DU / 1e3
+"""The paper's ozone column in atm cm (0.345): the fixed value and the start of a free fit."""
+GAS_START_ALPHA = 1.3
+GAS_START_GAMMA = 0.0
+GAS_START_FLOOR = 0.001
+"""A start aerosol depth under this is raised to it before its logarithm is taken."""
+GAS_FIT_SETTINGS = {"method": "trf", "xtol": 1e-15, "ftol": 1e-15, "gtol": 1e-15, "max_nfev": 20000}
+"""`scipy.optimize.least_squares`, every other argument at its default."""
+DEPTH_LOADS = AEROSOL_OPTICAL_DEPTHS
+"""The two loads the fixtures hold, the clearest first: the pilot's two spectra, in this order."""
+DEPTH_SUNS_DEG = (-1.0, 0.0, 1.0, 10.0)
+"""The suns the crossings are printed at, in the criterion's order."""
+CLEAREST_VISIBILITY_KM = 131.8
+INVARIANCE_FACTORS = (0.5, 2.0)
+ALPHA_CONTROL_STEP = 0.5
+INVARIANCE_COPIES = 3
+SE_MULTIPLE = 2.0
+
+
+@dataclass(frozen=True)
+class GasEstimate:
+    """One of the eight estimates: the aerosol's form, and which gas parameters are fitted."""
+
+    number: int
+    curved: bool
+    ozone_free: bool
+    rayleigh_free: bool
+
+    @property
+    def gas_parameters(self) -> int:
+        return int(self.rayleigh_free) + int(self.ozone_free)
+
+    @property
+    def aerosol_width(self) -> int:
+        """Parameters per visibility: u and alpha, and gamma where the form is curved."""
+        return 3 if self.curved else 2
+
+    @property
+    def form(self) -> str:
+        return "curved" if self.curved else "power law"
+
+    @property
+    def label(self) -> str:
+        ozone = "free" if self.ozone_free else "paper"
+        rayleigh = "free" if self.rayleigh_free else "paper"
+        return f"estimate {self.number} ({self.form}, ozone {ozone}, Rayleigh {rayleigh})"
+
+
+GAS_ESTIMATES = tuple(
+    GasEstimate(number, curved, ozone_free, rayleigh_free)
+    for number, (curved, ozone_free, rayleigh_free) in enumerate(
+        itertools.product((False, True), (True, False), (True, False)), start=1
+    )
+)
+"""The eight estimates; the aerosol form varies slowest, then the ozone, then the Rayleigh."""
+
+
+@dataclass(frozen=True)
+class GasData:
+    """What every fit needs: the fitted channels' shapes and the spectra as -ln T."""
+
+    centres: np.ndarray  # the ten fitted channel centres
+    x: np.ndarray  # ln(lambda / 550 nm) at them
+    rho: np.ndarray  # v1's Rayleigh depth over its depth at 550 nm
+    kappa: np.ndarray  # v1's ozone coefficient per atm cm
+    rho_bar: float  # rho and kappa interpolated to 550 nm
+    kappa_bar: float
+    r_paper: float  # the paper's Rayleigh depth at 550 nm
+    y: np.ndarray  # -ln T over the fitted channels, one row per visibility
+    y_bar: np.ndarray  # -ln T interpolated to 550 nm over all the channels, per visibility
+
+    @property
+    def g_paper(self) -> float:
+        """The paper's gas depth at 550 nm: its Rayleigh and its U.S. Standard ozone."""
+        return self.r_paper * self.rho_bar + GAS_OZONE_START * self.kappa_bar
+
+
+def gas_data(centres: Sequence[float], transmittance: Sequence[Sequence[float]]) -> GasData:
+    """The fit's inputs from the channel centres and one row of zenith transmittance per visibility.
+
+    The fit takes the ten channels centred at 380 nm and above, chosen by their centre (the 340 nm
+    channel is left out). ȳ(V), the start's total, interpolates all the channels at 550 nm.
+    """
+    all_centres = np.asarray(centres, dtype=float)
+    tau = -np.log(np.asarray(transmittance, dtype=float))
+    if tau.ndim != 2 or tau.shape[1] != all_centres.size or tau.shape[0] == 0:
+        raise PragueError("the spectra are not one row of transmittance per visibility and channel")
+    fitted = all_centres >= GAS_FIT_FIRST_NM
+    chosen = all_centres[fitted]
+    if chosen.size != GAS_FIT_CHANNELS:
+        raise PragueError(
+            f"the fit needs {GAS_FIT_CHANNELS} channels centred at {GAS_FIT_FIRST_NM:g} nm or "
+            f"above, the fixtures hold {chosen.size}"
+        )
+    rho = rayleigh_optical_depth(chosen) / rayleigh_optical_depth(REFERENCE_WAVELENGTH_NM)
+    kappa = ozone_absorption_per_atm_cm(chosen)
+    return GasData(
+        centres=chosen,
+        x=np.log(chosen / REFERENCE_WAVELENGTH_NM),
+        rho=rho,
+        kappa=kappa,
+        rho_bar=float(np.interp(REFERENCE_WAVELENGTH_NM, chosen, rho)),
+        kappa_bar=float(np.interp(REFERENCE_WAVELENGTH_NM, chosen, kappa)),
+        r_paper=float(rayleigh_optical_depth(REFERENCE_WAVELENGTH_NM, PAPER_PRESSURE_HPA)),
+        y=tau[:, fitted],
+        y_bar=np.array([np.interp(REFERENCE_WAVELENGTH_NM, all_centres, row) for row in tau]),
+    )
+
+
+def _unpack(
+    estimate: GasEstimate, data: GasData, theta: np.ndarray, visibilities: int
+) -> tuple[float, float, np.ndarray]:
+    """(a_R, a_O, the aerosol parameters one row per visibility) from the parameter vector.
+
+    The vector is the fitted gas parameters (Rayleigh, then ozone) and then each visibility's
+    u, alpha (and gamma): a gas parameter that is not fitted is the paper's.
+    """
+    theta = np.asarray(theta, dtype=float)
+    width = estimate.aerosol_width
+    if theta.size != estimate.gas_parameters + visibilities * width:
+        raise ValueError(
+            f"{estimate.label}: {theta.size} parameters for {visibilities} visibilities"
+        )
+    index = 0
+    a_r, a_o = data.r_paper, GAS_OZONE_START
+    if estimate.rayleigh_free:
+        a_r, index = float(theta[index]), index + 1
+    if estimate.ozone_free:
+        a_o, index = float(theta[index]), index + 1
+    return a_r, a_o, theta[index:].reshape(visibilities, width)
+
+
+def _aerosol(blocks: np.ndarray, x: np.ndarray) -> np.ndarray:
+    """exp(u - alpha x + gamma x^2) by channel, one row per visibility."""
+    exponent = blocks[:, 0:1] - blocks[:, 1:2] * x[None, :]
+    if blocks.shape[1] == 3:
+        exponent = exponent + blocks[:, 2:3] * x[None, :] ** 2
+    return np.exp(exponent)
+
+
+def gas_residuals(
+    estimate: GasEstimate, data: GasData, theta: np.ndarray, visibilities: int
+) -> np.ndarray:
+    """The model minus -ln T over the fitted channels, one visibility after another."""
+    a_r, a_o, blocks = _unpack(estimate, data, theta, visibilities)
+    model = a_r * data.rho[None, :] + a_o * data.kappa[None, :] + _aerosol(blocks, data.x)
+    return (model - data.y[:visibilities]).ravel()
+
+
+def gas_jacobian(
+    estimate: GasEstimate, data: GasData, theta: np.ndarray, visibilities: int
+) -> np.ndarray:
+    """The analytic Jacobian of the residuals: the gas columns are shared, the aerosol's are not.
+
+    A visibility's columns are A, -x A and x^2 A (A its aerosol depth by channel) in its own
+    rows and zero in every other visibility's. `visibilities` may exceed the data's rows: the
+    Jacobian does not read the data, which the six-node invariance check relies on.
+    """
+    _, _, blocks = _unpack(estimate, data, theta, visibilities)
+    channels = data.x.size
+    gas = estimate.gas_parameters
+    aerosol = _aerosol(blocks, data.x)
+    jac = np.zeros((visibilities * channels, gas + visibilities * estimate.aerosol_width))
+    index = 0
+    if estimate.rayleigh_free:
+        jac[:, index] = np.tile(data.rho, visibilities)
+        index += 1
+    if estimate.ozone_free:
+        jac[:, index] = np.tile(data.kappa, visibilities)
+    for i in range(visibilities):
+        rows = slice(i * channels, (i + 1) * channels)
+        base = gas + i * estimate.aerosol_width
+        jac[rows, base] = aerosol[i]
+        jac[rows, base + 1] = -data.x * aerosol[i]
+        if estimate.curved:
+            jac[rows, base + 2] = data.x**2 * aerosol[i]
+    return jac
+
+
+def gas_start(estimate: GasEstimate, data: GasData) -> np.ndarray:
+    """The criterion's start: the paper's Rayleigh and ozone, and at each visibility an aerosol
+    depth of ȳ(V) less the paper's gas (at least 0.001), alpha 1.3 and gamma 0."""
+    start: list[float] = []
+    if estimate.rayleigh_free:
+        start.append(data.r_paper)
+    if estimate.ozone_free:
+        start.append(GAS_OZONE_START)
+    for y_bar in data.y_bar:
+        start.append(math.log(max(float(y_bar) - data.g_paper, GAS_START_FLOOR)))
+        start.append(GAS_START_ALPHA)
+        if estimate.curved:
+            start.append(GAS_START_GAMMA)
+    return np.array(start)
+
+
+def gas_weights(estimate: GasEstimate, data: GasData, parameters: int) -> np.ndarray:
+    """q, the derivative of G with respect to the parameters: rho-bar for a_R, kappa-bar for a_O
+    and 0 for every aerosol parameter."""
+    q = np.zeros(parameters)
+    index = 0
+    if estimate.rayleigh_free:
+        q[index] = data.rho_bar
+        index += 1
+    if estimate.ozone_free:
+        q[index] = data.kappa_bar
+    return q
+
+
+def residual_variance(ssr: float, values: int, parameters: int) -> float:
+    """s2: the sum of squared residuals over the values less the fitted parameters.
+
+    Infinite where nothing is left over (no degrees of freedom), so the error is then infinite.
+    """
+    free = values - parameters
+    return ssr / free if free > 0 else math.inf
+
+
+def standard_error(jac: np.ndarray, q: np.ndarray, s2: float) -> float:
+    """sqrt(q' C q) with C = s2 (J'J)^-1; infinite if `numpy.linalg.inv` raises or if q' C q is
+    not a positive finite number."""
+    try:
+        inverse = np.linalg.inv(jac.T @ jac)
+    except np.linalg.LinAlgError:
+        return math.inf
+    with np.errstate(invalid="ignore", over="ignore"):
+        variance = float(q @ (s2 * inverse) @ q)
+    return math.sqrt(variance) if math.isfinite(variance) and variance > 0.0 else math.inf
+
+
+@dataclass(frozen=True)
+class GasFit:
+    """One estimate fitted: the solution, its gas, its error and the conditioning at it."""
+
+    estimate: GasEstimate
+    theta: np.ndarray
+    jac: np.ndarray  # the analytic Jacobian at the solution, unscaled
+    ssr: float
+    values: int
+    parameters: int
+    status: int
+    a_r: float
+    a_o: float
+    gas: float  # G = a_R rho-bar + a_O kappa-bar
+    se: float  # 0 where no gas parameter is fitted, infinite where it is not defined
+    rms: float  # sqrt(SSR / values)
+    condition: float  # the 2-norm condition number of `jac`
+
+    @property
+    def s2(self) -> float:
+        return residual_variance(self.ssr, self.values, self.parameters)
+
+    @property
+    def ozone_du(self) -> float:
+        return self.a_o * 1e3
+
+    def excess_over(self, y_bar_p: float) -> float:
+        """g = ȳ(V_p) - G - 0.1: Prague's aerosol depth at V_p minus v1's, under this estimate."""
+        return y_bar_p - self.gas - DEPTH_LOADS[-1]
+
+
+def fit_gas_estimate(estimate: GasEstimate, data: GasData) -> GasFit:
+    """Fit one estimate to every visibility of `data`; a fit with status <= 0 is refused."""
+    visibilities = data.y.shape[0]
+
+    def residuals(theta: np.ndarray) -> np.ndarray:
+        return gas_residuals(estimate, data, theta, visibilities)
+
+    def jacobian(theta: np.ndarray) -> np.ndarray:
+        return gas_jacobian(estimate, data, theta, visibilities)
+
+    result = least_squares(residuals, gas_start(estimate, data), jac=jacobian, **GAS_FIT_SETTINGS)
+    if result.status <= 0:
+        raise PragueError(
+            f"{estimate.label} did not converge (status {result.status}, "
+            f"{getattr(result, 'message', 'no message')}): the report is not written"
+        )
+    theta = np.asarray(result.x, dtype=float)
+    final = residuals(theta)
+    ssr = float(final @ final)
+    jac = jacobian(theta)
+    a_r, a_o, _ = _unpack(estimate, data, theta, visibilities)
+    s2 = residual_variance(ssr, final.size, theta.size)
+    se = (
+        standard_error(jac, gas_weights(estimate, data, theta.size), s2)
+        if estimate.gas_parameters
+        else 0.0
+    )
+    return GasFit(
+        estimate=estimate,
+        theta=theta,
+        jac=jac,
+        ssr=ssr,
+        values=final.size,
+        parameters=theta.size,
+        status=int(result.status),
+        a_r=a_r,
+        a_o=a_o,
+        gas=a_r * data.rho_bar + a_o * data.kappa_bar,
+        se=se,
+        rms=math.sqrt(ssr / final.size),
+        condition=float(np.linalg.cond(jac)),
+    )
+
+
+@dataclass(frozen=True)
+class Invariance:
+    """Problem 1's checks, for the estimates that fit a gas parameter (keyed by their number).
+
+    Each ratio is a standard error over the pilot's, at the pilot's s2: the aerosol columns
+    scaled by each factor; the first visibility's alpha raised (the control, which must move);
+    each spectrum's fitted aerosol taken three times (six nodes).
+    """
+
+    estimates: tuple[int, ...]
+    scale_ratios: dict[int, dict[float, float]]
+    alpha_ratios: dict[int, float]
+    triple_ratios: dict[int, float]
+
+    @property
+    def scale_largest(self) -> float:
+        return max(abs(r - 1.0) for ratios in self.scale_ratios.values() for r in ratios.values())
+
+    @property
+    def alpha_smallest(self) -> float:
+        return min(abs(r - 1.0) for r in self.alpha_ratios.values())
+
+    @property
+    def triple_largest(self) -> float:
+        return max(abs(r - 1 / math.sqrt(INVARIANCE_COPIES)) for r in self.triple_ratios.values())
+
+
+def invariance_checks(fits: Sequence[GasFit], data: GasData) -> Invariance:
+    """The invariance of the standard error under the nodes' amounts and under repeated nodes."""
+    visibilities = data.y.shape[0]
+    numbers: list[int] = []
+    scale: dict[int, dict[float, float]] = {}
+    alpha: dict[int, float] = {}
+    triple: dict[int, float] = {}
+    for fit in fits:
+        estimate = fit.estimate
+        if not estimate.gas_parameters:
+            continue
+        gas = estimate.gas_parameters
+        q = gas_weights(estimate, data, fit.theta.size)
+        numbers.append(estimate.number)
+        ratios = {}
+        for factor in INVARIANCE_FACTORS:
+            scaled = fit.jac.copy()
+            scaled[:, gas:] *= factor
+            ratios[factor] = standard_error(scaled, q, fit.s2) / fit.se
+        scale[estimate.number] = ratios
+        raised = fit.theta.copy()
+        raised[gas + 1] += ALPHA_CONTROL_STEP  # the first visibility's alpha
+        moved = gas_jacobian(estimate, data, raised, visibilities)
+        alpha[estimate.number] = standard_error(moved, q, fit.s2) / fit.se
+        blocks = fit.theta[gas:].reshape(visibilities, estimate.aerosol_width)
+        repeated = np.concatenate(
+            [fit.theta[:gas], np.repeat(blocks, INVARIANCE_COPIES, axis=0).ravel()]
+        )
+        nodes = visibilities * INVARIANCE_COPIES
+        wide = gas_jacobian(estimate, data, repeated, nodes)
+        q_wide = gas_weights(estimate, data, repeated.size)
+        triple[estimate.number] = standard_error(wide, q_wide, fit.s2) / fit.se
+    return Invariance(tuple(numbers), scale, alpha, triple)
+
+
+@dataclass(frozen=True)
+class DepthSun:
+    """#49's amount part at one sun, and where it crosses the bar (the 0.1 load's condition)."""
+
+    sun: float
+    L: float  # #49's offset at the condition
+    m: float  # the reading noise
+    delta_m: float  # the amount's part, L - L_matched
+    g_old: float  # the old excess: Prague's depth at V_p less its depth at the match
+    g_paper: float  # the paper's excess, estimate 4's, for the ratio at the paper's excess
+
+    @property
+    def bar(self) -> float:
+        return OFFSET_BAR_FACTOR * self.m
+
+    @property
+    def g_star(self) -> float:
+        """The excess at which the amount's part equals the bar, scaled linearly in g."""
+        return self.g_old * self.bar / self.delta_m
+
+    @property
+    def carrying(self) -> float:
+        """The excess the amount's part would need to reach half the offset."""
+        return self.g_old * (self.L * CARRIES_SHARE) / self.delta_m
+
+    @property
+    def delta_m_over_bar(self) -> float:
+        return self.delta_m / self.bar
+
+    @property
+    def at_paper(self) -> float:
+        """The amount's part at the paper's excess, scaled linearly, in multiples of the bar."""
+        return self.delta_m * self.g_paper / (self.g_old * self.bar)
+
+
+@dataclass(frozen=True)
+class DepthResult:
+    """The pilot, and everything the report prints, from the four fixtures."""
+
+    data: GasData
+    visibilities_km: tuple[float, float]  # V_0.03 and V_p
+    fits: tuple[GasFit, ...]
+    gas_old: float  # v1's gas at 550 nm at its own pressure, what the old estimate subtracts
+    gas_paper: float
+    gas_interpolation: float  # of G_paper - G_old: v1's gas interpolated like G, less G_old
+    gas_pressure: float  # and the rest, the pressure
+    suns: tuple[DepthSun, ...]
+    y_bar_clearest: float  # ȳ(131.8 km), from the recorded clamped match and the old gas
+    invariance: Invariance
+
+    @property
+    def y_bar_p(self) -> float:
+        return float(self.data.y_bar[-1])
+
+    @property
+    def g_max(self) -> float:
+        """The largest excess Prague's clearest node leaves: ȳ(V_p) - ȳ(131.8)."""
+        return self.y_bar_p - self.y_bar_clearest
+
+    @property
+    def threshold_003(self) -> float:
+        """The gas a match at the 0.03 load would need."""
+        return self.y_bar_clearest - DEPTH_LOADS[0]
+
+    def excess(self, fit: GasFit) -> float:
+        return fit.excess_over(self.y_bar_p)
+
+    def low(self, fit: GasFit) -> float:
+        return self.excess(fit) - SE_MULTIPLE * fit.se
+
+    def high(self, fit: GasFit) -> float:
+        return self.excess(fit) + SE_MULTIPLE * fit.se
+
+
+def _depth_entry(data: dict, aod: float) -> dict:
+    return data["atmospheres"][f"{aod:g}"]
+
+
+def check_depth_fixtures_agree(fixtures: dict[float, dict]) -> None:
+    """Refuse fixtures that do not hold identical spectra and the same clamped match.
+
+    The four fixtures hold the same Prague transmittance (it does not depend on the sun), and
+    the pilot fits one pair of spectra: a disagreement means another tool wrote them.
+    """
+    first = OFFSET_FIXTURE_SUNS_DEG[0]
+    base = fixtures[first]
+    for sun in OFFSET_FIXTURE_SUNS_DEG:
+        _require(
+            _is_number(_depth_entry(fixtures[sun], DEPTH_LOADS[0]).get("visibility_km"))
+            and _is_number(_depth_entry(fixtures[sun], DEPTH_LOADS[1]).get("visibility_km")),
+            f"for sun {_sun_label(sun)}",
+            "visibility_km is not a finite number",
+        )
+    for sun in OFFSET_FIXTURE_SUNS_DEG[1:]:
+        data = fixtures[sun]
+        if data["channel_centres_nm"] != base["channel_centres_nm"]:
+            raise PragueError(
+                f"the channel centres of the sun {_sun_label(sun)} fixture are not identical to "
+                f"the sun {_sun_label(first)} fixture's: the four fixtures must hold identical "
+                "spectra"
+            )
+        for aod in DEPTH_LOADS:
+            ours, theirs = _depth_entry(data, aod), _depth_entry(base, aod)
+            same = (
+                ours["diagnostics"]["zenith_transmittance"]
+                == theirs["diagnostics"]["zenith_transmittance"]
+                and ours["visibility_km"] == theirs["visibility_km"]
+            )
+            if not same:
+                raise PragueError(
+                    f"the {aod:g} spectrum of the sun {_sun_label(sun)} fixture is not identical "
+                    f"to the sun {_sun_label(first)} fixture's: the pilot fits one pair of "
+                    "spectra, so the four fixtures must hold identical spectra"
+                )
+        clear = DEPTH_LOADS[0]
+        if (
+            _depth_entry(data, clear)["diagnostics"]["matched_aerosol_depth"]
+            != _depth_entry(base, clear)["diagnostics"]["matched_aerosol_depth"]
+        ):
+            raise PragueError(
+                f"the {clear:g} load's clamped match of the sun {_sun_label(sun)} fixture is not "
+                f"the sun {_sun_label(first)} fixture's: the four fixtures must agree"
+            )
+
+
+def clearest_match_depth(fixtures: dict[float, dict]) -> float:
+    """The 0.03 load's recorded depth at Prague's largest visibility: refused unless it is clamped.
+
+    A match that is not clamped sits at some other visibility, and its depth is no value of
+    ȳ at 131.8 km.
+    """
+    matched = _depth_entry(fixtures[OFFSET_FIXTURE_SUNS_DEG[0]], DEPTH_LOADS[0])["diagnostics"][
+        "matched_aerosol_depth"
+    ]
+    if not matched["clamped_at_largest_visibility"]:
+        raise PragueError(
+            f"the {DEPTH_LOADS[0]:g} load's match is not clamped at Prague's largest visibility, "
+            f"{CLEAREST_VISIBILITY_KM:g} km, so its recorded depth is not the depth there"
+        )
+    return float(matched["prague_aerosol_depth"])
+
+
+def depth_crossing(sun: float, condition: OffsetCondition, g_paper: float) -> DepthSun:
+    """#49's amount part at one sun, refused where it is not a quantity that can be scaled."""
+    where = f"sun {_sun_label(sun)}"
+    delta_m = condition.delta_m
+    if condition.clamped or delta_m is None:
+        raise PragueError(
+            f"{where}: the {condition.aod:g} load's match is clamped at Prague's clearest "
+            "visibility, so there is no amount's part to scale"
+        )
+    if not (math.isfinite(delta_m) and delta_m > 0.0):
+        raise PragueError(
+            f"{where}: the amount's part Delta_M is {delta_m!r}, not above 0: there is no "
+            "crossing to find"
+        )
+    m = condition.p.m
+    if not (math.isfinite(m) and m > 0.0):
+        raise PragueError(f"{where}: the reading noise m is {m!r}, not above 0: the bar 2m is 0")
+    g_old = condition.depth - condition.depth_matched
+    if not (math.isfinite(g_old) and g_old > 0.0):
+        raise PragueError(
+            f"{where}: Prague's depth is not above its depth at the match (g_old {g_old!r}): "
+            "there is no old excess to scale"
+        )
+    return DepthSun(sun, condition.p.L, m, delta_m, g_old, g_paper)
+
+
+def depth_pilot(fixtures: dict[float, dict]) -> DepthResult:
+    """The eight estimates fitted to the fixtures' two spectra, and what is printed beside them.
+
+    `fixtures` maps the sun elevation (+10, 0, -1, +1) to the fixture's contents, which are
+    checked, and neither edited nor written. Nothing here evaluates Prague.
+    """
+    if set(fixtures) != set(OFFSET_FIXTURE_SUNS_DEG):
+        raise PragueError(f"the depth report needs the fixtures at suns {OFFSET_FIXTURE_SUNS_DEG}")
+    for sun in OFFSET_FIXTURE_SUNS_DEG:
+        check_offset_fixture(fixtures[sun], sun)
+    check_depth_fixtures_agree(fixtures)
+    clearest_depth = clearest_match_depth(fixtures)
+
+    base = fixtures[OFFSET_FIXTURE_SUNS_DEG[0]]
+    data = gas_data(
+        base["channel_centres_nm"],
+        [_depth_entry(base, aod)["diagnostics"]["zenith_transmittance"] for aod in DEPTH_LOADS],
+    )
+    fits = tuple(fit_gas_estimate(estimate, data) for estimate in GAS_ESTIMATES)
+    paper = next(fit for fit in fits if fit.estimate.number == 4)  # the paper's gas, both fixed
+
+    rayleigh_old, ozone_old = v1_gas_depth_at_550(Atmosphere(0.0).pressure_hpa)
+    gas_old = rayleigh_old + ozone_old
+    interpolated = rayleigh_old * data.rho_bar + GAS_OZONE_START * data.kappa_bar
+    y_bar_p = float(data.y_bar[-1])
+    g_paper = paper.excess_over(y_bar_p)
+    suns = tuple(
+        depth_crossing(sun, offset_condition(fixtures[sun], DEPTH_LOADS[-1]), g_paper)
+        for sun in DEPTH_SUNS_DEG
+    )
+    return DepthResult(
+        data=data,
+        visibilities_km=tuple(  # type: ignore[arg-type]
+            float(_depth_entry(base, aod)["visibility_km"]) for aod in DEPTH_LOADS
+        ),
+        fits=fits,
+        gas_old=gas_old,
+        gas_paper=paper.gas,
+        gas_interpolation=interpolated - gas_old,
+        gas_pressure=paper.gas - interpolated,
+        suns=suns,
+        y_bar_clearest=clearest_depth + gas_old,
+        invariance=invariance_checks(fits, data),
+    )
+
+
+def format_two_se(se: float) -> str:
+    """Twice the standard error as printed: 4 decimals, 0 where no gas parameter is fitted."""
+    if se == 0.0:
+        return "0"
+    return f"{SE_MULTIPLE * se:.4f}"
+
+
+def format_condition(value: float) -> str:
+    """A condition number as the criterion prints it: three significant digits under 1000, and
+    four in scientific form from there (882, 14.1, 1.470e4)."""
+    if value < 999.5:
+        return f"{value:.3g}"
+    mantissa, exponent = f"{value:.3e}".split("e")
+    return f"{mantissa}e{int(exponent)}"
+
+
+def _depth_pilot_section(result: DepthResult) -> list[str]:
+    lines: list[str] = []
+    out = lines.append
+    low_km, p_km = result.visibilities_km
+    out("### #55: Prague's aerosol amount from its own gas depths, no test (pre-registered)")
+    out("")
+    out(
+        "The criterion (`docs/renderer/prague-aerosol-depth-criterion.md`) registers the six-node "
+        "route as no test, with its evidence. This report prints the evidence that data in hand "
+        "can give: eight gas estimates fitted to the two spectra the fixtures hold, the crossings "
+        "of #49's amount part, the clearest node, and the invariance checks of the criterion's "
+        "problem 1. No six-node fit is run, no verdict is printed, and nothing is written: it "
+        "reads the four committed fixtures and v1, and runs no Prague evaluation."
+    )
+    out("")
+    out("#### The pilot (not a test): eight gas estimates fitted to the two committed spectra")
+    out("")
+    out(
+        f"Prague's zenith transmittance at V = {low_km:.4f} km (the {DEPTH_LOADS[0]:g} load's "
+        f"visibility) and V_p = {p_km:.4f} km (the {DEPTH_LOADS[1]:g} load's), the same eleven "
+        "numbers each in all four fixtures. y = -ln T over the ten channels centred 380 to 740 nm "
+        "(340 nm left out), 20 values. Model: a_R rho_c + a_O kappa_c + exp(u_i - alpha_i x_c + "
+        "gamma_i x_c^2), x_c = ln(lambda_c / 550 nm); a_R and a_O shared, u_i, alpha_i, gamma_i "
+        "one set per visibility. Unweighted least squares, `scipy.optimize.least_squares` "
+        "(method trf, analytic Jacobian, xtol = ftol = gtol = 1e-15, at most 20000 evaluations). "
+        f"The paper's Rayleigh is R_paper = {result.data.r_paper:.5f} at {PAPER_PRESSURE_HPA:.4f} "
+        f"hPa (the U.S. Standard pressure at {PAPER_ALTITUDE_M:g} m, unrounded); its ozone is "
+        f"{GAS_OZONE_START:g} atm cm."
+    )
+    out("")
+    out("| estimate | aerosol form | ozone | Rayleigh |")
+    out("| --- | --- | --- | --- |")
+    for fit in result.fits:
+        e = fit.estimate
+        out(
+            f"| {e.number} | {e.form} | {'free' if e.ozone_free else 'paper'} "
+            f"| {'free' if e.rayleigh_free else 'paper'} |"
+        )
+    out("")
+    out(
+        "G is the gas depth at 550 nm, a_R rho-bar + a_O kappa-bar (rho-bar "
+        f"{result.data.rho_bar:.5f}, kappa-bar {result.data.kappa_bar:.6f} per atm cm); 2SE twice "
+        "its standard error, sqrt(q' s2 (J'J)^-1 q) with s2 the sum of squared residuals over the "
+        "values less the fitted parameters (0 where no gas parameter is fitted); g = ybar(V_p) - "
+        "G - 0.1 is Prague's aerosol depth at V_p minus v1's under that estimate; the residual "
+        "rms is over all 20 values; the condition number is that of the unscaled J at the "
+        "solution."
+    )
+    out("")
+    out(
+        "| estimate | G | 2SE | g | g - 2SE | g + 2SE | residual rms | a_R | ozone (DU) "
+        "| condition number |"
+    )
+    out("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+    for fit in result.fits:
+        out(
+            f"| {fit.estimate.number} | {fit.gas:.4f} | {format_two_se(fit.se)} "
+            f"| {result.excess(fit):.4f} | {result.low(fit):.4f} | {result.high(fit):.4f} "
+            f"| {fit.rms:.5f} | {fit.a_r:.4f} | {fit.ozone_du:.1f} "
+            f"| {format_condition(fit.condition)} |"
+        )
+    out("")
+    return lines
+
+
+def _depth_printed_section(result: DepthResult) -> list[str]:
+    lines: list[str] = []
+    out = lines.append
+    out("#### The pilot, the bullets marked printed: the old estimate, the crossings, the node")
+    out("")
+    out(
+        "The old estimate subtracts v1's gas at 550 nm (its Rayleigh depth at its own "
+        f"{Atmosphere(0.0).pressure_hpa:g} hPa and its ozone for {US_STANDARD_OZONE_DU:g} DU) "
+        "from a total interpolated between the 540 and 580 nm channel centres. The same gas "
+        "interpolated the same way is G_paper, estimate 4's gas. The difference splits into the "
+        "interpolation (v1's gas interpolated like G, less G_old) and the pressure (G_paper "
+        "less that):"
+    )
+    out("")
+    out("| gas depth at 550 nm | value |")
+    out("| --- | --- |")
+    out(f"| G_paper | {result.gas_paper:.5f} |")
+    out(f"| G_old | {result.gas_old:.5f} |")
+    out(f"| G_paper - G_old | {result.gas_paper - result.gas_old:.5f} |")
+    out(f"| of which the interpolation | {result.gas_interpolation:.5f} |")
+    out(f"| of which the pressure | {result.gas_pressure:.5f} |")
+    out("")
+    paper = next(f for f in result.fits if f.estimate.number == 4)
+    out(
+        f"The paper's gas puts the excess at g_4 = {result.excess(paper):.4f}, not the old "
+        f"g_old = {result.suns[0].g_old:.4f} (Prague's depth at V_p less its depth at the "
+        "match, both under the old estimate)."
+    )
+    out("")
+    out(
+        "The crossings, at the 0.1 load of each fixture. L is #49's offset, m its reading noise, "
+        "b = 2m the bar, Delta_M #49's amount part; scaled linearly in g from the match at the "
+        "old excess, the amount's part equals the bar at g* = g_old b / Delta_M and reaches half "
+        "the offset at the carrying excess g_old (L / 2) / Delta_M; at the paper's excess it is "
+        "Delta_M g_4 / (g_old b) times the bar:"
+    )
+    out("")
+    out(
+        "| sun | L | m | bar b = 2m | Delta_M | g_old | g* | carrying excess | Delta_M / b "
+        "| Delta_M g_4 / (g_old b) |"
+    )
+    out("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+    for row in result.suns:
+        out(
+            f"| {_sun_label(row.sun)} | {row.L:.4f} | {row.m:.4f} | {row.bar:.4f} "
+            f"| {row.delta_m:.4f} | {row.g_old:.5f} | {row.g_star:.4f} | {row.carrying:.4f} "
+            f"| {row.delta_m_over_bar:.3f} | {row.at_paper:.3f} |"
+        )
+    out("")
+    out(
+        f"The clearest node. ybar({CLEAREST_VISIBILITY_KM:g}) is the {DEPTH_LOADS[0]:g} load's "
+        "recorded clamped match depth plus G_old; g_max = ybar(V_p) - ybar("
+        f"{CLEAREST_VISIBILITY_KM:g}) is the most excess Prague's clearest node leaves; a match "
+        f"at the {DEPTH_LOADS[0]:g} load would need a gas of ybar({CLEAREST_VISIBILITY_KM:g}) - "
+        f"{DEPTH_LOADS[0]:g}:"
+    )
+    out("")
+    out("| the clearest node | value |")
+    out("| --- | --- |")
+    out(f"| ybar({CLEAREST_VISIBILITY_KM:g}) | {result.y_bar_clearest:.5f} |")
+    out(f"| g_max | {result.g_max:.4f} |")
+    out(f"| {DEPTH_LOADS[0]:g} load's G threshold | {result.threshold_003:.4f} |")
+    out("")
+    largest = max(fit.gas for fit in result.fits)
+    out(f"The largest of the eight G is {largest:.4f}.")
+    out("")
+    return lines
+
+
+def _depth_invariance_section(result: DepthResult) -> list[str]:
+    lines: list[str] = []
+    out = lines.append
+    inv = result.invariance
+    out("#### The pilot, invariance of the standard error under the amounts (problem 1)")
+    out("")
+    out(
+        "For the six estimates that fit a gas parameter, at the pilot's s2 throughout. Each "
+        "node's aerosol columns of J scaled by 0.5 and by 2, as |ratio - 1| of the standard "
+        "error to the pilot's; the control that must move, J with the first visibility's alpha "
+        f"raised by {ALPHA_CONTROL_STEP:g}, as the ratio; and the six-node ratio, each pilot "
+        "spectrum's fitted aerosol taken three times (each copy with its own aerosol "
+        "parameters, the gas columns shared):"
+    )
+    out("")
+    out(
+        "| estimate | aerosol x 0.5, abs(ratio - 1) | aerosol x 2, abs(ratio - 1) "
+        "| control, alpha_1 + 0.5, ratio | six nodes, ratio |"
+    )
+    out("| --- | --- | --- | --- | --- |")
+    for number in inv.estimates:
+        half, double = (abs(inv.scale_ratios[number][f] - 1.0) for f in INVARIANCE_FACTORS)
+        out(
+            f"| {number} | {half:.1e} | {double:.1e} | {inv.alpha_ratios[number]:.4f} "
+            f"| {inv.triple_ratios[number]:.4f} |"
+        )
+    out("")
+    out(
+        f"Largest |ratio - 1| over the six estimates and both factors: {inv.scale_largest:.1e} "
+        "(the criterion: under 1e-9)"
+    )
+    out("")
+    out(
+        f"Smallest |ratio - 1| of the control over the six estimates: {inv.alpha_smallest:.4f} "
+        "(the criterion: 0.0180)"
+    )
+    out("")
+    out(
+        f"Largest |ratio - 1/sqrt(3)| over the six estimates: {inv.triple_largest:.1e} "
+        "(the criterion: under 1e-9)"
+    )
+    out("")
+    out(
+        "No verdict is printed. The criterion registers the route as no test: with each node's "
+        "shape free the amounts add no information about the gas, which is what these ratios "
+        "show. What would tell is in its section on #57."
+    )
+    out("")
+    return lines
+
+
+def format_depth(result: DepthResult) -> str:
+    """The whole report: the pilot table, the printed bullets, the invariance checks."""
+    lines: list[str] = []
+    for section in (_depth_pilot_section, _depth_printed_section, _depth_invariance_section):
+        lines.extend(section(result))
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def report_depth(fixtures: dict[float, dict]) -> str:
+    """The #55 evidence on the four fixtures, as the report text; refuses before any output."""
+    return format_depth(depth_pilot(fixtures))
+
+
+def cmd_report_depth() -> None:
+    """Print the depth report; the text is complete before anything is written to stdout."""
+    sys.stdout.write(report_depth(read_offset_fixtures()))
+
+
 def cmd_report(spec: FixtureSpec = SUN10) -> None:
     if spec.sun_elevation_deg not in (SUN_ELEVATION_DEG, 0.0):
         raise PragueError(
@@ -3253,6 +4083,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="report: the offset rules of #49, from all four fixtures (--sun is not used)",
     )
+    parser.add_argument(
+        "--depth",
+        action="store_true",
+        help="report: the evidence for #55 (the aerosol amount, no test), from all four fixtures "
+        "(--sun is not used)",
+    )
     return parser
 
 
@@ -3261,6 +4097,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.offset and "report" not in args.command:
         parser.error("--offset is an option of `report`")
+    if args.depth and "report" not in args.command:
+        parser.error("--depth is an option of `report`")
+    if args.depth and args.offset:
+        parser.error("--depth and --offset are different reports: give one")
     status = 0
     for command in args.command:
         try:
@@ -3271,6 +4111,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             elif command == "fixture":
                 spec = fixture_spec(args.sun, args.output)
                 status = max(status, cmd_fixture(args.cache, spec, check=args.check))
+            elif args.depth:
+                cmd_report_depth()
             elif args.offset:
                 cmd_report_offset()
             else:
