@@ -737,6 +737,145 @@ def test_fixtures_with_different_channel_centres_are_refused() -> None:
         tool.depth_pilot(fixtures)
 
 
+REGISTERED_CENTRES = [340.0 + 40.0 * i for i in range(11)]
+"""The eleven channel centres the fixtures hold: 340 to 740 nm by 40, ascending."""
+
+
+def committed_centres_and_rows() -> tuple[list[float], list[list[float]]]:
+    return (
+        list(_committed(10.0)["channel_centres_nm"]),
+        [list(spectrum(_committed(10.0), aod)) for aod in LOADS],
+    )
+
+
+def fixtures_with_channels(centres: list[float], keep: list[int]) -> dict[float, dict]:
+    """All four fixtures given these centres, and only the spectra columns `keep` (in this order),
+    so the four still agree with one another and only the channels have changed."""
+    fixtures = fresh_fixtures()
+    for data in fixtures.values():
+        data["channel_centres_nm"] = list(centres)
+        for aod in LOADS:
+            diagnostics = data["atmospheres"][f"{aod:g}"]["diagnostics"]
+            row = diagnostics["zenith_transmittance"]
+            diagnostics["zenith_transmittance"] = [row[i] for i in keep]
+    return fixtures
+
+
+def test_the_registered_centres_are_what_the_committed_fixtures_hold() -> None:
+    assert _committed(10.0)["channel_centres_nm"] == REGISTERED_CENTRES
+    assert tool_data().centres.tolist() == REGISTERED_CENTRES[1:]
+
+
+@pytest.mark.parametrize("shift", [1.0, -1.0, 40.0, 2e-9])
+def test_centres_that_are_not_the_registered_ones_are_refused_not_fitted(shift: float) -> None:
+    """The fit is the channels centred at 380, 420, ..., 740 nm: a +1 nm shift is not them."""
+    tool = load_tool()
+    centres, rows = committed_centres_and_rows()
+    with pytest.raises(tool.PragueError, match="registered eleven"):
+        tool.gas_data([c + shift for c in centres], rows)
+    with pytest.raises(tool.PragueError, match="registered eleven"):
+        tool.depth_pilot(fixtures_with_channels([c + shift for c in centres], list(range(11))))
+
+
+@pytest.mark.parametrize("shift", [0.0, 5e-10, -5e-10])
+def test_a_centre_within_a_billionth_of_a_nanometre_is_the_same_centre(shift: float) -> None:
+    tool = load_tool()
+    centres, rows = committed_centres_and_rows()
+    data = tool.gas_data([c + shift for c in centres], rows)
+    assert data.centres.size == 10
+    np.testing.assert_allclose(data.centres, CENTRES, rtol=0, atol=1e-9)
+    np.testing.assert_allclose(data.y, pilot_y(), rtol=1e-14)
+
+
+@pytest.mark.parametrize("dropped", range(11))
+def test_a_dropped_channel_is_refused_whichever_channel_it_is(dropped: int) -> None:
+    """Including the 340 nm one: ten channels are not the fit's ten unless they are 380 to 740."""
+    tool = load_tool()
+    centres, rows = committed_centres_and_rows()
+    keep = [i for i in range(11) if i != dropped]
+    kept = [centres[i] for i in keep]
+    with pytest.raises(tool.PragueError, match="registered eleven"):
+        tool.gas_data(kept, [[row[i] for i in keep] for row in rows])
+    with pytest.raises(tool.PragueError, match="registered eleven"):
+        tool.depth_pilot(fixtures_with_channels(kept, keep))
+
+
+def test_an_extra_channel_is_refused() -> None:
+    tool = load_tool()
+    centres, rows = committed_centres_and_rows()
+    with pytest.raises(tool.PragueError, match="registered eleven"):
+        tool.gas_data([*centres, 780.0], [[*row, row[-1]] for row in rows])
+
+
+def test_descending_centres_are_refused_not_fitted_in_the_order_given() -> None:
+    tool = load_tool()
+    centres, rows = committed_centres_and_rows()
+    backwards = list(range(10, -1, -1))
+    with pytest.raises(tool.PragueError, match="registered eleven"):
+        tool.gas_data(centres[::-1], [row[::-1] for row in rows])
+    with pytest.raises(tool.PragueError, match="registered eleven"):
+        tool.depth_pilot(fixtures_with_channels(centres[::-1], backwards))
+
+
+def test_a_centre_that_is_not_a_number_is_refused() -> None:
+    tool = load_tool()
+    centres, rows = committed_centres_and_rows()
+    centres[3] = math.nan
+    with pytest.raises(tool.PragueError, match="registered eleven"):
+        tool.gas_data(centres, rows)
+
+
+V_003_KM = 123.8187372
+V_P_KM = 49.9864309567
+
+
+def with_visibility(aod: float, km: float) -> dict[float, dict]:
+    """All four fixtures with the `aod` load's visibility set to `km` (they still agree)."""
+    fixtures = fresh_fixtures()
+    for data in fixtures.values():
+        data["atmospheres"][f"{aod:g}"]["visibility_km"] = km
+    return fixtures
+
+
+def test_the_committed_loads_have_the_criterions_visibilities() -> None:
+    for aod, km in zip(LOADS, (V_003_KM, V_P_KM), strict=True):
+        assert _committed(10.0)["atmospheres"][f"{aod:g}"]["visibility_km"] == pytest.approx(
+            km, abs=1e-6, rel=0
+        )
+
+
+@pytest.mark.parametrize("aod", LOADS)
+@pytest.mark.parametrize("shift", [2e-6, -2e-6, 1e-3, -5.0])
+def test_a_load_whose_visibility_is_not_the_registered_one_is_refused(
+    aod: float, shift: float
+) -> None:
+    tool = load_tool()
+    registered = dict(zip(LOADS, (V_003_KM, V_P_KM), strict=True))[aod]
+    with pytest.raises(tool.PragueError, match=f"the {aod:g} load's visibility") as raised:
+        tool.depth_pilot(with_visibility(aod, registered + shift))
+    assert f"{registered + shift!r}" in str(raised.value)
+
+
+def test_the_two_visibilities_swapped_between_the_loads_are_refused() -> None:
+    tool = load_tool()
+    fixtures = with_visibility(0.03, V_P_KM)
+    for data in fixtures.values():
+        data["atmospheres"]["0.1"]["visibility_km"] = V_003_KM
+    with pytest.raises(tool.PragueError, match="load's visibility"):
+        tool.depth_pilot(fixtures)
+
+
+@pytest.mark.parametrize("aod", LOADS)
+@pytest.mark.parametrize("shift", [0.0, 5e-7, -5e-7])
+def test_a_visibility_within_a_millionth_of_a_kilometre_is_the_registered_one(
+    aod: float, shift: float
+) -> None:
+    tool = load_tool()
+    registered = dict(zip(LOADS, (V_003_KM, V_P_KM), strict=True))[aod]
+    result = tool.depth_pilot(with_visibility(aod, registered + shift))
+    assert [f.estimate.number for f in result.fits] == list(range(1, 9))
+
+
 def test_fixtures_with_different_clamped_matches_for_the_clearest_load_are_refused() -> None:
     tool = load_tool()
     fixtures = fresh_fixtures()
@@ -1277,6 +1416,15 @@ def test_a_standard_error_of_zero_prints_as_0_and_an_infinite_one_as_inf() -> No
     assert tool.format_two_se(0.0016) == "0.0032"
 
 
+def test_a_condition_number_that_is_not_finite_prints_as_inf_or_nan_and_does_not_raise() -> None:
+    tool = load_tool()
+    assert tool.format_condition(math.inf) == "inf"
+    assert tool.format_condition(math.nan) == "nan"
+    assert tool.format_condition(float(np.float64("inf"))) == "inf"
+    for value, printed in ((14.1475, "14.1"), (882.2, "882"), (14_699.4, "1.470e4")):
+        assert tool.format_condition(value) == printed  # the finite ones are as they were
+
+
 def test_the_report_names_each_estimates_assumptions() -> None:
     rows = table(report_text(), "| estimate | aerosol form |")
     assert [r[0] for r in rows] == [str(k) for k in range(1, 9)]
@@ -1545,3 +1693,9 @@ def test_the_criterion_file_is_the_one_the_tool_reproduces() -> None:
         in text
     )
     assert "No six-node fit is run under it" in text
+
+
+def test_the_provenance_note_lists_the_depth_report_beside_the_other_reports() -> None:
+    text = (FIXTURE_DIR / "PROVENANCE.md").read_text(encoding="utf-8")
+    assert "uv run python tools/prague_reference.py report --depth" in text
+    assert "`report --depth` prints #55's evidence (no test) from all four fixtures" in text

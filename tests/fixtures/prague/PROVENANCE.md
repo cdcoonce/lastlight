@@ -136,13 +136,15 @@ uv run python tools/prague_reference.py fixture --sun -1       # about 30 second
 uv run python tools/prague_reference.py fixture --sun 1
 uv run python tools/prague_reference.py fixture --sun -1 --check
 uv run python tools/prague_reference.py report --offset        # the offset rules of #49, from all four fixtures
+uv run python tools/prague_reference.py report --depth         # #55's evidence (no test), from all four fixtures
 ```
 
 `--sun` takes the sun elevation of a registered fixture (10, 0, -1 or 1); any other is an error,
 and `--output PATH` writes or checks a registered fixture at another path (the recorded command is
 the registered one either way). With no `--sun` the tool does what it did before there were more
 fixtures: `fixture` regenerates `sun10.json` byte for byte. `report --offset` reads all four
-fixtures and ignores `--sun`.
+fixtures and ignores `--sun`; `report --depth` prints #55's evidence (no test) from all four fixtures
+and ignores it too.
 
 `fetch` clones the model at the pinned commit and downloads both datasets, verifying size and SHA-256
 (2.5 GB); `build` compiles `PragueSkyModel.cpp` and lastlight's driver with the system C++17

@@ -3245,9 +3245,14 @@ PAPER_ALTITUDE_M = 340.0
 """The observer's height in the fixtures, 0.34 km, in metres."""
 PAPER_PRESSURE_HPA = STANDARD_PRESSURE_HPA * (1 - 0.0065 * PAPER_ALTITUDE_M / 288.15) ** 5.25588
 """The U.S. Standard pressure at 0.34 km, unrounded (973.0664 hPa as the criterion prints it)."""
+GAS_CHANNEL_CENTRES_NM = tuple(340.0 + 40.0 * i for i in range(11))
+"""The eleven channel centres every fixture holds, ascending: 340 to 740 nm by 40."""
+GAS_CENTRE_TOLERANCE_NM = 1e-9
+"""Two centres this close are the same centre."""
 GAS_FIT_FIRST_NM = 380.0
 """The fit uses the channels centred from here up; SPCTRL2's ozone table starts at 380 nm."""
-GAS_FIT_CHANNELS = 10
+GAS_FIT_CENTRES_NM = tuple(c for c in GAS_CHANNEL_CENTRES_NM if c >= GAS_FIT_FIRST_NM)
+"""The fitted channels' centres: 380, 420, ..., 740 nm."""
 GAS_OZONE_START = US_STANDARD_OZONE_DU / 1e3
 """The paper's ozone column in atm cm (0.345): the fixed value and the start of a free fit."""
 GAS_START_ALPHA = 1.3
@@ -3258,6 +3263,9 @@ GAS_FIT_SETTINGS = {"method": "trf", "xtol": 1e-15, "ftol": 1e-15, "gtol": 1e-15
 """`scipy.optimize.least_squares`, every other argument at its default."""
 DEPTH_LOADS = AEROSOL_OPTICAL_DEPTHS
 """The two loads the fixtures hold, the clearest first: the pilot's two spectra, in this order."""
+DEPTH_VISIBILITIES_KM = (123.8187372, 49.9864309567)
+"""The loads' visibilities as the criterion registers them: V_0.03, then V_p."""
+DEPTH_VISIBILITY_TOLERANCE_KM = 1e-6
 DEPTH_SUNS_DEG = (-1.0, 0.0, 1.0, 10.0)
 """The suns the crossings are printed at, in the criterion's order."""
 CLEAREST_VISIBILITY_KM = 131.8
@@ -3328,20 +3336,30 @@ class GasData:
 def gas_data(centres: Sequence[float], transmittance: Sequence[Sequence[float]]) -> GasData:
     """The fit's inputs from the channel centres and one row of zenith transmittance per visibility.
 
-    The fit takes the ten channels centred at 380 nm and above, chosen by their centre (the 340 nm
-    channel is left out). ȳ(V), the start's total, interpolates all the channels at 550 nm.
+    The fixtures' channel centres must be the registered eleven, 340 to 740 nm by 40 and ascending
+    (each within 1e-9 nm). The fit takes the ten whose centres are 380, 420, ..., 740 nm, chosen by
+    those exact centres (the 340 nm channel is left out). ȳ(V), the start's total, interpolates
+    all the channels at 550 nm.
     """
     all_centres = np.asarray(centres, dtype=float)
     tau = -np.log(np.asarray(transmittance, dtype=float))
     if tau.ndim != 2 or tau.shape[1] != all_centres.size or tau.shape[0] == 0:
         raise PragueError("the spectra are not one row of transmittance per visibility and channel")
-    fitted = all_centres >= GAS_FIT_FIRST_NM
-    chosen = all_centres[fitted]
-    if chosen.size != GAS_FIT_CHANNELS:
+    registered = np.asarray(GAS_CHANNEL_CENTRES_NM)
+    if all_centres.shape != registered.shape or not np.all(
+        np.abs(all_centres - registered) <= GAS_CENTRE_TOLERANCE_NM
+    ):
         raise PragueError(
-            f"the fit needs {GAS_FIT_CHANNELS} channels centred at {GAS_FIT_FIRST_NM:g} nm or "
-            f"above, the fixtures hold {chosen.size}"
+            f"the fixtures' channel centres are {all_centres.tolist()} nm, not the registered "
+            "eleven, 340 to 740 nm by 40 and ascending: the fit takes the channels centred at "
+            f"{GAS_FIT_CENTRES_NM[0]:g}, {GAS_FIT_CENTRES_NM[1]:g}, ..., "
+            f"{GAS_FIT_CENTRES_NM[-1]:g} nm and no others"
         )
+    fit_centres = np.asarray(GAS_FIT_CENTRES_NM)
+    fitted = (
+        np.abs(all_centres[:, None] - fit_centres[None, :]).min(axis=1) <= GAS_CENTRE_TOLERANCE_NM
+    )
+    chosen = all_centres[fitted]
     rho = rayleigh_optical_depth(chosen) / rayleigh_optical_depth(REFERENCE_WAVELENGTH_NM)
     kappa = ozone_absorption_per_atm_cm(chosen)
     return GasData(
@@ -3739,6 +3757,22 @@ def check_depth_fixtures_agree(fixtures: dict[float, dict]) -> None:
             )
 
 
+def check_depth_visibilities(fixtures: dict[float, dict]) -> None:
+    """Refuse loads whose visibility is not the one the criterion registers (to 1e-6 km).
+
+    The fixtures have already been found to agree, so the first one speaks for all four.
+    """
+    base = fixtures[OFFSET_FIXTURE_SUNS_DEG[0]]
+    for aod, registered in zip(DEPTH_LOADS, DEPTH_VISIBILITIES_KM, strict=True):
+        recorded = _depth_entry(base, aod)["visibility_km"]
+        if abs(recorded - registered) > DEPTH_VISIBILITY_TOLERANCE_KM:
+            raise PragueError(
+                f"the {aod:g} load's visibility in the fixtures is {recorded!r} km, not the "
+                f"criterion's {registered!r} km: the pilot's two spectra are Prague's at those two "
+                "visibilities"
+            )
+
+
 def clearest_match_depth(fixtures: dict[float, dict]) -> float:
     """The 0.03 load's recorded depth at Prague's largest visibility: refused unless it is clamped.
 
@@ -3793,6 +3827,7 @@ def depth_pilot(fixtures: dict[float, dict]) -> DepthResult:
     for sun in OFFSET_FIXTURE_SUNS_DEG:
         check_offset_fixture(fixtures[sun], sun)
     check_depth_fixtures_agree(fixtures)
+    check_depth_visibilities(fixtures)
     clearest_depth = clearest_match_depth(fixtures)
 
     base = fixtures[OFFSET_FIXTURE_SUNS_DEG[0]]
@@ -3837,7 +3872,10 @@ def format_two_se(se: float) -> str:
 
 def format_condition(value: float) -> str:
     """A condition number as the criterion prints it: three significant digits under 1000, and
-    four in scientific form from there (882, 14.1, 1.470e4)."""
+    four in scientific form from there (882, 14.1, 1.470e4). A condition number that is not finite
+    (a singular J) prints as inf or nan."""
+    if not math.isfinite(value):
+        return str(float(value))
     if value < 999.5:
         return f"{value:.3g}"
     mantissa, exponent = f"{value:.3e}".split("e")
