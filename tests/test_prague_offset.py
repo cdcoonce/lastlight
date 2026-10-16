@@ -2592,3 +2592,20 @@ def test_the_older_reports_are_written_to_stdout_exactly_as_the_report_functions
         written = capsys.readouterr().out
         assert written == built, argv
         assert written.endswith("\n") and not written.endswith("\n\n"), argv
+
+
+def test_the_verdict_is_taken_on_unrounded_values_not_the_printed_four_digits() -> None:
+    """kappa 0.05002 against the floor 0.05 both print as 0.0500, and the bend is still over it."""
+    tool = load_tool()
+    over_the_floor = (0.30, 0.35002, 0.30)  # kappa = 0.35002 - 0.30 = 0.05002, no noise, bar 0.05
+    rule = rule3({0.03: over_the_floor, 0.1: over_the_floor})
+    fit = rule.conditions[0]
+    assert fit.kappa == pytest.approx(0.05002, rel=1e-6, abs=0)
+    assert fit.condition.bar == 0.05
+    assert f"{fit.condition.removed:.4f}" == f"{fit.condition.bar:.4f}" == "0.0500"
+    assert [f.condition.verdict for f in rule.conditions] == ["contributes", "contributes"]
+    assert (rule.verdict, rule.branch) == ("contributes", 2)
+    # The condition alone: 0.10004 over a bar of 0.10001 (both print 0.1000), under half of 0.3.
+    assert tool._rule_condition("c", 0.10004, 0.3, 0.10001).verdict == "contributes"
+    # And the half, the other comparison: 0.14996 prints 0.1500; half of 0.3 is 0.15, not reached.
+    assert tool._rule_condition("c", 0.14996, 0.3, 0.05).verdict == "contributes"
