@@ -1,12 +1,12 @@
 # Renderer v1: the camera magnitude check
 
-Verdict: NOT YET DECIDABLE (2 of 5 counted evenings)
+Verdict: NOT YET DECIDABLE (3 of 5 counted evenings)
 
 The pre-registered check of [`criterion.md`](criterion.md), run by `lastlight renderer-check` over WHTM1's observed evenings. It asks one coarse question: is renderer v1's within-frame contrast within a factor of two of what the camera sees? A pass says the magnitude is plausible. It says nothing about skill.
 
 ## Verdict
 
-2 of the 5 counted evenings the verdict needs so far: 2026-10-13, 2026-10-15. With fewer than 5 the criterion's verdict is not yet decidable and v0 keeps painting.
+3 of the 5 counted evenings the verdict needs so far: 2026-10-13, 2026-10-15, 2026-10-16. With fewer than 5 the criterion's verdict is not yet decidable and v0 keeps painting.
 
 ## The renderer under test
 
@@ -22,6 +22,7 @@ Engine `v1` with the table `src/lastlight/render/data/bruneton_ms_xyz.bin`, whos
 | 2026-10-13 | counted (first 5, number 1) | 3 | 5.53 | 0.0451 | 1.2229 | 9.9524 | 2.2588 | 1.1813 | 2.0689 | 1.1493 |
 | 2026-10-14 | not considered: 2 used frames | 2 | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | 2026-10-15 | counted (first 5, number 2) | 3 | 0.00 | 0.0168 | 0.4323 | 1.6118 | 0.6698 | 0.4247 | 1.8407 | 1.4007 |
+| 2026-10-16 | counted (first 5, number 3) | 4 | 4.53 | 0.0177 | 1.0247 | 3.5349 | 1.4825 | 1.0100 | 1.9339 | 1.5494 |
 
 ## Reading the table
 
