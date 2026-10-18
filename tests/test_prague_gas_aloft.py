@@ -74,6 +74,52 @@ def pinned(value: float) -> object:
     return pytest.approx(value, rel=1e-6, abs=0)
 
 
+REAL_EVALUATE = load_tool().evaluate
+"""The tool's `evaluate`, which runs the Prague binary: only `driver_stub` ever installs it."""
+
+
+def _unreachable_evaluate(*args, **kwargs):
+    raise AssertionError(
+        "a test reached evaluate, which runs the Prague binary: install a fake `evaluate`"
+    )
+
+
+@pytest.fixture(autouse=True)
+def _no_test_reaches_the_prague_binary(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test starts with the tool's `evaluate` replaced by one that raises.
+
+    The binary is built on the machine that grades this file, so a test that reaches `evaluate`
+    unstubbed would run the model. A test that needs an `evaluate` installs its own fake over this
+    one (`aloft_stand_in`, `replay`, a `monkeypatch.setattr`) or, to grade `evaluate` itself, goes
+    through `driver_stub`, which fakes the driver subprocess too.
+    """
+    monkeypatch.setattr(load_tool(), "evaluate", _unreachable_evaluate)
+
+
+def driver_stub(
+    monkeypatch: pytest.MonkeyPatch, tool: ModuleType, cache: Path, stdout: str
+) -> list[list[str]]:
+    """The real `evaluate` with the driver subprocess faked; returns the commands it was handed.
+
+    A fake binary is made under `cache` (a temporary directory), and `subprocess.run` is replaced
+    by a function that answers `stdout` to a command that names that fake binary and fails the
+    test on any other.
+    """
+    binary = tool.binary_path(cache)
+    binary.parent.mkdir(parents=True)
+    binary.write_text("")
+    commands: list[list[str]] = []
+
+    def run(command, **kwargs):
+        assert command[0] == str(binary), f"a subprocess other than the fake driver: {command[0]}"
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout + "\n", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(tool, "evaluate", REAL_EVALUATE)
+    return commands
+
+
 # --- an independent re-derivation of the criterion's definitions ---------------------------------
 #
 # Written here from the criterion's text, in plain numpy and scipy, so the tool's pieces are graded
@@ -1078,6 +1124,36 @@ def test_perturbing_the_340_nm_channel_moves_neither_end_of_the_envelope() -> No
     assert ends[0] == ends[1] == ends[2]
 
 
+def _sliced(y: np.ndarray, shape: tuple[int, int]) -> np.ndarray:
+    """`y` (6 x 10) cut or padded by repeating its last row and column to `shape`."""
+    rows = np.vstack([y, *([y[-1:]] * max(shape[0] - 6, 0))])[: shape[0]]
+    return np.hstack([rows, *([rows[:, -1:]] * max(shape[1] - 10, 0))])[:, : shape[1]]
+
+
+@pytest.mark.parametrize(
+    ("shape0", "shape15"),
+    [
+        pytest.param((5, 10), (5, 10), id="five nodes"),
+        pytest.param((6, 11), (6, 11), id="eleven channels"),
+        pytest.param((5, 10), (6, 10), id="y0 has five nodes"),
+        pytest.param((6, 10), (5, 10), id="y15 has five nodes"),
+        pytest.param((6, 11), (6, 10), id="y0 has eleven channels"),
+        pytest.param((6, 10), (6, 11), id="y15 has eleven channels"),
+        pytest.param((10, 6), (10, 6), id="transposed"),
+    ],
+)
+def test_the_estimate_refuses_spectra_that_are_not_six_nodes_of_ten_channels(
+    shape0: tuple[int, int], shape15: tuple[int, int]
+) -> None:
+    tool = load_tool()
+    y0, y15 = base_pair()
+    bad0 = y0.T if shape0 == (10, 6) else _sliced(y0, shape0)
+    bad15 = y15.T if shape15 == (10, 6) else _sliced(y15, shape15)
+    assert (bad0.shape, bad15.shape) == (shape0, shape15)
+    with pytest.raises(tool.PragueError, match="not 6 nodes of 10 channels"):
+        tool.aloft_estimate(bad0, bad15, YBAR_P)
+
+
 # --- step 6: the verdict --------------------------------------------------------------------------
 
 G_STAR = {-1.0: 0.0094444, 0.0: 0.0094830, 1.0: 0.0095275, 10.0: 0.0094923}
@@ -1190,6 +1266,35 @@ def test_the_outcomes_are_looked_up_by_sun_in_the_criterion_order() -> None:
     assert [verdict.outcome_at(s) for s in CRITERION_SUNS] == list(verdict.outcomes)
 
 
+def test_g_lo_between_the_unrounded_and_the_printed_crossing_contributes() -> None:
+    """The verdict compares with #55's unrounded crossings (`G_STARS_COMMITTED`), not the five
+    figures printed beside them. Sun -1's prints up (0.0094444 over 0.0094443697...), so an
+    envelope that starts between the two is over the crossing and under the print."""
+    tool = load_tool()
+    unrounded = G_STARS_COMMITTED[-1.0]
+    g_lo = 0.00944438
+    assert unrounded < g_lo < float(tool.format_significant(unrounded))
+    verdict = tool.aloft_verdict(g_lo, 0.0200, G_STARS_COMMITTED)
+    assert verdict.outcome_at(-1.0) == "contributes"
+    assert verdict.lines[0] == "sun -1: g* 0.0094444, contributes"
+    assert verdict.outcomes == ("contributes", "spans", "spans", "spans")
+    assert verdict.verdict == "mixed"
+
+
+def test_g_hi_between_the_printed_and_the_unrounded_crossing_is_not_this() -> None:
+    """Sun 0's crossing prints down (0.0094830 under 0.0094830312...), so an envelope that ends
+    between the two is under the crossing and over the print."""
+    tool = load_tool()
+    unrounded = G_STARS_COMMITTED[0.0]
+    g_hi = 0.00948302
+    assert float(tool.format_significant(unrounded)) < g_hi < unrounded
+    verdict = tool.aloft_verdict(0.0010, g_hi, G_STARS_COMMITTED)
+    assert verdict.outcome_at(0.0) == "not this"
+    assert verdict.lines[1] == "sun 0: g* 0.0094830, not this"
+    assert verdict.outcomes == ("spans", "not this", "not this", "not this")
+    assert verdict.verdict == "mixed"
+
+
 # --- the fixture builder, against stand-ins for the model -----------------------------------------
 
 
@@ -1221,8 +1326,12 @@ def aloft_stand_in(
     reported: float | None = None,
     reported_shift: float = 0.0,
     scale: float = 1.0,
+    scale_at: dict[float, float] | None = None,
 ) -> list[dict]:
-    """Stand-ins for everything `build_aloft_fixture` reaches for; returns the log of `evaluate`."""
+    """Stand-ins for everything `build_aloft_fixture` reaches for; returns the log of `evaluate`.
+
+    `scale` multiplies every transmittance; `scale_at` multiplies those at one altitude (m) only.
+    """
     calls: list[dict] = []
     the_axes = axes if axes is not None else full_axes(tool)
 
@@ -1237,7 +1346,7 @@ def aloft_stand_in(
                 "mode": mode,
             }
         )
-        row = scale * model_t(visibility, altitude_m)
+        row = scale * (scale_at or {}).get(altitude_m, 1.0) * model_t(visibility, altitude_m)
         said = altitude_m + reported_shift if reported is None else reported
         return tool.Evaluation(np.array([row]), 320.0, 40.0, np.array([said]))
 
@@ -1364,6 +1473,20 @@ def test_the_visibility_check_allows_one_part_in_a_million(
     tool.build_aloft_fixture(tmp_path)
 
 
+def test_the_visibility_check_allows_one_part_in_a_million_above_the_highest_node_and_no_more(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    tool = load_tool()
+    within = full_axes(tool, visibilities_km=(20.0, 131.8 / (1.0 + 5e-7)))
+    aloft_stand_in(monkeypatch, tool, axes=within)
+    tool.build_aloft_fixture(tmp_path)
+    beyond = full_axes(tool, visibilities_km=(20.0, 131.8 / (1.0 + 2e-6)))
+    calls = aloft_stand_in(monkeypatch, tool, axes=beyond)
+    with pytest.raises(tool.PragueError, match=r"visibility 131\.8 km is outside"):
+        tool.build_aloft_fixture(tmp_path)
+    assert calls == []
+
+
 def test_the_builder_refuses_a_reported_altitude_that_differs_from_the_one_asked(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -1391,6 +1514,34 @@ def test_the_builder_refuses_a_transmittance_that_is_not_finite_and_above_zero(
         with pytest.raises(tool.PragueError, match="transmittance"):
             tool.build_aloft_fixture(tmp_path)
         assert calls  # it did evaluate before it refused
+
+
+@pytest.mark.parametrize(
+    ("channels", "start_nm", "width_nm"),
+    [
+        pytest.param(10, 320.0, 40.0, id="ten channels, not eleven"),
+        pytest.param(12, 320.0, 40.0, id="twelve channels"),
+        pytest.param(11, 300.0, 40.0, id="another channel start"),
+        pytest.param(11, 320.0, 20.0, id="another channel width"),
+        pytest.param(11, 320.0 + 1e-8, 40.0, id="a start off by 1e-8 nm"),
+    ],
+)
+def test_the_builder_refuses_an_evaluation_whose_channels_are_not_the_datasets(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, channels: int, start_nm: float, width_nm: float
+) -> None:
+    tool = load_tool()
+    calls = aloft_stand_in(monkeypatch, tool)
+    real = tool.evaluate
+
+    def reshaped(*args, **kwargs):
+        out = real(*args, **kwargs)
+        row = np.resize(out.channels[0], channels)  # the model's own channels, cut or repeated
+        return tool.Evaluation(np.array([row]), start_nm, width_nm, out.altitudes_m)
+
+    monkeypatch.setattr(tool, "evaluate", reshaped)
+    with pytest.raises(tool.PragueError, match="the evaluation's channels are not the dataset's"):
+        tool.build_aloft_fixture(tmp_path)
+    assert len(calls) == 1  # the first evaluation was refused: nothing after it ran
 
 
 def test_the_reported_altitude_is_checked_to_a_millionth_of_a_metre(
@@ -1427,17 +1578,8 @@ def test_evaluate_hands_back_the_altitudes_the_model_reported(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     tool = load_tool()
-    binary = tool.binary_path(tmp_path)
-    binary.parent.mkdir(parents=True)
-    binary.write_text("")
     stdout = "# available channels=11 start=320 width=40\n0 90 340 10 0 " + " ".join(["0.5"] * 11)
-    seen: dict = {}
-
-    def run(command, **kwargs):
-        seen["command"] = command
-        return subprocess.CompletedProcess(command, 0, stdout + "\n", "")
-
-    monkeypatch.setattr(subprocess, "run", run)
+    commands = driver_stub(monkeypatch, tool, tmp_path, stdout)
     result = tool.evaluate(
         tmp_path,
         tool.DATASETS["full"],
@@ -1449,8 +1591,46 @@ def test_evaluate_hands_back_the_altitudes_the_model_reported(
     )
     assert list(result.altitudes_m) == [340.0]
     assert result.channels.shape == (1, 11)
-    assert seen["command"][4] == repr(340.0 - tool.SAFETY_ALTITUDE_M)
-    assert seen["command"][-1] == "transmittance"
+    assert len(commands) == 1
+    assert commands[0][4] == repr(340.0 - tool.SAFETY_ALTITUDE_M)
+    assert commands[0][-1] == "transmittance"
+
+
+@pytest.mark.parametrize("reported", [290.0, 390.0, 340.1, 15000.0])
+def test_evaluate_refuses_a_reported_altitude_other_than_the_one_asked(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, reported: float
+) -> None:
+    """290 is the nominal altitude less the safety lift again, 390 the lift left on."""
+    tool = load_tool()
+    stdout = f"# available channels=11 start=320 width=40\n0 90 {reported!r} 10 0 " + " ".join(
+        ["0.5"] * 11
+    )
+    commands = driver_stub(monkeypatch, tool, tmp_path, stdout)
+    with pytest.raises(tool.PragueError, match="the model evaluated at altitude"):
+        tool.evaluate(
+            tmp_path,
+            tool.DATASETS["full"],
+            visibility=20.0,
+            altitude_m=340.0,
+            queries=[(0.0, 90.0)],
+            sun_elevation_deg=10.0,
+            mode="transmittance",
+        )
+    assert len(commands) == 1  # the fake driver answered; the refusal is evaluate's own
+
+
+def test_a_test_that_installs_no_fake_cannot_reach_evaluate(tmp_path: Path) -> None:
+    tool = load_tool()
+    with pytest.raises(AssertionError, match="reached evaluate"):
+        tool.evaluate(
+            tmp_path,
+            tool.DATASETS["full"],
+            visibility=20.0,
+            altitude_m=340.0,
+            queries=[(0.0, 90.0)],
+            sun_elevation_deg=10.0,
+            mode="transmittance",
+        )
 
 
 def test_verify_dataset_refuses_a_missing_short_or_altered_file(tmp_path: Path) -> None:
@@ -1507,6 +1687,53 @@ def test_check_returns_1_on_any_difference_beyond_one_part_in_a_million(
     out = capsys.readouterr().out
     assert "difference(s)" in out and "0 difference(s)" not in out
     assert target.read_bytes() == before  # check wrote nothing
+
+
+def check_after_scaling_only(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    altitude_m: float,
+) -> tuple[int, str]:
+    """Write the fixture, then check it against evaluations that differ at one altitude only.
+
+    First by 5e-8 relative (inside the tolerance, so the check passes), then by 5e-6 (beyond it).
+    Returns the exit status and the output of the second.
+    """
+    tool = load_tool()
+    aloft_stand_in(monkeypatch, tool)
+    target = tmp_path / "aloft.json"
+    assert tool.main(["fixture", "--aloft", "--cache", str(tmp_path), "--output", str(target)]) == 0
+    capsys.readouterr()
+    before = target.read_bytes()
+    command = ["fixture", "--aloft", "--check", "--cache", str(tmp_path), "--output", str(target)]
+    aloft_stand_in(monkeypatch, tool, scale_at={altitude_m: 1.0 + 5e-8})
+    assert tool.main(command) == 0
+    capsys.readouterr()
+    aloft_stand_in(monkeypatch, tool, scale_at={altitude_m: 1.0 + 5e-6})
+    status = tool.main(command)
+    assert target.read_bytes() == before  # check wrote nothing
+    return status, capsys.readouterr().out
+
+
+def test_check_returns_1_when_only_the_15_km_evaluations_differ(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    status, out = check_after_scaling_only(monkeypatch, tmp_path, capsys, 15000.0)
+    assert status == 1
+    assert "66 difference(s)" in out  # 6 nodes x 11 channels at 15 km, and nothing else
+    printed = [line for line in out.splitlines() if line.startswith("/")]
+    assert printed and all(line.startswith("/transmittance[1][") for line in printed)
+
+
+def test_check_returns_1_when_only_the_340_m_evaluations_differ(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    status, out = check_after_scaling_only(monkeypatch, tmp_path, capsys, 340.0)
+    assert status == 1
+    assert "66 difference(s)" in out  # 6 nodes x 11 channels at 0.34 km, and nothing else
+    printed = [line for line in out.splitlines() if line.startswith("/")]
+    assert printed and all(line.startswith("/transmittance[0][") for line in printed)
 
 
 def test_check_of_a_fixture_that_does_not_exist_is_a_refusal(
@@ -1642,6 +1869,28 @@ def test_the_aloft_fixture_must_be_the_registered_format_and_version() -> None:
         tool.check_aloft_fixture(short)
 
 
+@pytest.mark.parametrize(
+    ("key", "index", "word"),
+    [
+        *[("visibility_nodes_km", i, "visibility") for i in range(6)],
+        *[("altitudes_m", i, "altitude") for i in range(2)],
+        *[("channel_centres_nm", i, "channel") for i in range(11)],
+    ],
+)
+def test_the_fixture_check_allows_a_billionth_off_the_registered_axes_and_no_more(
+    key: str, index: int, word: str
+) -> None:
+    tool = load_tool()
+    for sign in (1.0, -1.0):
+        near = synthetic_aloft()
+        near[key][index] += sign * 1e-10
+        tool.check_aloft_fixture(near)
+        far = synthetic_aloft()
+        far[key][index] += sign * 1e-8
+        with pytest.raises(tool.PragueError, match=word):
+            tool.check_aloft_fixture(far)
+
+
 def test_a_fixture_that_cannot_be_read_is_refused(tmp_path: Path) -> None:
     tool = load_tool()
     with pytest.raises(tool.PragueError, match="cannot be read"):
@@ -1711,6 +1960,59 @@ def test_the_sun_lines_compare_the_envelope_with_the_unrounded_crossings_of_repo
     expected = tool.aloft_verdict(estimate.g_lo, estimate.g_hi, g_stars())
     assert list(expected.lines) == [
         ln for ln in text.splitlines() if ln.startswith(("sun ", "verdict: "))
+    ]
+
+
+class WithEnvelope:
+    """An estimate whose envelope is replaced: everything else is the wrapped estimate's."""
+
+    def __init__(self, estimate: object, g_lo: float, g_hi: float) -> None:
+        self._estimate = estimate
+        self.g_lo = g_lo
+        self.g_hi = g_hi
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._estimate, name)
+
+
+def verdict_lines_of_the_committed_report_with(
+    monkeypatch: pytest.MonkeyPatch, g_lo: float, g_hi: float
+) -> list[str]:
+    """The sun lines and the verdict line `report_aloft` prints when the estimator returns these."""
+    tool = load_tool()
+    real = committed_estimate()
+    monkeypatch.setattr(tool, "aloft_estimate", lambda *a, **k: WithEnvelope(real, g_lo, g_hi))
+    text = tool.report_aloft(four_fixtures(), committed_aloft())
+    return [ln for ln in text.splitlines() if ln.startswith(("sun ", "verdict: "))]
+
+
+def test_the_report_takes_its_verdict_on_the_unrounded_g_lo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """0.009444368 is under sun -1's crossing (0.00944437...) and prints as 0.0094444, over it."""
+    assert (
+        float(load_tool().format_significant(0.009444368)) > G_STARS_COMMITTED[-1.0] > 0.009444368
+    )
+    assert verdict_lines_of_the_committed_report_with(monkeypatch, 0.009444368, 0.0200) == [
+        "sun -1: g* 0.0094444, spans",
+        "sun 0: g* 0.0094830, spans",
+        "sun +1: g* 0.0095275, spans",
+        "sun +10: g* 0.0094923, spans",
+        "verdict: spans",
+    ]
+
+
+def test_the_report_takes_its_verdict_on_the_unrounded_g_hi(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """0.009483034 is over sun 0's crossing (0.00948303...) and prints as 0.0094830, under it."""
+    assert float(load_tool().format_significant(0.009483034)) < G_STARS_COMMITTED[0.0] < 0.009483034
+    assert verdict_lines_of_the_committed_report_with(monkeypatch, 0.0010, 0.009483034) == [
+        "sun -1: g* 0.0094444, spans",
+        "sun 0: g* 0.0094830, spans",
+        "sun +1: g* 0.0095275, not this",
+        "sun +10: g* 0.0094923, not this",
+        "verdict: mixed",
     ]
 
 
