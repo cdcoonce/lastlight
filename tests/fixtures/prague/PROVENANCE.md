@@ -123,6 +123,22 @@ reported (`report --offset`).
   `diagnostics.matched_aerosol_depth` says which.
 - `zenith_transmittance`: Prague's transmittance to space along the zenith, per channel.
 
+## `aloft.json` (#57)
+
+A fifth file, `aloft.json`, holds Prague's zenith transmittance T (the model's `transmittance`
+with the full dataset, the zenith query, ground albedo 0.2 and sun elevation 10 degrees; it depends
+on neither sun nor azimuth) in eleven channels at the six visibility nodes, 20, 27.6, 40, 59.4, 90
+and 131.8 km, and at two observer altitudes, 340 m and 15000 m (the model's highest). That is 132
+values, to nine significant figures, indexed `[altitude][visibility node][channel]`. It is made for
+the rule of issue #57 (`docs/renderer/prague-gas-aloft-criterion.md`) and read by
+`tests/test_prague_gas_aloft.py` and by `report --aloft`. Its `provenance` records the model's
+commit, the full dataset's name, size and SHA-256, the dataset's axes from its header, the
+viewpoint altitude the model reported for each of the twelve evaluations, and the command that
+remakes it. The tool refuses to write it for an altitude above the dataset's highest, or a
+visibility outside its range, by more than 1e-6 relative, and for a reported viewpoint altitude
+that differs from the one asked for. Nothing in CI needs the model: `report --aloft` and the tests
+read the fixtures only.
+
 ## Regenerating
 
 ```
@@ -137,6 +153,9 @@ uv run python tools/prague_reference.py fixture --sun 1
 uv run python tools/prague_reference.py fixture --sun -1 --check
 uv run python tools/prague_reference.py report --offset        # the offset rules of #49, from all four fixtures
 uv run python tools/prague_reference.py report --depth         # #55's evidence (no test), from all four fixtures
+uv run python tools/prague_reference.py fixture --aloft        # about 10 seconds once the model is built (#57)
+uv run python tools/prague_reference.py fixture --aloft --check
+uv run python tools/prague_reference.py report --aloft         # #57's evidence and verdict, from aloft.json and the four fixtures
 ```
 
 `--sun` takes the sun elevation of a registered fixture (10, 0, -1 or 1); any other is an error,
