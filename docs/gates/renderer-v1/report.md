@@ -23,6 +23,7 @@ Engine `v1` with the table `src/lastlight/render/data/bruneton_ms_xyz.bin`, whos
 | 2026-10-14 | not considered: 2 used frames | 2 | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | 2026-10-15 | counted (first 5, number 2) | 3 | 0.00 | 0.0168 | 0.4323 | 1.6118 | 0.6698 | 0.4247 | 1.8407 | 1.4007 |
 | 2026-10-16 | counted (first 5, number 3) | 4 | 4.53 | 0.0177 | 1.0247 | 3.5349 | 1.4825 | 1.0100 | 1.9339 | 1.5494 |
+| 2026-10-17 | not counted, cloud 39.71% | 4 | 39.71 | 0.0313 | 0.6135 | 2.9484 | 0.8945 | 0.6046 | 1.9385 | 1.3857 |
 
 ## Reading the table
 
