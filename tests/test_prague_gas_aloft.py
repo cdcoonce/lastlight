@@ -32,6 +32,7 @@ from dataclasses import replace
 from functools import cache
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import NamedTuple
 
 import numpy as np
 import pytest
@@ -1801,6 +1802,31 @@ def test_a_failed_perturbed_fit_in_the_report_exits_1_with_the_member_on_stderr(
     assert "member (k=0.99, m=0)" in captured.err and "perturbed" in captured.err
 
 
+@pytest.mark.parametrize("refusal", ["tail", "nan error", "non-finite excess"])
+def test_each_other_refusal_in_the_report_exits_1_with_the_member_on_stderr(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], refusal: str
+) -> None:
+    tool = load_tool()
+    monkeypatch.setattr(tool, "read_aloft_fixture", lambda *a, **k: synthetic_aloft())
+    if refusal == "tail":
+        monkeypatch.setattr(tool, "ALOFT_TAIL_TOLERANCE", -1.0)
+        needle = "did not settle"
+    elif refusal == "nan error":
+        monkeypatch.setattr(tool, "standard_error", lambda jac, q, s2: math.nan)
+        needle = "not a number"
+    else:
+        real = tool.aloft_fit
+        monkeypatch.setattr(
+            tool, "aloft_fit", lambda *args, **kwargs: replace(real(*args, **kwargs), gas=math.nan)
+        )
+        needle = "finite"
+    assert tool.main(["report", "--aloft"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("error:") and "member (k=" in captured.err
+    assert needle in captured.err
+
+
 def test_the_report_refuses_a_malformed_aloft_fixture(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1842,3 +1868,842 @@ def test_the_criterion_file_is_the_one_the_tool_implements() -> None:
     )
     assert "p_15 = 121.11 hPa exactly" in text
     assert "`fixture --aloft`" in text and "`report --aloft`" in text
+
+
+# --- the committed aloft.json and the printed quantities ------------------------------------------
+#
+# `aloft.json` was made by `fixture --aloft` from the full dataset (the first Prague numbers at the
+# six nodes and at 15 km), after the tests above had passed. Below, every quantity `report --aloft`
+# prints is pinned by value, `pytest.approx(x, rel=1e-6, abs=0)`, against references taken from the
+# tool's own unrounded functions when it was first run on the committed spectra, and the printed
+# text is held to those values to the digits it prints. The estimate is also checked against the
+# power check's `estimate` and against this file's independent derivation on the same spectra.
+
+ALOFT_FILE = FIXTURE_DIR / "aloft.json"
+
+
+@cache
+def _committed_aloft() -> dict:
+    return json.loads(ALOFT_FILE.read_text())
+
+
+def committed_aloft() -> dict:
+    return copy.deepcopy(_committed_aloft())
+
+
+class Pinned(NamedTuple):
+    """One member's quantities by value."""
+
+    passes: int
+    regime: str
+    t380: float
+    t420: float
+    eta: float
+    beta: float
+    o_bar: float
+    o: list[float]
+    a: float
+    gas: float
+    s: float
+    rms: float
+    condition: float
+    se_fit: float
+    grad15: float
+    se_ext: float
+    grad0: float
+    se_0: float
+    se: float
+    g: float
+    low: float
+    high: float
+
+
+YBAR_P_COMMITTED = 0.23575061725216928
+G_STARS_COMMITTED = {
+    -1.0: 0.009444369707353337,
+    0.0: 0.009483031280641796,
+    1.0: 0.009527494016917382,
+    10.0: 0.009492315430495191,
+}
+PINNED_MEMBERS = {
+    (0.99, 0.0): Pinned(
+        passes=1,
+        regime="guard",
+        t380=0.0,
+        t420=0.0,
+        eta=0.0,
+        beta=6.980036180460544e-05,
+        o_bar=0.022266701272407957,
+        o=[
+            0.0,
+            0.0,
+            0.0018259310717090027,
+            0.006374070364096405,
+            0.01887619944429395,
+            0.03243820675674998,
+            0.029166098057890295,
+            0.014240892434224937,
+            0.0066885349683451605,
+            0.005114751529428852,
+        ],
+        a=1.1909002564880864,
+        gas=0.11952829165094592,
+        s=0.0009841093948473542,
+        rms=0.0008135039780900465,
+        condition=212.8210847749826,
+        se_fit=0.0003305714614660554,
+        grad15=1.4988616317173744,
+        se_ext=0.0014766747466224612,
+        grad0=0.8247720842601134,
+        se_0=0.0008116659567282112,
+        se=0.0017171626084211817,
+        g=0.01622232560122336,
+        low=0.012788000384380995,
+        high=0.01965665081806572,
+    ),
+    (0.99, 1.0): Pinned(
+        passes=3,
+        regime="guard",
+        t380=6.306776932012957e-05,
+        t420=0.00031533884660064784,
+        eta=0.0,
+        beta=0.0,
+        o_bar=0.02233650163421256,
+        o=[
+            6.306776932012957e-05,
+            0.00031533884660064784,
+            0.0018957314335136081,
+            0.00644387072590101,
+            0.018945999806098554,
+            0.03250800711855458,
+            0.0292358984196949,
+            0.014310692796029542,
+            0.006758335330149766,
+            0.005184551891233458,
+        ],
+        a=1.1924322155512372,
+        gas=0.1196456355258396,
+        s=0.0010199085118583811,
+        rms=0.0008430969524616597,
+        condition=213.46606740995733,
+        se_fit=0.0003441820346364084,
+        grad15=1.1836255320659788,
+        se_ext=0.0012084325161862903,
+        grad0=0.8288154241751421,
+        se_0=0.0008453159058757421,
+        se=0.0015143742601712803,
+        g=0.01610498172632968,
+        low=0.013076233205987121,
+        high=0.019133730246672243,
+    ),
+    (0.99, 2.0): Pinned(
+        passes=3,
+        regime="guard",
+        t380=0.00012613553864025914,
+        t420=0.0006306776932012957,
+        eta=0.0,
+        beta=0.0,
+        o_bar=0.02233650163421256,
+        o=[
+            0.00012613553864025914,
+            0.0006306776932012957,
+            0.0018957314335136081,
+            0.00644387072590101,
+            0.018945999806098554,
+            0.03250800711855458,
+            0.0292358984196949,
+            0.014310692796029542,
+            0.006758335330149766,
+            0.005184551891233458,
+        ],
+        a=1.1933794456428115,
+        gas=0.11966679333232802,
+        s=0.0010666426811077566,
+        rms=0.0008817292760591775,
+        condition=213.7646143547062,
+        se_fit=0.0003604269470630038,
+        grad15=1.1901094841996804,
+        se_ext=0.001270616443824484,
+        grad0=0.8301427969590368,
+        se_0=0.000885465738650679,
+        se=0.0015901016652436182,
+        g=0.016083823919841256,
+        low=0.01290362058935402,
+        high=0.019264027250328494,
+    ),
+    (1.0, 0.0): Pinned(
+        passes=1,
+        regime="guard",
+        t380=0.0,
+        t420=0.0,
+        eta=0.0,
+        beta=0.0,
+        o_bar=0.022219568913552,
+        o=[
+            0.0,
+            0.0,
+            0.0016547870239091364,
+            0.006272835140875892,
+            0.018821176615378306,
+            0.032414745808073075,
+            0.029164799411863916,
+            0.014255532068020386,
+            0.0067148777358692815,
+            0.005149846252821843,
+        ],
+        a=1.1825077191049103,
+        gas=0.12022518690140993,
+        s=0.0009380114360772677,
+        rms=0.0007753975713860304,
+        condition=220.57820791118263,
+        se_fit=0.0003155420639725919,
+        grad15=1.1691574070371857,
+        se_ext=0.0010980176417613246,
+        grad0=0.8256461231140884,
+        se_0=0.0007744655056338746,
+        se=0.001380219676418184,
+        g=0.015525430350759345,
+        low=0.012764990997922977,
+        high=0.018285869703595713,
+    ),
+    (1.0, 1.0): Pinned(
+        passes=2,
+        regime="guard",
+        t380=6.273760634414681e-05,
+        t420=0.00031368803172073407,
+        eta=0.0,
+        beta=0.0,
+        o_bar=0.022219568913552,
+        o=[
+            6.273760634414681e-05,
+            0.00031368803172073407,
+            0.0016547870239091364,
+            0.006272835140875892,
+            0.018821176615378306,
+            0.032414745808073075,
+            0.029164799411863916,
+            0.014255532068020386,
+            0.0067148777358692815,
+            0.005149846252821843,
+        ],
+        a=1.1835099937942493,
+        gas=0.12024745701294001,
+        s=0.0009779802368802442,
+        rms=0.0008084373722688922,
+        condition=220.91314684947483,
+        se_fit=0.00032942286417005524,
+        grad15=1.1757612458223847,
+        se_ext=0.0011511586337525793,
+        grad0=0.8269672625426517,
+        se_0=0.0008087576393136696,
+        se=0.0014449133339578977,
+        g=0.015503160239229263,
+        low=0.012613333571313468,
+        high=0.01839298690714506,
+    ),
+    (1.0, 2.0): Pinned(
+        passes=2,
+        regime="guard",
+        t380=0.00012547521268829363,
+        t420=0.0006273760634414681,
+        eta=0.0,
+        beta=0.0,
+        o_bar=0.022219568913552,
+        o=[
+            0.00012547521268829363,
+            0.0006273760634414681,
+            0.0016547870239091364,
+            0.006272835140875892,
+            0.018821176615378306,
+            0.032414745808073075,
+            0.029164799411863916,
+            0.014255532068020386,
+            0.0067148777358692815,
+            0.005149846252821843,
+        ],
+        a=1.1843195052726199,
+        gas=0.12026544400901998,
+        s=0.001028153316551915,
+        rms=0.0008499124360368426,
+        condition=221.2406301236598,
+        se_fit=0.0003467572583270168,
+        grad15=1.1818891796772213,
+        se_ext=0.001216394276934767,
+        grad0=0.8282375108927905,
+        se_0=0.0008515551437171255,
+        se=0.001524795657113837,
+        g=0.015485173243149297,
+        low=0.012435581928921623,
+        high=0.018534764557376973,
+    ),
+    (1.01, 0.0): Pinned(
+        passes=1,
+        regime="guard",
+        t380=0.0,
+        t420=0.0,
+        eta=0.0,
+        beta=0.0,
+        o_bar=0.02210263619289144,
+        o=[
+            0.0,
+            0.0,
+            0.0014138426143046647,
+            0.006101799555850773,
+            0.01869635342465806,
+            0.03232148449759158,
+            0.029093700404032925,
+            0.01420037134001123,
+            0.006671420141588797,
+            0.005115140614410228,
+        ],
+        a=1.1730384914586414,
+        gas=0.12081712191437924,
+        s=0.0008914766207180769,
+        rms=0.000736930041645336,
+        condition=229.01172252881008,
+        se_fit=0.00029946511138599944,
+        grad15=1.1610782420729107,
+        se_ext=0.0010364686031911433,
+        grad0=0.8239950257759925,
+        se_0=0.0007345723010672864,
+        se=0.0013051984461505141,
+        g=0.014933495337790037,
+        low=0.012323098445489008,
+        high=0.017543892230091066,
+    ),
+    (1.01, 1.0): Pinned(
+        passes=2,
+        regime="guard",
+        t380=6.240744336816407e-05,
+        t420=0.0003120372168408203,
+        eta=0.0,
+        beta=0.0,
+        o_bar=0.02210263619289144,
+        o=[
+            6.240744336816407e-05,
+            0.0003120372168408203,
+            0.0014138426143046647,
+            0.006101799555850773,
+            0.01869635342465806,
+            0.03232148449759158,
+            0.029093700404032925,
+            0.01420037134001123,
+            0.006671420141588797,
+            0.005115140614410228,
+        ],
+        a=1.1739009284175044,
+        gas=0.1208361840447203,
+        s=0.0009348737697951586,
+        rms=0.0007728038516067262,
+        condition=229.3834402140726,
+        se_fit=0.0003144384023717547,
+        grad15=1.1673239247602303,
+        se_ext=0.001092637515367714,
+        grad0=0.8252582905720778,
+        se_0=0.0007715123291618267,
+        se=0.001374030393740888,
+        g=0.01491443320744898,
+        low=0.012166372419967203,
+        high=0.017662493994930757,
+    ),
+    (1.01, 2.0): Pinned(
+        passes=2,
+        regime="guard",
+        t380=0.00012481488673632814,
+        t420=0.0006240744336816406,
+        eta=0.0,
+        beta=0.0,
+        o_bar=0.02210263619289144,
+        o=[
+            0.00012481488673632814,
+            0.0006240744336816406,
+            0.0014138426143046647,
+            0.006101799555850773,
+            0.01869635342465806,
+            0.03232148449759158,
+            0.029093700404032925,
+            0.01420037134001123,
+            0.006671420141588797,
+            0.005115140614410228,
+        ],
+        a=1.174571963004106,
+        gas=0.1208510156780608,
+        s=0.0009882538548190785,
+        rms=0.0008169299535879795,
+        condition=229.74810353721722,
+        se_fit=0.0003327873951286226,
+        grad15=1.1730852248918764,
+        se_ext=0.0011605770995250148,
+        grad0=0.826472514245593,
+        se_0=0.000816764648105223,
+        se=0.0014576663351716808,
+        g=0.014899601574108481,
+        low=0.01198426890376512,
+        high=0.01781493424445184,
+    ),
+}
+PINNED_S15 = 0.00011338866763343304
+PINNED_D550 = [
+    -3.253063284834412e-05,
+    -4.161363810605397e-05,
+    -8.240797542512454e-05,
+    -5.200683618118989e-05,
+    6.396394554060771e-05,
+    0.00014459513702011435,
+]
+PINNED_G_LO = 0.01198426890376512
+PINNED_G_HI = 0.01965665081806572
+PINNED_G_SEG = 0.02315027767427902
+
+
+T_SAMPLES = {
+    (0, 0, 0): 0.301482918,
+    (0, 0, 5): 0.660905577,
+    (0, 5, 10): 0.94324727,
+    (0, 3, 4): 0.780459487,
+    (1, 0, 1): 0.949242476,
+    (1, 2, 6): 0.959223814,
+    (1, 5, 3): 0.974317057,
+    (1, 5, 10): 0.991465241,
+}
+"""Eight of the committed 132 transmittances, [altitude][node][channel]."""
+
+
+@cache
+def committed_estimate() -> object:
+    tool = load_tool()
+    y0, y15 = tool.aloft_inputs(_committed_aloft())
+    return tool.aloft_estimate(y0, y15, YBAR_P_COMMITTED)
+
+
+@cache
+def committed_report() -> str:
+    fixtures = {sun: _committed(sun) for sun in FIXTURE_FILES}
+    return load_tool().report_aloft(fixtures, _committed_aloft())
+
+
+def test_the_committed_aloft_fixture_has_the_registered_layout() -> None:
+    tool = load_tool()
+    data = committed_aloft()
+    tool.check_aloft_fixture(data)
+    assert list(data) == [
+        "format",
+        "version",
+        "sun_elevation_deg",
+        "ground_albedo",
+        "zenith_query",
+        "visibility_nodes_km",
+        "altitudes_m",
+        "channel_centres_nm",
+        "transmittance_convention",
+        "transmittance",
+        "provenance",
+    ]
+    assert data["format"] == "lastlight-prague-aloft" and data["version"] == 1
+    assert data["sun_elevation_deg"] == 10.0 and data["ground_albedo"] == 0.2
+    assert data["visibility_nodes_km"] == list(NODES) and data["altitudes_m"] == list(ALTITUDES)
+    assert data["channel_centres_nm"] == CENTRES
+    assert np.asarray(data["transmittance"]).shape == (2, 6, 11)  # 132 transmittances
+    assert np.all(np.asarray(data["transmittance"]) > 0.0)
+    assert np.all(np.asarray(data["transmittance"]) <= 1.0)
+
+
+def test_the_committed_fixture_records_the_model_the_dataset_and_each_evaluation() -> None:
+    tool = load_tool()
+    provenance = committed_aloft()["provenance"]
+    assert provenance["model"]["commit"] == tool.MODEL_COMMIT
+    assert provenance["model"]["repository"] == tool.MODEL_URL
+    assert provenance["dataset"] == {
+        "file": "SkyModelDataset.dat",
+        "bytes": 2397370196,
+        "sha256": "33832f99525e7833cb83ac4369026f07e7d403db2fe01b5e9fedbe92ce898727",
+        "drive_id": "1IShL7T3umxGOEFvyYGQpHKMTneXEvyTM",
+    }
+    axes = provenance["dataset_axes"]
+    assert axes["visibilities_km"] == list(NODES) and axes["altitudes_m"][-1] == 15000.0
+    assert max(axes["altitudes_m"]) >= 15000.0 >= 340.0
+    assert [(e["altitude_m"], e["visibility_km"]) for e in provenance["evaluations"]] == [
+        (a, n) for a in ALTITUDES for n in NODES
+    ]
+    assert all(e["reported_altitude_m"] == e["altitude_m"] for e in provenance["evaluations"])
+    assert provenance["command"] == "uv run python tools/prague_reference.py fixture --aloft"
+    recorded = json.loads((FIXTURE_DIR / "sun10.json").read_text())["provenance"]
+    assert provenance["model"] == recorded["model"]
+    assert provenance["dataset"]["sha256"] == recorded["datasets"]["full"]["sha256"]
+    assert axes["visibilities_km"] == recorded["dataset_axes"]["visibilities_km"]
+
+
+@pytest.mark.parametrize(("index", "value"), list(T_SAMPLES.items()))
+def test_a_few_committed_transmittances_are_pinned(index: tuple, value: float) -> None:
+    a, n, c = index
+    assert _committed_aloft()["transmittance"][a][n][c] == pinned(value)
+
+
+def test_the_committed_spectra_reproduce_the_older_fixtures_zenith_transmittance() -> None:
+    """At 0.34 km the 90 and 131.8 km nodes bracket the 0.03 load's 123.8187 km, where the older
+    fixtures recorded Prague's transmittance (interpolated by the model, so only close)."""
+    table = np.asarray(_committed_aloft()["transmittance"][0])
+    recorded = np.asarray(
+        _committed(10.0)["atmospheres"]["0.03"]["diagnostics"]["zenith_transmittance"]
+    )
+    weight = (123.8187372 - 90.0) / (131.8 - 90.0)
+    np.testing.assert_allclose((1 - weight) * table[4] + weight * table[5], recorded, rtol=2e-4)
+
+
+def replay(
+    monkeypatch: pytest.MonkeyPatch, tool: ModuleType, scale: float = 1.0
+) -> list[tuple[float, float]]:
+    """A fake `evaluate` replaying the committed fixture; returns the (altitude, V) it was asked."""
+    data = _committed_aloft()
+    table = {
+        (altitude, node): np.array(row)
+        for altitude, block in zip(data["altitudes_m"], data["transmittance"], strict=True)
+        for node, row in zip(data["visibility_nodes_km"], block, strict=True)
+    }
+    recorded = data["provenance"]["dataset_axes"]
+    axes = tool.Axes(
+        tuple(recorded["visibilities_km"]),
+        tuple(recorded["albedos"]),
+        tuple(recorded["altitudes_m"]),
+        tuple(recorded["elevations_deg"]),
+        11,
+        320.0,
+        40.0,
+    )
+    asked: list[tuple[float, float]] = []
+
+    def evaluate(cache, dataset, *, visibility, altitude_m, queries, sun_elevation_deg, mode="sky"):
+        asked.append((altitude_m, visibility))
+        row = scale * table[(altitude_m, visibility)]
+        return tool.Evaluation(np.array([row]), 320.0, 40.0, np.array([altitude_m]))
+
+    monkeypatch.setattr(tool, "fetch_model", lambda cache: cache)
+    monkeypatch.setattr(tool, "verify_dataset", lambda path, dataset: None)
+    monkeypatch.setattr(tool, "read_axes", lambda path: axes)
+    monkeypatch.setattr(tool, "evaluate", evaluate)
+    return asked
+
+
+def test_check_passes_against_the_committed_fixture_with_a_fake_evaluate_replaying_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tool = load_tool()
+    asked = replay(monkeypatch, tool)
+    assert tool.main(["fixture", "--aloft", "--check", "--cache", str(tmp_path)]) == 0
+    assert "0 difference(s)" in capsys.readouterr().out
+    assert asked == [(a, n) for a in ALTITUDES for n in NODES]
+
+
+def test_the_replay_rewrites_the_committed_fixture_byte_for_byte(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tool = load_tool()
+    replay(monkeypatch, tool)
+    target = tmp_path / "aloft.json"
+    assert tool.main(["fixture", "--aloft", "--cache", str(tmp_path), "--output", str(target)]) == 0
+    capsys.readouterr()
+    assert target.read_bytes() == ALOFT_FILE.read_bytes()
+
+
+def test_check_fails_when_the_replay_differs_by_more_than_a_millionth(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tool = load_tool()
+    replay(monkeypatch, tool, scale=1.0 + 2e-6)
+    assert tool.main(["fixture", "--aloft", "--check", "--cache", str(tmp_path)]) == 1
+    out = capsys.readouterr().out
+    assert "difference(s)" in out and "0 difference(s)" not in out
+    replay(monkeypatch, tool, scale=1.0 + 2e-7)
+    assert tool.main(["fixture", "--aloft", "--check", "--cache", str(tmp_path)]) == 0
+
+
+def test_the_tools_excess_inputs_are_report_depths(monkeypatch: pytest.MonkeyPatch) -> None:
+    tool = load_tool()
+    pilot = tool.depth_pilot({sun: _committed(sun) for sun in FIXTURE_FILES})
+    assert pilot.y_bar_p == pinned(YBAR_P_COMMITTED)
+    assert pilot.y_bar_p == pytest.approx(
+        load_power().YBAR_P, abs=1e-6
+    )  # the power check's, rounded
+    for sun, expected in G_STARS_COMMITTED.items():
+        assert g_stars()[sun] == pinned(expected)
+        assert load_power().G_STARS[sun] == pinned(expected)
+
+
+def test_every_members_quantities_are_pinned_by_value() -> None:
+    estimate = committed_estimate()
+    assert [(m.k, m.m) for m in estimate.members] == list(PINNED_MEMBERS)
+    for member in estimate.members:
+        want = PINNED_MEMBERS[(member.k, member.m)]
+        where = member.label
+        assert member.ozone.passes == want.passes, where
+        assert member.ozone.regime == want.regime, where
+        for name in ("t380", "t420", "eta", "beta"):
+            assert getattr(member.ozone, name) == pinned(getattr(want, name)), (where, name)
+        assert member.ozone.o_bar == pinned(want.o_bar), where
+        np.testing.assert_allclose(member.ozone.o, want.o, rtol=1e-6, atol=0, err_msg=where)
+        assert member.fit.a == pinned(want.a), where
+        assert member.fit.gas == pinned(want.gas), where
+        assert member.fit.s == pinned(want.s), where
+        assert member.fit.rms == pinned(want.rms), where
+        assert member.fit.condition == pinned(want.condition), where
+        assert member.fit.se == pinned(want.se_fit), where
+        assert member.grad15 == pinned(want.grad15), where
+        assert member.se_ext == pinned(want.se_ext), where
+        assert member.grad0 == pinned(want.grad0), where
+        assert member.se_0 == pinned(want.se_0), where
+        assert member.se == pinned(want.se), where
+        assert member.g == pinned(want.g), where
+        assert member.low == pinned(want.low) and member.high == pinned(want.high), where
+
+
+def test_the_scale_the_envelope_and_g_seg_are_pinned_by_value() -> None:
+    estimate = committed_estimate()
+    assert estimate.scale.s15 == pinned(PINNED_S15)
+    np.testing.assert_allclose(estimate.scale.d550, PINNED_D550, rtol=1e-6, atol=0)
+    assert estimate.g_lo == pinned(PINNED_G_LO) and estimate.g_hi == pinned(PINNED_G_HI)
+    # The extremes come from members: the lowest low and the highest high of the pinned nine.
+    assert pytest.approx(min(p.low for p in PINNED_MEMBERS.values()), abs=0) == PINNED_G_LO
+    assert pytest.approx(max(p.high for p in PINNED_MEMBERS.values()), abs=0) == PINNED_G_HI
+    tool = load_tool()
+    y0, _ = tool.aloft_inputs(_committed_aloft())
+    assert YBAR_P_COMMITTED - float(at550(y0[3])) == pinned(PINNED_G_SEG)
+
+
+def test_the_estimate_agrees_with_the_power_check_on_the_committed_spectra() -> None:
+    power = load_power()
+    y0, y15 = load_tool().aloft_inputs(_committed_aloft())
+    theirs = power.estimate(y0, y15, YBAR_P_COMMITTED)
+    estimate = committed_estimate()
+    lo, hi = theirs.envelope()
+    assert estimate.g_lo == pytest.approx(lo, abs=1e-6) and estimate.g_hi == pytest.approx(
+        hi, abs=1e-6
+    )
+    np.testing.assert_allclose([m.g for m in estimate.members], theirs.g, rtol=0, atol=1e-8)
+    np.testing.assert_allclose([m.se for m in estimate.members], theirs.se_tot, rtol=1e-6, atol=0)
+    assert theirs.status_ok
+
+
+@pytest.mark.parametrize(("k", "m"), [(0.99, 0.0), (1.0, 1.0), (1.01, 2.0)])
+def test_the_estimate_agrees_with_the_independent_derivation_on_the_committed_spectra(
+    k: float, m: float
+) -> None:
+    y0, y15 = load_tool().aloft_inputs(_committed_aloft())
+    theirs = ref_member(y0, y15, YBAR_P_COMMITTED, k, m)
+    ours = next(x for x in committed_estimate().members if (x.k, x.m) == (k, m))
+    assert ours.g == pytest.approx(theirs["g"], abs=1e-10)
+    assert ours.fit.s == pinned(theirs["s"])
+    assert ours.fit.se == pytest.approx(theirs["se_fit"], rel=1e-5, abs=0)
+    assert ours.grad15 == pytest.approx(theirs["grad15"], rel=1e-5, abs=0)
+    assert ours.grad0 == pytest.approx(theirs["grad0"], rel=1e-5, abs=0)
+    assert ours.se == pytest.approx(theirs["se"], rel=1e-5, abs=0)
+    np.testing.assert_allclose(ours.ozone.o, theirs["ozone"]["o"], rtol=1e-9, atol=1e-14)
+
+
+def test_the_committed_verdict_is_pinned() -> None:
+    tool = load_tool()
+    verdict = tool.aloft_verdict(PINNED_G_LO, PINNED_G_HI, G_STARS_COMMITTED)
+    assert verdict.verdict == "contributes"
+    assert set(verdict.outcomes) == {"contributes"}
+    assert max(G_STARS_COMMITTED.values()) < PINNED_G_LO
+    estimate = committed_estimate()
+    assert tool.aloft_verdict(estimate.g_lo, estimate.g_hi, g_stars()).lines == verdict.lines
+
+
+# --- what the committed report prints, held to the pinned values --------------------------------
+
+
+def significant_digits(token: str) -> int:
+    mantissa = token.lstrip("-").lower().split("e")[0]
+    return len(mantissa.replace(".", "").lstrip("0"))
+
+
+def assert_printed(token: str, value: float, what: str, digits: int = 5) -> None:
+    """`token` is `value` to `digits` significant figures: within half a unit of its last digit."""
+    if value == 0.0:
+        assert token == "0", (what, token)
+        return
+    exponent = math.floor(math.log10(abs(value)))
+    half_unit = 0.5 * 10 ** (exponent - digits + 1)
+    assert abs(float(token) - value) <= half_unit * (1 + 1e-9), (what, token, value)
+    assert significant_digits(token) == digits, (what, token)
+
+
+def rows_after(text: str, header: str) -> list[list[str]]:
+    """The cells of the table whose header row starts with `header`, one list per body row."""
+    lines = text.splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.startswith(header))
+    rows = []
+    for line in lines[start + 2 :]:
+        if not line.startswith("|"):
+            break
+        rows.append([cell.strip() for cell in line.strip("|").split("|")])
+    return rows
+
+
+def test_the_heading_and_the_six_items_are_in_the_committed_report() -> None:
+    text = committed_report()
+    assert text.splitlines()[0].startswith("### #57")
+    for item in ("#### 1.", "#### 2.", "#### 3.", "#### 4.", "#### 5.", "#### 6."):
+        assert item in text
+    assert text.endswith("\n") and not text.endswith("\n\n")
+
+
+def test_the_132_printed_transmittances_are_minus_ln_t_of_the_fixture_to_five_decimals() -> None:
+    text = committed_report()
+    data = _committed_aloft()
+    for a in range(len(ALTITUDES)):
+        header = "| V_i (km) |"
+        lines = text.splitlines()
+        starts = [i for i, ln in enumerate(lines) if ln.startswith(header)]
+        rows = []
+        for line in lines[starts[a] + 2 :]:
+            if not line.startswith("|"):
+                break
+            rows.append([cell.strip() for cell in line.strip("|").split("|")])
+        assert len(rows) == 6
+        for n, (node, row) in enumerate(zip(NODES, rows, strict=True)):
+            assert row[0] == f"{node:g}"
+            assert row[1:] == [f"{-math.log(t):.5f}" for t in data["transmittance"][a][n]]
+
+
+def test_the_ozone_tables_print_the_pinned_values() -> None:
+    text = committed_report()
+    summary = rows_after(text, "| k | m | passes |")
+    assert len(summary) == 9
+    for row in summary:
+        k, m = float(row[0]), float(row[1])
+        want = PINNED_MEMBERS[(k, m)]
+        assert int(row[2]) == want.passes and row[3] == want.regime
+        for token, value, name in zip(
+            row[4:],
+            (want.t380, want.t420, want.eta, want.beta, want.o_bar),
+            ("t380", "t420", "eta", "beta", "o_bar"),
+            strict=True,
+        ):
+            assert_printed(token, value, f"{k} {m} {name}")
+    shapes = rows_after(text, "| k | m | O(380) |")
+    assert len(shapes) == 9
+    for row in shapes:
+        want = PINNED_MEMBERS[(float(row[0]), float(row[1]))]
+        assert len(row[2:]) == 10
+        for token, value, centre in zip(row[2:], want.o, CENTRES[1:], strict=True):
+            assert_printed(token, value, f"{row[0]} {row[1]} O({centre:g})")
+
+
+def test_the_scale_table_prints_the_pinned_values() -> None:
+    text = committed_report()
+    match = re.search(r"^s_15 = (\S+):", text, re.M)
+    assert match is not None
+    assert_printed(match.group(1), PINNED_S15, "s_15")
+    rows = rows_after(text, "| V_i (km) | D at 550 nm |")
+    assert [row[0] for row in rows] == [f"{n:g}" for n in NODES]
+    for row, value in zip(rows, PINNED_D550, strict=True):
+        assert_printed(row[1], value, f"D at 550 nm, node {row[0]}")
+
+
+def test_the_fit_tables_print_the_pinned_values() -> None:
+    text = committed_report()
+    first = rows_after(text, "| k | m | a | 1 / a |")
+    second = rows_after(text, "| k | m | abs(grad_k) |")
+    assert len(first) == len(second) == 9
+    for row in first:
+        want = PINNED_MEMBERS[(float(row[0]), float(row[1]))]
+        expected = (want.a, 1.0 / want.a, want.gas, want.s, want.rms, want.condition, want.se_fit)
+        for token, value, name in zip(
+            row[2:], expected, ("a", "1/a", "G", "s", "rms", "cond", "SE_fit"), strict=True
+        ):
+            assert_printed(token, value, f"{row[0]} {row[1]} {name}")
+    for row in second:
+        want = PINNED_MEMBERS[(float(row[0]), float(row[1]))]
+        expected = (
+            want.grad15,
+            want.se_ext,
+            want.grad0,
+            want.se_0,
+            want.se,
+            want.g,
+            want.low,
+            want.high,
+        )
+        names = ("grad", "SE_ext", "grad0", "SE_0", "SE", "g", "low", "high")
+        for token, value, name in zip(row[2:], expected, names, strict=True):
+            assert_printed(token, value, f"{row[0]} {row[1]} {name}")
+
+
+def test_the_envelope_the_excess_at_the_node_and_the_verdict_print_the_pinned_values() -> None:
+    text = committed_report()
+    for name, value in (("g_lo", PINNED_G_LO), ("g_hi", PINNED_G_HI), ("g_seg", PINNED_G_SEG)):
+        match = re.search(rf"^{name} = (\S+)$", text, re.M)
+        assert match is not None, name
+        assert_printed(match.group(1), value, name)
+    lines = text.splitlines()
+    sun_lines = [ln for ln in lines if ln.startswith("sun ")]
+    assert [ln.split(":")[0] for ln in sun_lines] == ["sun -1", "sun 0", "sun +1", "sun +10"]
+    for line, (sun, g_star) in zip(sun_lines, G_STARS_COMMITTED.items(), strict=True):
+        match = re.fullmatch(r"sun \S+: g\* (\S+), (\w+)", line)
+        assert match is not None
+        assert_printed(match.group(1), g_star, f"g* at sun {sun:g}")
+        assert match.group(2) == "contributes"
+    assert lines[lines.index(sun_lines[-1]) + 1] == "verdict: contributes"
+
+
+def test_the_committed_report_text_is_the_sun_lines_of_the_unrounded_comparison() -> None:
+    tool = load_tool()
+    estimate = committed_estimate()
+    expected = tool.aloft_verdict(estimate.g_lo, estimate.g_hi, g_stars()).lines
+    shown = [ln for ln in committed_report().splitlines() if ln.startswith(("sun ", "verdict: "))]
+    assert tuple(shown) == expected
+
+
+def test_the_command_writes_exactly_the_report_functions_text_on_the_committed_files(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    tool = load_tool()
+    assert tool.main(["report", "--aloft"]) == 0
+    assert capsys.readouterr().out == committed_report()
+
+
+def test_the_command_reads_the_aloft_fixture_and_the_four_committed_ones_only(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tool = load_tool()
+    read: list[Path] = []
+    real = Path.read_text
+
+    def recording(self: Path, *args, **kwargs) -> str:
+        read.append(self)
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", recording)
+    assert tool.main(["report", "--aloft"]) == 0
+    capsys.readouterr()
+    fixtures = {p for p in read if FIXTURE_DIR in p.parents}
+    assert fixtures == {FIXTURE_DIR / name for name in (*FIXTURE_FILES.values(), "aloft.json")}
+
+
+def test_the_committed_report_runs_no_evaluation_writes_nothing_and_edits_no_fixture(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tool = load_tool()
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("the aloft report must not evaluate Prague or write a file")
+
+    for name in ("evaluate", "build_fixture", "build_aloft_fixture", "cmd_fetch", "cmd_build"):
+        monkeypatch.setattr(tool, name, refuse)
+    monkeypatch.setattr(subprocess, "run", refuse)
+    monkeypatch.setattr(Path, "write_text", refuse)
+    monkeypatch.setattr(Path, "write_bytes", refuse)
+    monkeypatch.chdir(tmp_path)
+    before = {p.name: p.read_bytes() for p in FIXTURE_DIR.iterdir()}
+    assert tool.main(["report", "--aloft"]) == 0
+    capsys.readouterr()
+    assert list(tmp_path.iterdir()) == []
+    assert {p.name: p.read_bytes() for p in FIXTURE_DIR.iterdir()} == before
+
+
+def test_the_provenance_note_lists_the_aloft_commands_beside_the_other_reports() -> None:
+    text = (FIXTURE_DIR / "PROVENANCE.md").read_text(encoding="utf-8")
+    for command in ("fixture --aloft", "fixture --aloft --check", "report --aloft"):
+        assert f"uv run python tools/prague_reference.py {command}" in text
+    assert "`aloft.json`" in text
