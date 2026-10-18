@@ -438,7 +438,7 @@
       "replace": "g* {format_significant(g_stars[sun])} {outcome}\""
     },
     {
-      "label": "X1 fixture --aloft --check never compares the 15 km half -> test_check_returns_1_on_any_difference_beyond_one_part_in_a_million",
+      "label": "X1 fixture --aloft --check never compares the 15 km half -> test_check_returns_1_when_only_the_15_km_evaluations_differ",
       "file": "../../tools/prague_reference.py",
       "oracle": "real",
       "find": "    committed = json.loads(path.read_text())\n    problems: list[str] = []\n    _compare(committed, fresh, \"\", problems)\n    for problem in problems[:20]:\n        print(problem)\n    print(f\"{len(problems)} difference(s) between the committed fixture and a fresh evaluation\")\n    return 1 if problems else 0\n\n\ndef check_aloft_fixture",
@@ -536,14 +536,14 @@
       "replace": "math.sqrt(float(format_significant(scale.s15)) ** 2 / ALOFT_NODES + fit.s**2)"
     },
     {
-      "label": "X16 the verdict compares the envelope with the crossings rounded to five figures (as printed) -> test_the_sun_lines_compare_the_envelope_with_the_unrounded_crossings_of_report_depth",
+      "label": "X16 the verdict compares the envelope with the crossings rounded to five figures (as printed) -> test_g_lo_between_the_unrounded_and_the_printed_crossing_contributes",
       "file": "../../tools/prague_reference.py",
       "oracle": "real",
       "find": "    outcomes = tuple(aloft_outcome(g_lo, g_hi, g_stars[sun]) for sun in DEPTH_SUNS_DEG)",
       "replace": "    outcomes = tuple(\n        aloft_outcome(g_lo, g_hi, float(format_significant(g_stars[sun]))) for sun in DEPTH_SUNS_DEG\n    )"
     },
     {
-      "label": "X17 the report's verdict is taken on g_lo and g_hi rounded to five figures -> test_the_sun_lines_compare_the_envelope_with_the_unrounded_crossings_of_report_depth",
+      "label": "X17 the report's verdict is taken on g_lo and g_hi rounded to five figures -> test_the_report_takes_its_verdict_on_the_unrounded_g_lo",
       "file": "../../tools/prague_reference.py",
       "oracle": "real",
       "find": "        estimate.g_lo, estimate.g_hi, {row.sun: row.g_star for row in pilot.suns}",
@@ -564,7 +564,7 @@
       "replace": "        if False:"
     },
     {
-      "label": "X20 the shape check of the spectra is skipped in aloft_estimate -> test_the_report_refuses_a_malformed_aloft_fixture",
+      "label": "X20 the shape check of the spectra is skipped in aloft_estimate -> test_the_estimate_refuses_spectra_that_are_not_six_nodes_of_ten_channels",
       "file": "../../tools/prague_reference.py",
       "oracle": "real",
       "find": "    if y0.shape != shape or y15.shape != shape:",
@@ -634,7 +634,7 @@
       "replace": "            if len(reported) != 1:"
     },
     {
-      "label": "X35 the builder skips the check of the evaluation's channels against the dataset's -> test_the_builder_refuses_a_transmittance_that_is_not_finite_and_above_zero",
+      "label": "X35 the builder skips the check of the evaluation's channels against the dataset's -> test_the_builder_refuses_an_evaluation_whose_channels_are_not_the_datasets",
       "file": "../../tools/prague_reference.py",
       "oracle": "real",
       "find": "            if (\n                result.channels.shape != (1, axes.channels)\n                or abs(result.start_nm - axes.channel_start_nm) > GAS_CENTRE_TOLERANCE_NM\n                or abs(result.width_nm - axes.channel_width_nm) > GAS_CENTRE_TOLERANCE_NM\n            ):",
@@ -662,14 +662,14 @@
       "replace": "        if altitude > top * (1.0 + 10 * ALOFT_AXIS_TOLERANCE):"
     },
     {
-      "label": "X39 the visibility upper bound allows 1e-5 relative instead of 1e-6 -> test_the_builder_refuses_a_visibility_outside_the_datasets_range_before_evaluating",
+      "label": "X39 the visibility upper bound allows 1e-5 relative instead of 1e-6 -> test_the_visibility_check_allows_one_part_in_a_million_above_the_highest_node_and_no_more",
       "file": "../../tools/prague_reference.py",
       "oracle": "real",
       "find": "        if visibility < low * (1.0 - ALOFT_AXIS_TOLERANCE) or visibility > high * (\n            1.0 + ALOFT_AXIS_TOLERANCE\n        ):",
       "replace": "        if visibility < low * (1.0 - ALOFT_AXIS_TOLERANCE) or visibility > high * (\n            1.0 + 10 * ALOFT_AXIS_TOLERANCE\n        ):"
     },
     {
-      "label": "X42 the fixture check accepts visibility nodes within 1 km of the registered ones -> test_the_report_refuses_a_malformed_aloft_fixture",
+      "label": "X42 the fixture check accepts visibility nodes within 1 km of the registered ones -> test_the_fixture_check_allows_a_billionth_off_the_registered_axes_and_no_more",
       "file": "../../tools/prague_reference.py",
       "oracle": "real",
       "find": "all(abs(v - r) <= 1e-9 for v, r in zip(nodes, ALOFT_VISIBILITIES_KM, strict=True))",
@@ -683,7 +683,7 @@
       "replace": "                visibility=visibility,\n                altitude_m=altitude + 50.0 * (altitude > 1000.0),\n                queries=[ALOFT_ZENITH_QUERY],"
     },
     {
-      "label": "X45 evaluate's own refusal of a reported altitude other than the one asked is dropped -> test_evaluate_hands_back_the_altitudes_the_model_reported",
+      "label": "X45 evaluate's own refusal of a reported altitude other than the one asked is dropped -> test_evaluate_refuses_a_reported_altitude_other_than_the_one_asked",
       "file": "../../tools/prague_reference.py",
       "oracle": "real",
       "find": "    if not np.allclose(table[:, 2], altitude_m, atol=1e-6):",
