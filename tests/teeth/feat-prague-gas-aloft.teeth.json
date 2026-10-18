@@ -774,6 +774,27 @@
       "replace": "\"\"\"The six visibility nodes of the dataset's axis, in kilometres.\"\"\"",
       "expect": "survived",
       "why": "A bare string literal after an assignment is not a docstring of anything (module-level names have no __doc__), so it is evaluated and discarded: no value, name or output changes. No test reads the tool's source text. Scope: inert on every path the suite reaches; it would matter only to a test that greps this file's text, and none does."
+    },
+    {
+      "label": "F1 fixture --aloft --check never compares the 0.34 km half -> test_check_returns_1_when_only_the_340_m_evaluations_differ",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    committed = json.loads(path.read_text())\n    problems: list[str] = []\n    _compare(committed, fresh, \"\", problems)\n    for problem in problems[:20]:\n        print(problem)\n    print(f\"{len(problems)} difference(s) between the committed fixture and a fresh evaluation\")\n    return 1 if problems else 0\n\n\ndef check_aloft_fixture",
+      "replace": "    committed = json.loads(path.read_text())\n    problems: list[str] = []\n    committed[\"transmittance\"][0] = fresh[\"transmittance\"][0]\n    _compare(committed, fresh, \"\", problems)\n    for problem in problems[:20]:\n        print(problem)\n    print(f\"{len(problems)} difference(s) between the committed fixture and a fresh evaluation\")\n    return 1 if problems else 0\n\n\ndef check_aloft_fixture"
+    },
+    {
+      "label": "F2 the fixture check accepts altitudes within 1 m of the registered ones -> test_the_fixture_check_allows_a_billionth_off_the_registered_axes_and_no_more",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "all(abs(v - r) <= 1e-9 for v, r in zip(altitudes, ALOFT_ALTITUDES_M, strict=True))",
+      "replace": "all(abs(v - r) <= 1.0 for v, r in zip(altitudes, ALOFT_ALTITUDES_M, strict=True))"
+    },
+    {
+      "label": "F3 the fixture check accepts channel centres within 1 nm of the registered ones -> test_the_fixture_check_allows_a_billionth_off_the_registered_axes_and_no_more",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "            abs(v - r) <= GAS_CENTRE_TOLERANCE_NM\n            for v, r in zip(centres, GAS_CHANNEL_CENTRES_NM, strict=True)",
+      "replace": "            abs(v - r) <= 1.0\n            for v, r in zip(centres, GAS_CHANNEL_CENTRES_NM, strict=True)"
     }
   ]
 }
