@@ -19,6 +19,7 @@ the file.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import importlib.util
 import json
@@ -308,29 +309,37 @@ AGREEMENT_CELLS = (
     "band_s1",
     "topcommon_s3",
 )
-AGREEMENT_PAIRS = [(cell, i) for cell in AGREEMENT_CELLS for i in range(2)]
+AGREEMENT_PAIRS = [(cell, i, 0.0121) for cell in AGREEMENT_CELLS for i in range(2)] + [
+    # True excesses far from the paper's, so "not this" and the high "contributes" occur.
+    ("base_s1", 2, 0.004),
+    ("base_s3", 2, 0.006),
+    ("tail1_s1", 2, 0.0),
+    ("base_s1", 3, 0.022),
+    ("tail2_s1", 2, 0.0095),
+]
 
 
 @cache
-def _pair_estimates(cell: str, index: int) -> tuple[object, object]:
-    y0, y15 = synthetic(cell, index)
+def _pair_estimates(cell: str, index: int, g_true: float) -> tuple[object, object]:
+    y0, y15 = synthetic(cell, index, g_true)
     power = load_power()
     return load_tool().aloft_estimate(y0, y15, power.YBAR_P), power.estimate(y0, y15, power.YBAR_P)
 
 
 def test_the_agreement_test_covers_at_least_twenty_pairs_and_both_kinds_of_cell() -> None:
     assert len(AGREEMENT_PAIRS) >= 20
-    names = {cell for cell, _ in AGREEMENT_PAIRS}
+    assert len(set(AGREEMENT_PAIRS)) == len(AGREEMENT_PAIRS)
+    names = {cell for cell, _, _ in AGREEMENT_PAIRS}
     assert any(n.startswith("tail") for n in names) and any(n.startswith("band") for n in names)
     assert any(n.startswith("base") for n in names)
 
 
-@pytest.mark.parametrize(("cell", "index"), AGREEMENT_PAIRS)
+@pytest.mark.parametrize(("cell", "index", "g_true"), AGREEMENT_PAIRS)
 def test_the_envelope_and_the_verdict_agree_with_the_power_checks_to_1e_minus_6(
-    cell: str, index: int
+    cell: str, index: int, g_true: float
 ) -> None:
     tool, power = load_tool(), load_power()
-    ours, theirs = _pair_estimates(cell, index)
+    ours, theirs = _pair_estimates(cell, index, g_true)
     lo, hi = theirs.envelope()
     assert ours.g_lo == pytest.approx(lo, abs=1e-6)
     assert ours.g_hi == pytest.approx(hi, abs=1e-6)
@@ -342,11 +351,11 @@ def test_the_envelope_and_the_verdict_agree_with_the_power_checks_to_1e_minus_6(
             assert line.outcome_at(sun) == power.outcome(end_lo, end_hi, g_star)
 
 
-@pytest.mark.parametrize(("cell", "index"), AGREEMENT_PAIRS)
+@pytest.mark.parametrize(("cell", "index", "g_true"), AGREEMENT_PAIRS)
 def test_every_member_agrees_with_the_power_check_not_only_the_envelope(
-    cell: str, index: int
+    cell: str, index: int, g_true: float
 ) -> None:
-    ours, theirs = _pair_estimates(cell, index)
+    ours, theirs = _pair_estimates(cell, index, g_true)
     assert [(m.k, m.m) for m in ours.members] == MEMBERS
     np.testing.assert_allclose([m.g for m in ours.members], theirs.g, rtol=0, atol=1e-8)
     np.testing.assert_allclose([m.fit.s for m in ours.members], theirs.s_fit, rtol=1e-8, atol=0)
@@ -356,12 +365,10 @@ def test_every_member_agrees_with_the_power_check_not_only_the_envelope(
     assert ours.scale.s15 == pytest.approx(theirs.s15, rel=1e-9, abs=0)
 
 
-def test_the_agreement_pairs_reach_both_regimes_of_the_power_law_and_every_tail_pass_count() -> (
-    None
-):
+def test_the_agreement_pairs_reach_both_regimes_of_the_power_law() -> None:
     regimes: set[str] = set()
-    for cell, index in AGREEMENT_PAIRS:
-        ours, _ = _pair_estimates(cell, index)
+    for pair in AGREEMENT_PAIRS:
+        ours, _ = _pair_estimates(*pair)
         regimes |= {m.ozone.regime for m in ours.members}
     assert regimes == {"exact", "guard"}
 
@@ -369,12 +376,21 @@ def test_the_agreement_pairs_reach_both_regimes_of_the_power_law_and_every_tail_
 def test_the_agreement_pairs_include_the_guard_and_the_exact_branch_in_the_same_member() -> None:
     """Both branches for the plain member (k = 1, m = 0): the power check's `regime`."""
     seen = set()
-    for cell, index in AGREEMENT_PAIRS:
-        ours, theirs = _pair_estimates(cell, index)
+    for pair in AGREEMENT_PAIRS:
+        ours, theirs = _pair_estimates(*pair)
         plain = next(m for m in ours.members if (m.k, m.m) == (1.0, 0.0))
         assert plain.ozone.regime == theirs.regime
         seen.add(plain.ozone.regime)
     assert seen == {"exact", "guard"}
+
+
+def test_the_agreement_pairs_reach_every_outcome_a_verdict_can_take_but_mixed() -> None:
+    tool, power = load_tool(), load_power()
+    outcomes: set[str] = set()
+    for pair in AGREEMENT_PAIRS:
+        ours, _ = _pair_estimates(*pair)
+        outcomes.add(tool.aloft_verdict(ours.g_lo, ours.g_hi, power.G_STARS).verdict)
+    assert {"contributes", "spans", "not this"} <= outcomes
 
 
 # --- step 1: the power law ------------------------------------------------------------------------
@@ -434,6 +450,29 @@ def test_the_residuals_are_floored_at_1e_minus_12_inside_the_logarithm_only() ->
     assert beta == pinned(4.3632942735514586e-13)  # the amplitude uses the unfloored residuals
 
 
+def test_the_guard_bounds_are_inclusive_at_both_ends(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An eta_2 exactly on a bound of the guard is exact; one ulp outside it is the guard."""
+    tool = load_tool()
+    _, eta, regime = tool.aloft_power_law(0.02, 0.015)
+    assert regime == "exact"
+    for bounds, expected in (
+        ((eta, 3.0), "exact"),
+        ((0.0, eta), "exact"),
+        ((math.nextafter(eta, math.inf), 3.0), "guard"),
+        ((0.0, math.nextafter(eta, 0.0)), "guard"),
+    ):
+        monkeypatch.setattr(tool, "ALOFT_ETA_GUARD", bounds)
+        assert tool.aloft_power_law(0.02, 0.015)[2] == expected, bounds
+
+
+def test_the_registered_guard_is_zero_to_three_and_the_floor_is_1e_minus_12() -> None:
+    tool = load_tool()
+    assert tool.ALOFT_ETA_GUARD == (0.0, 3.0)
+    assert tool.ALOFT_RESIDUAL_FLOOR == 1e-12
+    assert tool.ALOFT_TAIL_TOLERANCE == 1e-15 and tool.ALOFT_TAIL_MAX_PASSES == 200
+    assert tool.ALOFT_STEP == 1e-5
+
+
 @pytest.mark.parametrize(
     ("z380", "z420"),
     [(0.02, 0.015), (0.05, 0.01), (0.01, 0.02), (-0.001, 0.01), (0.01, -0.002), (0.013, 0.0117)],
@@ -466,7 +505,8 @@ def test_the_rayleigh_at_15_km_is_computed_at_121_11_hpa_exactly() -> None:
     tool = load_tool()
     assert tool.ALOFT_PRESSURE_HPA == 121.11
     np.testing.assert_array_equal(tool.ALOFT_R15, R15)
-    assert tool.ALOFT_R_PAPER == R_PAPER and pinned(0.093050) == tool.ALOFT_R_PAPER
+    assert tool.ALOFT_R_PAPER == R_PAPER
+    assert pytest.approx(0.093050, abs=5e-7) == tool.ALOFT_R_PAPER  # as the criterion prints it
     np.testing.assert_array_equal(tool.ALOFT_RHO, RHO)
     assert float(at550(RHO)) == pytest.approx(1.00968, abs=5e-6)  # the criterion's rho-bar
 
@@ -643,7 +683,8 @@ def test_a_start_depth_under_0_001_is_raised_to_it_before_the_logarithm(
     o = ref_ozone(y15.mean(axis=0), 1.0, 0.0)["o"]
     flat = y0 - 5.0  # every node's ybar less the gas is far below 0
     calls = spy_solver(monkeypatch, tool)
-    tool.aloft_fit(flat, o, 1.0)
+    with contextlib.suppress(tool.PragueError):  # whether it then converges is not graded
+        tool.aloft_fit(flat, o, 1.0)
     np.testing.assert_allclose(calls[0]["args"][1][1::3], np.full(6, math.log(0.001)), rtol=1e-14)
 
 
@@ -1177,6 +1218,7 @@ def aloft_stand_in(
     *,
     axes: object | None = None,
     reported: float | None = None,
+    reported_shift: float = 0.0,
     scale: float = 1.0,
 ) -> list[dict]:
     """Stand-ins for everything `build_aloft_fixture` reaches for; returns the log of `evaluate`."""
@@ -1195,7 +1237,7 @@ def aloft_stand_in(
             }
         )
         row = scale * model_t(visibility, altitude_m)
-        said = altitude_m if reported is None else reported
+        said = altitude_m + reported_shift if reported is None else reported
         return tool.Evaluation(np.array([row]), 320.0, 40.0, np.array([said]))
 
     monkeypatch.setattr(tool, "fetch_model", lambda cache: cache)
@@ -1350,6 +1392,85 @@ def test_the_builder_refuses_a_transmittance_that_is_not_finite_and_above_zero(
         assert calls  # it did evaluate before it refused
 
 
+def test_the_reported_altitude_is_checked_to_a_millionth_of_a_metre(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    tool = load_tool()
+    aloft_stand_in(monkeypatch, tool, reported_shift=5e-7)
+    data = tool.build_aloft_fixture(tmp_path)
+    reported = [e["reported_altitude_m"] for e in data["provenance"]["evaluations"]]
+    assert reported[0] == pytest.approx(340.0, abs=1e-6) and reported[-1] == pytest.approx(
+        15000.0, abs=1e-6
+    )
+    assert reported[0] != 340.0  # what the model reported is what is recorded
+    aloft_stand_in(monkeypatch, tool, reported_shift=2e-6)
+    with pytest.raises(tool.PragueError, match="altitude"):
+        tool.build_aloft_fixture(tmp_path)
+
+
+def test_an_evaluation_that_does_not_say_its_altitude_is_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    tool = load_tool()
+    aloft_stand_in(monkeypatch, tool)
+    monkeypatch.setattr(
+        tool,
+        "evaluate",
+        lambda *a, **k: tool.Evaluation(np.array([model_t(20.0, 340.0)]), 320.0, 40.0),
+    )
+    with pytest.raises(tool.PragueError, match="altitude"):
+        tool.build_aloft_fixture(tmp_path)
+
+
+def test_evaluate_hands_back_the_altitudes_the_model_reported(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    tool = load_tool()
+    binary = tool.binary_path(tmp_path)
+    binary.parent.mkdir(parents=True)
+    binary.write_text("")
+    stdout = "# available channels=11 start=320 width=40\n0 90 340 10 0 " + " ".join(["0.5"] * 11)
+    seen: dict = {}
+
+    def run(command, **kwargs):
+        seen["command"] = command
+        return subprocess.CompletedProcess(command, 0, stdout + "\n", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    result = tool.evaluate(
+        tmp_path,
+        tool.DATASETS["full"],
+        visibility=20.0,
+        altitude_m=340.0,
+        queries=[(0.0, 90.0)],
+        sun_elevation_deg=10.0,
+        mode="transmittance",
+    )
+    assert list(result.altitudes_m) == [340.0]
+    assert result.channels.shape == (1, 11)
+    assert seen["command"][4] == repr(340.0 - tool.SAFETY_ALTITUDE_M)
+    assert seen["command"][-1] == "transmittance"
+
+
+def test_verify_dataset_refuses_a_missing_short_or_altered_file(tmp_path: Path) -> None:
+    import hashlib
+
+    tool = load_tool()
+    payload = b"a stand-in dataset"
+    dataset = tool.Dataset("d.dat", "id", len(payload), hashlib.sha256(payload).hexdigest())
+    path = tmp_path / "d.dat"
+    with pytest.raises(tool.PragueError, match="is missing"):
+        tool.verify_dataset(path, dataset)
+    path.write_bytes(payload[:-1])
+    with pytest.raises(tool.PragueError, match="is missing"):
+        tool.verify_dataset(path, dataset)
+    path.write_bytes(b"x" * len(payload))
+    with pytest.raises(tool.PragueError, match="pinned SHA-256"):
+        tool.verify_dataset(path, dataset)
+    path.write_bytes(payload)
+    tool.verify_dataset(path, dataset)
+
+
 def test_the_command_writes_the_fixture_and_check_passes_against_it(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1461,6 +1582,76 @@ def test_the_aloft_flag_belongs_to_fixture_and_report_and_not_with_offset_or_dep
 def test_the_module_docstring_lists_the_two_new_commands() -> None:
     doc = load_tool().__doc__ or ""
     assert "fixture --aloft" in doc and "report --aloft" in doc
+
+
+# --- number formatting and the fixture's layout --------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (0.009483031280641796, "0.0094830"),
+        (0.0094444, "0.0094444"),
+        (-0.0012345678, "-0.0012346"),
+        (0.12345, "0.12345"),
+        (1.0, "1.0000"),
+        (87.2, "87.200"),
+        (14699.6, "14700"),
+        (99999.4, "99999"),
+        (123456.0, "1.2346e+05"),
+        (9.99996, "10.000"),
+        (0.00012345, "0.00012345"),
+        (0.000012345, "1.2345e-05"),
+        (0.0, "0"),
+        (math.inf, "inf"),
+        (-math.inf, "-inf"),
+        (math.nan, "nan"),
+    ],
+)
+def test_numbers_are_printed_to_five_significant_figures_trailing_zeros_kept(
+    value: float, expected: str
+) -> None:
+    assert load_tool().format_significant(value) == expected
+
+
+def test_the_digits_can_be_changed_and_the_default_is_five() -> None:
+    tool = load_tool()
+    assert tool.format_significant(0.0094830, 3) == "0.00948"
+    assert tool.format_significant(0.0094830) == "0.0094830"
+
+
+def test_the_aloft_fixture_must_be_the_registered_format_and_version() -> None:
+    tool = load_tool()
+    good = synthetic_aloft()
+    tool.check_aloft_fixture(good)
+    for key, value in (("format", "lastlight-prague-control"), ("version", 2), ("version", None)):
+        bad = copy.deepcopy(good)
+        bad[key] = value
+        with pytest.raises(tool.PragueError, match=key):
+            tool.check_aloft_fixture(bad)
+    with pytest.raises(tool.PragueError, match="not an object"):
+        tool.check_aloft_fixture([good])
+    short = copy.deepcopy(good)
+    short["transmittance"][0].pop()
+    with pytest.raises(tool.PragueError, match="transmittance"):
+        tool.check_aloft_fixture(short)
+    short = copy.deepcopy(good)
+    short["transmittance"][1][0].pop()
+    with pytest.raises(tool.PragueError, match="transmittance"):
+        tool.check_aloft_fixture(short)
+
+
+def test_a_fixture_that_cannot_be_read_is_refused(tmp_path: Path) -> None:
+    tool = load_tool()
+    with pytest.raises(tool.PragueError, match="cannot be read"):
+        tool.read_aloft_fixture(tmp_path / "missing.json")
+    broken = tmp_path / "broken.json"
+    broken.write_text("{not json")
+    with pytest.raises(tool.PragueError, match="cannot be read"):
+        tool.read_aloft_fixture(broken)
+    good = tmp_path / "good.json"
+    good.write_text(json.dumps(synthetic_aloft()))
+    assert tool.read_aloft_fixture(good) == synthetic_aloft()
 
 
 # --- the report, on synthetic aloft spectra -------------------------------------------------------
