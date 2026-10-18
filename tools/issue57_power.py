@@ -295,8 +295,8 @@ def estimate(y0: np.ndarray, y15: np.ndarray, ybar_p: float = YBAR_P) -> Estimat
         grad15.append(n15)
         grad0.append(n0)
         s_fit.append(f.s)
-    ok = ok and bool(np.all(np.isfinite(g))) and not bool(np.any(np.isnan(se_fit)))
-    return Estimate(
+    ok = ok and bool(np.all(np.isfinite(g)))
+    est = Estimate(
         g=np.array(g),
         se_fit=np.array(se_fit),
         grad15=np.array(grad15),
@@ -306,6 +306,9 @@ def estimate(y0: np.ndarray, y15: np.ndarray, ybar_p: float = YBAR_P) -> Estimat
         regime=regime,
         status_ok=ok,
     )
+    if np.any(np.isnan(est.se_tot)):
+        est.status_ok = False
+    return est
 
 
 def outcome(g_lo: float, g_hi: float, g_star: float) -> str:
@@ -652,7 +655,7 @@ def headline(rows: list[dict], names: list[str]) -> str:
 
         at = gs.index(0.0121)
         width = float(np.median([r["g_hi"] - r["g_lo"] for r in sel_all]))
-        guard = sum(r["regime"] == "guard" for r in sel_all) / len(sel_all)
+        guard = sum(r["regime"] == "guard" for r in sel_all) / len(sel_all)  # member (1.00, 0)
         lines.append(
             f"| {name} | {n_[0]} | {_crossing(gs, pc, True):.4f} | "
             f"{_crossing(gs, pn, False):.4f} | "
