@@ -1,0 +1,800 @@
+{
+  "runner": "pytest",
+  "test_command": [
+    "env",
+    "PYTHONDONTWRITEBYTECODE=1",
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "-x",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_prague_gas_aloft.py",
+    "tests/test_prague_depth.py",
+    "-m",
+    "not network"
+  ],
+  "collect_command": [
+    "uv",
+    "run",
+    "--frozen",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_prague_gas_aloft.py",
+    "tests/test_prague_depth.py",
+    "-m",
+    "not network"
+  ],
+  "mutants": [
+    {
+      "label": "I1 the fit includes the 340 nm channel (ten channels become eleven) -> test_the_inputs_are_the_ten_channels_from_380_nm_up_and_leave_the_340_nm_channel_out",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "GAS_FIT_FIRST_NM = 380.0",
+      "replace": "GAS_FIT_FIRST_NM = 340.0"
+    },
+    {
+      "label": "I2 the fit drops the 740 nm channel -> test_the_inputs_are_the_ten_channels_from_380_nm_up_and_leave_the_340_nm_channel_out",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "GAS_FIT_CENTRES_NM = tuple(c for c in GAS_CHANNEL_CENTRES_NM if c >= GAS_FIT_FIRST_NM)",
+      "replace": "GAS_FIT_CENTRES_NM = tuple(\n    c for c in GAS_CHANNEL_CENTRES_NM if c >= GAS_FIT_FIRST_NM and c < 740.0\n)"
+    },
+    {
+      "label": "I3 the model is asked for the nominal altitude, the 50 m safety correction not applied (it then reports another altitude) -> test_evaluate_hands_back_the_altitudes_the_model_reported",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        repr(altitude_m - SAFETY_ALTITUDE_M),",
+      "replace": "        repr(altitude_m),"
+    },
+    {
+      "label": "I4 the reader does not take -ln of the stored T (writer stores T, reader expects -ln T) -> test_the_inputs_are_the_ten_channels_from_380_nm_up_and_leave_the_340_nm_channel_out",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    return -np.log(np.asarray(data[\"transmittance\"], dtype=float))",
+      "replace": "    return np.asarray(data[\"transmittance\"], dtype=float)"
+    },
+    {
+      "label": "I5 the six aloft spectra are not averaged: the first node stands for the mean -> test_the_gradients_are_central_differences_with_a_step_of_1e_minus_5",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    y15_mean = y15.mean(axis=0)",
+      "replace": "    y15_mean = y15[0]"
+    },
+    {
+      "label": "I6 the 0.34 km and 15 km arrays are swapped when the fixture is read -> test_the_inputs_are_the_ten_channels_from_380_nm_up_and_leave_the_340_nm_channel_out",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    return spectra[0][:, first:], spectra[1][:, first:]",
+      "replace": "    return spectra[1][:, first:], spectra[0][:, first:]"
+    },
+    {
+      "label": "I7 fixture --aloft --check never compares the transmittance (tolerance infinite) -> test_check_returns_1_on_any_difference_beyond_one_part_in_a_million",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    committed = json.loads(path.read_text())\n    problems: list[str] = []\n    _compare(committed, fresh, \"\", problems)\n    for problem in problems[:20]:\n        print(problem)\n    print(f\"{len(problems)} difference(s) between the committed fixture and a fresh evaluation\")\n    return 1 if problems else 0\n\n\ndef check_aloft_fixture",
+      "replace": "    committed = json.loads(path.read_text())\n    problems: list[str] = []\n    committed[\"transmittance\"] = fresh[\"transmittance\"]\n    _compare(committed, fresh, \"\", problems)\n    for problem in problems[:20]:\n        print(problem)\n    print(f\"{len(problems)} difference(s) between the committed fixture and a fresh evaluation\")\n    return 1 if problems else 0\n\n\ndef check_aloft_fixture"
+    },
+    {
+      "label": "I8 p_15 is 120.45 rounded to 120 -> test_the_rayleigh_at_15_km_is_computed_at_121_11_hpa_exactly",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "ALOFT_PRESSURE_HPA = 121.11",
+      "replace": "ALOFT_PRESSURE_HPA = 120.0"
+    },
+    {
+      "label": "I9 R_paper uses the pressure rounded to 973.07 -> test_the_rayleigh_at_15_km_is_computed_at_121_11_hpa_exactly",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "ALOFT_R_PAPER = float(rayleigh_optical_depth(REFERENCE_WAVELENGTH_NM, PAPER_PRESSURE_HPA))",
+      "replace": "ALOFT_R_PAPER = float(rayleigh_optical_depth(REFERENCE_WAVELENGTH_NM, 973.07))"
+    },
+    {
+      "label": "I10 v-bar interpolates at 550 nm with the weights swapped (0.25 at 540, 0.75 at 580) -> test_the_passes_and_the_ozone_match_the_independent_derivation",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "ALOFT_W540, ALOFT_W580 = 0.75, 0.25",
+      "replace": "ALOFT_W540, ALOFT_W580 = 0.25, 0.75"
+    },
+    {
+      "label": "I11 y-bar(V_p) is taken from the 0.03 load's spectrum instead of the 0.1 load's -> test_the_tools_excess_inputs_are_report_depths",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        return float(self.data.y_bar[-1])",
+      "replace": "        return float(self.data.y_bar[0])"
+    },
+    {
+      "label": "I12 g*_s is 0.0095 at every sun instead of each sun's unrounded crossing -> test_the_sun_lines_compare_the_envelope_with_the_unrounded_crossings_of_report_depth",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "{row.sun: row.g_star for row in pilot.suns}",
+      "replace": "{row.sun: 0.0095 for row in pilot.suns}"
+    },
+    {
+      "label": "I13 the aloft Rayleigh is R15 with k fixed at 1 for every member -> test_the_ozone_aloft_uses_the_six_node_mean_less_k_times_the_15_km_rayleigh",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    r = np.asarray(y15_mean, dtype=float) - k * ALOFT_R15",
+      "replace": "    r = np.asarray(y15_mean, dtype=float) - ALOFT_R15"
+    },
+    {
+      "label": "I14 the exponent guard is [0, 2] instead of [0, 3] -> test_the_power_law_is_exact_through_both_points_when_both_are_positive_and_in_range",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "ALOFT_ETA_GUARD = (0.0, 3.0)",
+      "replace": "ALOFT_ETA_GUARD = (0.0, 2.0)"
+    },
+    {
+      "label": "I15 the exact branch is taken when a residual is non-positive (positivity test dropped) -> test_a_residual_at_or_under_zero_takes_the_guard_whichever_end_it_is",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if z380 > 0.0 and z420 > 0.0:",
+      "replace": "    if True:"
+    },
+    {
+      "label": "I16 in the guard branch beta is not floored at 0 -> test_the_amplitude_is_floored_at_zero_and_both_residuals_under_zero_give_eta_zero",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    return float(max(beta, 0.0)), eta, \"guard\"",
+      "replace": "    return float(beta), eta, \"guard\""
+    },
+    {
+      "label": "I17 in the guard branch beta is r(380)(380/550)^eta instead of the least-squares amplitude -> test_an_eta_above_three_is_clipped_and_the_amplitude_is_the_least_squares_one",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    beta = (w380 * z380 + w420 * z420) / (w380**2 + w420**2)",
+      "replace": "    beta = z380 / w380"
+    },
+    {
+      "label": "I18 the guard branch's floor is 1e-6 instead of 1e-12 -> test_the_residuals_are_floored_at_1e_minus_12_inside_the_logarithm_only",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "ALOFT_RESIDUAL_FLOOR = 1e-12",
+      "replace": "ALOFT_RESIDUAL_FLOOR = 1e-6"
+    },
+    {
+      "label": "I19 O(380) and O(420) are left as the residuals instead of being set to the tail -> test_with_a_tail_the_passes_stop_at_a_fixed_point_tied_to_the_ozone_at_550_nm",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "            o[0], o[1] = t380, t420",
+      "replace": "            o[0], o[1] = o[0], o[1]"
+    },
+    {
+      "label": "I20 the power law is referenced to 500 nm in the removal (beta and shape inconsistent) -> test_the_passes_and_the_ozone_match_the_independent_derivation",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    o = r - beta * (ALOFT_CENTRES / REFERENCE_WAVELENGTH_NM) ** (-eta)",
+      "replace": "    o = r - beta * (ALOFT_CENTRES / 500.0) ** (-eta)"
+    },
+    {
+      "label": "I21 the Rayleigh in the fit is R_paper instead of k R_paper -> test_the_fit_matches_the_independent_six_node_fit",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    target = y0 - k * ALOFT_R_PAPER * ALOFT_RHO[None, :]",
+      "replace": "    target = y0 - ALOFT_R_PAPER * ALOFT_RHO[None, :]"
+    },
+    {
+      "label": "I22 gamma_i is dropped from the aerosol (curved silently becomes power law) -> test_the_fit_matches_the_independent_six_node_fit",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        u[:, None] - alpha[:, None] * ALOFT_X[None, :] + gamma[:, None] * ALOFT_X[None, :] ** 2",
+      "replace": "        u[:, None] - alpha[:, None] * ALOFT_X[None, :]"
+    },
+    {
+      "label": "I23 s_k divides by 60 instead of 41 -> test_the_residual_scale_has_41_degrees_of_freedom_and_the_rms_is_over_the_60_values",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    s2 = ssr / ALOFT_FIT_DOF",
+      "replace": "    s2 = ssr / ALOFT_VALUES"
+    },
+    {
+      "label": "I24 SE_fit's q uses 1 instead of O-bar for a -> test_the_standard_error_takes_q_equal_to_the_ozone_at_550_nm_for_a_alone",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    q[0] = o_bar",
+      "replace": "    q[0] = 1.0"
+    },
+    {
+      "label": "I25 a fit with status <= 0 is accepted instead of refused -> test_a_status_of_zero_or_under_is_refused",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if result.status <= 0:\n        raise PragueError(\n            f\"{label}: the six-node fit did not converge",
+      "replace": "    if False:\n        raise PragueError(\n            f\"{label}: the six-node fit did not converge"
+    },
+    {
+      "label": "I26 the start uses G_start with SPCTRL2's 0.345 atm cm kappa-bar instead of O-bar -> test_the_solver_is_called_with_the_registered_settings_and_the_registered_start",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        total = k * ALOFT_R_PAPER * ALOFT_RHO_BAR + o_bar",
+      "replace": "        total = k * ALOFT_R_PAPER * ALOFT_RHO_BAR + GAS_OZONE_START * float(\n            aloft_at_550(np.asarray(ozone_absorption_per_atm_cm(ALOFT_CENTRES)))\n        )"
+    },
+    {
+      "label": "I27 the fit tolerances are loosened to 1e-8 -> test_the_solver_is_called_with_the_registered_settings_and_the_registered_start",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "least_squares(residuals, start, jac=jacobian, **GAS_FIT_SETTINGS)",
+      "replace": "least_squares(\n            residuals,\n            start,\n            jac=jacobian,\n            **{**GAS_FIT_SETTINGS, \"xtol\": 1e-8, \"ftol\": 1e-8, \"gtol\": 1e-8},\n        )"
+    },
+    {
+      "label": "I28 G_k uses rho at 540 nm instead of rho-bar -> test_the_fit_matches_the_independent_six_node_fit",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        gas=k * ALOFT_R_PAPER * ALOFT_RHO_BAR + float(x[0]) * o_bar,",
+      "replace": "        gas=k * ALOFT_R_PAPER * ALOFT_RHO[ALOFT_I540] + float(x[0]) * o_bar,"
+    },
+    {
+      "label": "I29 s_15 divides by 60 instead of 35 -> test_the_scale_aloft_has_35_degrees_of_freedom",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "ALOFT_SCALE_DOF = ALOFT_VALUES - ALOFT_CHANNELS - 3 * (ALOFT_NODES - 1)",
+      "replace": "ALOFT_SCALE_DOF = ALOFT_VALUES"
+    },
+    {
+      "label": "I30 s_15 removes a linear (two-coefficient) per-node difference instead of a quadratic -> test_a_difference_that_is_a_quadratic_in_the_log_wavelength_leaves_nothing",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    basis = np.stack([np.ones(ALOFT_CHANNELS), ALOFT_X, ALOFT_X**2], axis=1)",
+      "replace": "    basis = np.stack([np.ones(ALOFT_CHANNELS), ALOFT_X], axis=1)"
+    },
+    {
+      "label": "I31 SE_ext uses s_15^2 (not s_15^2 / 6) for the noise term -> test_the_extraction_error_carries_s15_over_root_six_and_s_k_inside_the_gradient_norm",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "math.sqrt(scale.s15**2 / ALOFT_NODES + fit.s**2)",
+      "replace": "math.sqrt(scale.s15**2 + fit.s**2)"
+    },
+    {
+      "label": "I32 SE_ext drops the s_k^2 tolerance term (noise only) -> test_the_extraction_error_carries_s15_over_root_six_and_s_k_inside_the_gradient_norm",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "math.sqrt(scale.s15**2 / ALOFT_NODES + fit.s**2)",
+      "replace": "math.sqrt(scale.s15**2 / ALOFT_NODES)"
+    },
+    {
+      "label": "I33 the finite-difference step is 1e-3 instead of 1e-5 -> test_the_gradients_are_central_differences_with_a_step_of_1e_minus_5",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "ALOFT_STEP = 1e-5",
+      "replace": "ALOFT_STEP = 1e-3"
+    },
+    {
+      "label": "I34 the 15 km perturbed fits start from the registered start instead of the unperturbed solution -> test_each_member_runs_41_fits_and_each_perturbed_fit_starts_at_the_unperturbed_solution",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "aloft_fit(y0, shape, k, start=own.x, where=where).gas",
+      "replace": "aloft_fit(y0, shape, k, start=None, where=where).gas"
+    },
+    {
+      "label": "I35 |grad_k| is the sum of absolute values instead of the Euclidean norm -> test_the_member_matches_the_independent_derivation_quantity_by_quantity",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "float(np.linalg.norm(grad15))",
+      "replace": "float(np.abs(grad15).sum())"
+    },
+    {
+      "label": "I36 SE_k adds SE_fit, SE_ext and SE_0 linearly instead of in quadrature -> test_the_error_adds_the_fit_the_extraction_and_the_shared_tolerance_in_quadrature",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        se = _quadrature(fit.se, se_ext, se_0)",
+      "replace": "        se = fit.se + se_ext + se_0"
+    },
+    {
+      "label": "I37 the envelope uses 1 SE instead of 2 SE -> test_the_envelope_function_takes_the_minimum_and_maximum_over_all_members_by_hand",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        min(m.g - SE_MULTIPLE * m.se for m in members),\n        max(m.g + SE_MULTIPLE * m.se for m in members),",
+      "replace": "        min(m.g - 1.0 * m.se for m in members),\n        max(m.g + 1.0 * m.se for m in members),"
+    },
+    {
+      "label": "I38 g_lo takes the max over the members instead of the min -> test_the_envelope_function_takes_the_minimum_and_maximum_over_all_members_by_hand",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        min(m.g - SE_MULTIPLE * m.se for m in members),",
+      "replace": "        max(m.g - SE_MULTIPLE * m.se for m in members),"
+    },
+    {
+      "label": "I39 g_k subtracts 0.03 instead of 0.1 -> test_the_excess_is_prague_at_vp_less_the_gas_less_v1s_one_tenth",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        g = ybar_p - fit.gas - DEPTH_LOADS[-1]",
+      "replace": "        g = ybar_p - fit.gas - DEPTH_LOADS[0]"
+    },
+    {
+      "label": "I40 contributes uses g_lo >= g* instead of g_lo > g* -> test_g_lo_exactly_at_the_crossing_does_not_contribute",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if g_lo > g_star:",
+      "replace": "    if g_lo >= g_star:"
+    },
+    {
+      "label": "I41 the verdict reports the sun-0 outcome when the suns disagree instead of mixed -> test_mixed_when_g_lo_lies_between_two_suns_crossings",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    verdict = outcomes[0] if len(set(outcomes)) == 1 else MIXED",
+      "replace": "    verdict = outcomes[0] if len(set(outcomes)) == 1 else outcomes[1]"
+    },
+    {
+      "label": "I42 contributes compares g_hi (not g_lo) with g* -> test_the_outcome_at_one_sun_is_contributes_above_not_this_at_or_under_and_spans_between",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if g_lo > g_star:",
+      "replace": "    if g_hi > g_star:"
+    },
+    {
+      "label": "I43 O-bar is rounded to five figures before it is used in the fit (G, q) -> test_the_fit_matches_the_independent_six_node_fit",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    o = np.asarray(o, dtype=float)\n    target = y0 - k * ALOFT_R_PAPER * ALOFT_RHO[None, :]\n    o_bar = float(aloft_at_550(o))",
+      "replace": "    o = np.asarray(o, dtype=float)\n    target = y0 - k * ALOFT_R_PAPER * ALOFT_RHO[None, :]\n    o_bar = float(f\"{float(aloft_at_550(o)):.4e}\")"
+    },
+    {
+      "label": "I44 g_seg uses the 40 km node instead of 59.4 km -> test_g_seg_is_the_excess_at_the_59_4_km_node",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "ALOFT_VISIBILITIES_KM.index(59.4)",
+      "replace": "ALOFT_VISIBILITIES_KM.index(40.0)"
+    },
+    {
+      "label": "I45 report --aloft calls evaluate -> test_the_report_runs_no_evaluation_and_writes_no_file",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    sys.stdout.write(report_aloft(read_offset_fixtures(), read_aloft_fixture()))",
+      "replace": "    evaluate(\n        Path(\"/nonexistent-prague-cache\"),\n        DATASETS[\"full\"],\n        visibility=20.0,\n        altitude_m=340.0,\n        queries=[ALOFT_ZENITH_QUERY],\n        sun_elevation_deg=SUN_ELEVATION_DEG,\n        mode=\"transmittance\",\n    )\n    sys.stdout.write(report_aloft(read_offset_fixtures(), read_aloft_fixture()))"
+    },
+    {
+      "label": "I46 report --aloft output differs from the report function's output (trailing newline stripped) -> test_the_command_line_writes_exactly_the_report_functions_text",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    sys.stdout.write(report_aloft(read_offset_fixtures(), read_aloft_fixture()))",
+      "replace": "    sys.stdout.write(report_aloft(read_offset_fixtures(), read_aloft_fixture()).rstrip(\"\\n\"))"
+    },
+    {
+      "label": "I47 the report prints 1/a as a -> test_the_fit_tables_print_the_pinned_values",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "            f\"| {format_significant(_reciprocal(fit.a))} | {format_significant(fit.gas)} \"",
+      "replace": "            f\"| {format_significant(fit.a)} | {format_significant(fit.gas)} \""
+    },
+    {
+      "label": "I48 a 0.1 percent scale error injected into the tool's step 4 alone (grad0), not the power check -> test_every_member_agrees_with_the_power_check_not_only_the_envelope",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        grad0[c] = (gas[0] - gas[1]) / (2.0 * ALOFT_STEP)",
+      "replace": "        grad0[c] = 1.001 * (gas[0] - gas[1]) / (2.0 * ALOFT_STEP)"
+    },
+    {
+      "label": "I49 the tail multipliers are (0, 1) instead of (0, 1, 2) -> test_the_members_are_the_nine_pairs_of_rayleigh_factor_and_tail_multiplier",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "ALOFT_TAIL_MULTIPLIERS = (0.0, 1.0, 2.0)",
+      "replace": "ALOFT_TAIL_MULTIPLIERS = (0.0, 1.0)"
+    },
+    {
+      "label": "I50 omega_420 uses kappa(460)/kappa(550) (kappa(460)/kappa(500) once, not squared) -> test_the_tail_ratios_are_the_log_linear_continuation_of_the_coefficients_at_460_and_500",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "ALOFT_TAIL_RATIO_420 = _K460**2 / (_K500 * _K550)",
+      "replace": "ALOFT_TAIL_RATIO_420 = _K460 / _K550"
+    },
+    {
+      "label": "I51 the tail is taken from the first pass's O-bar only (no further passes) -> test_with_a_tail_the_passes_stop_at_a_fixed_point_tied_to_the_ozone_at_550_nm",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        settled = (\n            abs(new380 - t380) <= ALOFT_TAIL_TOLERANCE\n            and abs(new420 - t420) <= ALOFT_TAIL_TOLERANCE\n        )",
+      "replace": "        settled = True"
+    },
+    {
+      "label": "I52 the stopping rule compares the tail to 1e-12 instead of 1e-15 -> test_the_passes_stop_at_the_first_one_that_moves_neither_tail_by_more_than_1e_minus_15",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "ALOFT_TAIL_TOLERANCE = 1e-15",
+      "replace": "ALOFT_TAIL_TOLERANCE = 1e-12"
+    },
+    {
+      "label": "I53 a tail that has not settled in 200 passes is accepted instead of refused -> test_a_tail_that_has_not_settled_in_200_passes_is_a_refusal_naming_the_member",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    raise PragueError(\n        f\"{where or aloft_label(k, m)}: the ozone tail at 380 and 420 nm did not settle in \"\n        f\"{ALOFT_TAIL_MAX_PASSES} passes\"\n    )",
+      "replace": "    return AloftOzone(o, regime, ALOFT_TAIL_MAX_PASSES, t380, t420, eta, beta)"
+    },
+    {
+      "label": "I54 the tail is not zeroed when O-bar is not positive (a negative tail is used) -> test_the_tail_is_zero_where_the_ozone_at_550_nm_is_not_positive",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        new380 = m * ALOFT_TAIL_RATIO_380 * o_bar if o_bar > 0.0 else 0.0\n        new420 = m * ALOFT_TAIL_RATIO_420 * o_bar if o_bar > 0.0 else 0.0",
+      "replace": "        new380 = m * ALOFT_TAIL_RATIO_380 * o_bar\n        new420 = m * ALOFT_TAIL_RATIO_420 * o_bar"
+    },
+    {
+      "label": "I55 O(380) and O(420) are set to the old tail instead of the new one at the settling pass -> test_with_a_tail_the_passes_stop_at_a_fixed_point_tied_to_the_ozone_at_550_nm",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        t380, t420 = new380, new420\n        if settled:\n            o[0], o[1] = t380, t420",
+      "replace": "        old380, old420 = t380, t420\n        t380, t420 = new380, new420\n        if settled:\n            o[0], o[1] = old380, old420"
+    },
+    {
+      "label": "I56 p_15 is 120.45 (geopotential) instead of 121.11 -> test_the_rayleigh_at_15_km_is_computed_at_121_11_hpa_exactly",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "ALOFT_PRESSURE_HPA = 121.11",
+      "replace": "ALOFT_PRESSURE_HPA = 120.45"
+    },
+    {
+      "label": "I57 the altitude axis check is skipped (an altitude above the dataset's highest is accepted) -> test_the_builder_refuses_an_altitude_above_the_datasets_highest_before_evaluating",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        if altitude > top * (1.0 + ALOFT_AXIS_TOLERANCE):",
+      "replace": "        if False:"
+    },
+    {
+      "label": "I58 the sun line has no comma before the outcome -> test_the_four_sun_lines_are_printed_in_the_order_minus_one_zero_plus_one_plus_ten",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "g* {format_significant(g_stars[sun])}, {outcome}\"",
+      "replace": "g* {format_significant(g_stars[sun])} {outcome}\""
+    },
+    {
+      "label": "X1 fixture --aloft --check never compares the 15 km half -> test_check_returns_1_when_only_the_15_km_evaluations_differ",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    committed = json.loads(path.read_text())\n    problems: list[str] = []\n    _compare(committed, fresh, \"\", problems)\n    for problem in problems[:20]:\n        print(problem)\n    print(f\"{len(problems)} difference(s) between the committed fixture and a fresh evaluation\")\n    return 1 if problems else 0\n\n\ndef check_aloft_fixture",
+      "replace": "    committed = json.loads(path.read_text())\n    problems: list[str] = []\n    committed[\"transmittance\"][1] = fresh[\"transmittance\"][1]\n    _compare(committed, fresh, \"\", problems)\n    for problem in problems[:20]:\n        print(problem)\n    print(f\"{len(problems)} difference(s) between the committed fixture and a fresh evaluation\")\n    return 1 if problems else 0\n\n\ndef check_aloft_fixture"
+    },
+    {
+      "label": "X2 the writer stores -ln T where the reader expects T -> test_the_builder_stores_t_to_nine_significant_figures_by_altitude_then_node",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "            block.append([significant(t) for t in row])",
+      "replace": "            block.append([significant(-math.log(t)) for t in row])"
+    },
+    {
+      "label": "X3 the 15 km Rayleigh is computed at the 0.34 km pressure -> test_the_rayleigh_at_15_km_is_computed_at_121_11_hpa_exactly",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "ALOFT_R15 = np.asarray(rayleigh_optical_depth(ALOFT_CENTRES, ALOFT_PRESSURE_HPA))",
+      "replace": "ALOFT_R15 = np.asarray(rayleigh_optical_depth(ALOFT_CENTRES, PAPER_PRESSURE_HPA))"
+    },
+    {
+      "label": "X4 the 15 km spectra include the 340 nm channel (y0 keeps ten) -> test_the_inputs_are_the_ten_channels_from_380_nm_up_and_leave_the_340_nm_channel_out",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    return spectra[0][:, first:], spectra[1][:, first:]",
+      "replace": "    return spectra[0][:, first:], spectra[1][:, first - 1 :]"
+    },
+    {
+      "label": "X5 not this uses g_hi < g* instead of g_hi <= g* -> test_g_hi_exactly_at_the_crossing_is_not_this",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if g_hi <= g_star:",
+      "replace": "    if g_hi < g_star:"
+    },
+    {
+      "label": "X7 the envelope uses only the k = 1.00 members -> test_the_envelope_is_the_lowest_and_highest_of_g_minus_and_plus_two_se_over_the_nine",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    members = list(members)",
+      "replace": "    members = [m for m in members if getattr(m, \"k\", 1.0) == 1.0]"
+    },
+    {
+      "label": "X8 the envelope omits the m = 2 members -> test_the_envelope_is_the_lowest_and_highest_of_g_minus_and_plus_two_se_over_the_nine",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    members = list(members)",
+      "replace": "    members = [m for m in members if getattr(m, \"m\", 0.0) != 2.0]"
+    },
+    {
+      "label": "X9 the tail ratios omega_380 and omega_420 are swapped -> test_the_tail_ratios_are_the_log_linear_continuation_of_the_coefficients_at_460_and_500",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "ALOFT_TAIL_RATIO_420 = _K460**2 / (_K500 * _K550)\nALOFT_TAIL_RATIO_380 = _K460**3 / (_K500**2 * _K550)",
+      "replace": "ALOFT_TAIL_RATIO_420 = _K460**3 / (_K500**2 * _K550)\nALOFT_TAIL_RATIO_380 = _K460**2 / (_K500 * _K550)"
+    },
+    {
+      "label": "X10 the 0.34 km perturbed fits start from the registered start instead of the unperturbed solution -> test_each_member_runs_41_fits_and_each_perturbed_fit_starts_at_the_unperturbed_solution",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "aloft_fit(y0 + step[None, :], ozone.o, k, start=own.x, where=where).gas",
+      "replace": "aloft_fit(y0 + step[None, :], ozone.o, k, start=None, where=where).gas"
+    },
+    {
+      "label": "X11 the 15 km gradient is one-sided (raised minus unperturbed over 1e-5) -> test_the_member_matches_the_independent_derivation_quantity_by_quantity",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        grad15[c] = (gas[0] - gas[1]) / (2.0 * ALOFT_STEP)",
+      "replace": "        grad15[c] = (gas[0] - own.gas) / ALOFT_STEP"
+    },
+    {
+      "label": "X12 |grad0_k| is the sum of absolute values instead of the Euclidean norm -> test_the_member_matches_the_independent_derivation_quantity_by_quantity",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "float(np.linalg.norm(grad0))",
+      "replace": "float(np.abs(grad0).sum())"
+    },
+    {
+      "label": "X13 the 15 km gradient redoes the ozone with no tail (m = 0) instead of recomputing the member's tail -> test_the_member_matches_the_independent_derivation_quantity_by_quantity",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "shape = aloft_ozone(y15_mean + step, k, m, where=where).o",
+      "replace": "shape = aloft_ozone(y15_mean + step, k, 0.0, where=where).o"
+    },
+    {
+      "label": "X14 the 0.34 km gradient perturbs one node only instead of all six at once -> test_the_gradients_are_central_differences_with_a_step_of_1e_minus_5",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "aloft_fit(y0 + step[None, :], ozone.o, k, start=own.x, where=where).gas",
+      "replace": "aloft_fit(\n                    y0 + step[None, :] * (np.arange(ALOFT_NODES)[:, None] == 0),\n                    ozone.o,\n                    k,\n                    start=own.x,\n                    where=where,\n                ).gas"
+    },
+    {
+      "label": "X15 the extraction term uses s_15 rounded to five figures (a printed quantity reused) -> test_the_extraction_error_carries_s15_over_root_six_and_s_k_inside_the_gradient_norm",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "math.sqrt(scale.s15**2 / ALOFT_NODES + fit.s**2)",
+      "replace": "math.sqrt(float(format_significant(scale.s15)) ** 2 / ALOFT_NODES + fit.s**2)"
+    },
+    {
+      "label": "X16 the verdict compares the envelope with the crossings rounded to five figures (as printed) -> test_g_lo_between_the_unrounded_and_the_printed_crossing_contributes",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    outcomes = tuple(aloft_outcome(g_lo, g_hi, g_stars[sun]) for sun in DEPTH_SUNS_DEG)",
+      "replace": "    outcomes = tuple(\n        aloft_outcome(g_lo, g_hi, float(format_significant(g_stars[sun]))) for sun in DEPTH_SUNS_DEG\n    )"
+    },
+    {
+      "label": "X17 the report's verdict is taken on g_lo and g_hi rounded to five figures -> test_the_report_takes_its_verdict_on_the_unrounded_g_lo",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        estimate.g_lo, estimate.g_hi, {row.sun: row.g_star for row in pilot.suns}",
+      "replace": "        float(format_significant(estimate.g_lo)),\n        float(format_significant(estimate.g_hi)),\n        {row.sun: row.g_star for row in pilot.suns},"
+    },
+    {
+      "label": "X18 an infinite SE_k is refused instead of widening the envelope -> test_an_infinite_error_widens_the_envelope_without_a_refusal",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        if math.isnan(se):",
+      "replace": "        if not math.isfinite(se):"
+    },
+    {
+      "label": "X19 a non-finite g_k is not refused -> test_a_non_finite_excess_is_a_refusal_naming_the_member",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        if not math.isfinite(g):",
+      "replace": "        if False:"
+    },
+    {
+      "label": "X20 the shape check of the spectra is skipped in aloft_estimate -> test_the_estimate_refuses_spectra_that_are_not_six_nodes_of_ten_channels",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if y0.shape != shape or y15.shape != shape:",
+      "replace": "    if False:"
+    },
+    {
+      "label": "X21 the finiteness check of the spectra is skipped in aloft_estimate -> test_the_report_refuses_a_malformed_aloft_fixture",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if not (np.all(np.isfinite(y0)) and np.all(np.isfinite(y15))):",
+      "replace": "    if False:"
+    },
+    {
+      "label": "X22 s_15 removes the node median instead of the node mean -> test_the_scale_matches_the_independent_derivation_on_noisy_spectra",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    d = y15 - y15.mean(axis=0)",
+      "replace": "    d = y15 - np.median(y15, axis=0)"
+    },
+    {
+      "label": "X23 the condition number is taken on the column-scaled Jacobian -> test_the_condition_number_is_that_of_the_unscaled_analytic_jacobian_at_the_solution",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        return float(np.linalg.cond(self.jac))",
+      "replace": "        return float(np.linalg.cond(self.jac / np.linalg.norm(self.jac, axis=0)))"
+    },
+    {
+      "label": "X26 the report omits the per-node D at 550 nm -> test_the_scale_table_prints_the_pinned_values",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        out(f\"| {node:g} | {format_significant(float(d))} |\")",
+      "replace": "        pass"
+    },
+    {
+      "label": "X27 1 / a is not guarded at a = 0 (ZeroDivisionError instead of inf) -> test_numbers_are_printed_to_five_significant_figures_trailing_zeros_kept",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    return math.inf if value == 0.0 else 1.0 / value",
+      "replace": "    return 1.0 / value"
+    },
+    {
+      "label": "X28 x_c is referenced to 500 nm instead of 550 nm (same fit space, other parametrisation) -> test_the_condition_number_is_that_of_the_unscaled_analytic_jacobian_at_the_solution",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "ALOFT_X = np.log(ALOFT_CENTRES / REFERENCE_WAVELENGTH_NM)",
+      "replace": "ALOFT_X = np.log(ALOFT_CENTRES / 500.0)"
+    },
+    {
+      "label": "X30 report --aloft writes a file -> test_the_report_runs_no_evaluation_and_writes_no_file",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    sys.stdout.write(report_aloft(read_offset_fixtures(), read_aloft_fixture()))",
+      "replace": "    Path(__import__(\"tempfile\").gettempdir(), \"aloft-report-x30.txt\").write_text(\"report\")\n    sys.stdout.write(report_aloft(read_offset_fixtures(), read_aloft_fixture()))"
+    },
+    {
+      "label": "X31 the sun lines are printed in reverse order -> test_the_four_sun_lines_are_printed_in_the_order_minus_one_zero_plus_one_plus_ten",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        for sun, outcome in zip(DEPTH_SUNS_DEG, outcomes, strict=True)",
+      "replace": "        for sun, outcome in zip(reversed(DEPTH_SUNS_DEG), reversed(outcomes), strict=True)"
+    },
+    {
+      "label": "X33 the reported-altitude refusal never fires -> test_the_builder_refuses_a_reported_altitude_that_differs_from_the_one_asked",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "            if len(reported) != 1 or abs(reported[0] - altitude) > ALOFT_ALTITUDE_TOLERANCE_M:",
+      "replace": "            if len(reported) != 1:"
+    },
+    {
+      "label": "X35 the builder skips the check of the evaluation's channels against the dataset's -> test_the_builder_refuses_an_evaluation_whose_channels_are_not_the_datasets",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "            if (\n                result.channels.shape != (1, axes.channels)\n                or abs(result.start_nm - axes.channel_start_nm) > GAS_CENTRE_TOLERANCE_NM\n                or abs(result.width_nm - axes.channel_width_nm) > GAS_CENTRE_TOLERANCE_NM\n            ):",
+      "replace": "            if False:"
+    },
+    {
+      "label": "X36 the dataset is verified after its axes are read, not before -> test_the_builder_checks_the_dataset_before_it_evaluates_anything",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    verify_dataset(path, full)\n    axes = read_axes(path)\n    check_aloft_axes(axes)",
+      "replace": "    axes = read_axes(path)\n    verify_dataset(path, full)\n    check_aloft_axes(axes)"
+    },
+    {
+      "label": "X37 verify_dataset refuses a file that is shorter than pinned but accepts a longer one at the size check -> test_verify_dataset_refuses_a_missing_short_or_altered_file",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if not path.exists() or path.stat().st_size != dataset.size:",
+      "replace": "    if not path.exists() or path.stat().st_size < dataset.size:"
+    },
+    {
+      "label": "X38 the altitude check allows 1e-5 relative instead of 1e-6 -> test_the_altitude_check_allows_one_part_in_a_million_and_no_more",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        if altitude > top * (1.0 + ALOFT_AXIS_TOLERANCE):",
+      "replace": "        if altitude > top * (1.0 + 10 * ALOFT_AXIS_TOLERANCE):"
+    },
+    {
+      "label": "X39 the visibility upper bound allows 1e-5 relative instead of 1e-6 -> test_the_visibility_check_allows_one_part_in_a_million_above_the_highest_node_and_no_more",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        if visibility < low * (1.0 - ALOFT_AXIS_TOLERANCE) or visibility > high * (\n            1.0 + ALOFT_AXIS_TOLERANCE\n        ):",
+      "replace": "        if visibility < low * (1.0 - ALOFT_AXIS_TOLERANCE) or visibility > high * (\n            1.0 + 10 * ALOFT_AXIS_TOLERANCE\n        ):"
+    },
+    {
+      "label": "X42 the fixture check accepts visibility nodes within 1 km of the registered ones -> test_the_fixture_check_allows_a_billionth_off_the_registered_axes_and_no_more",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "all(abs(v - r) <= 1e-9 for v, r in zip(nodes, ALOFT_VISIBILITIES_KM, strict=True))",
+      "replace": "all(abs(v - r) <= 1.0 for v, r in zip(nodes, ALOFT_VISIBILITIES_KM, strict=True))"
+    },
+    {
+      "label": "X44 the builder asks for the 15 km spectra 50 m high (the stand-in model reports what it was asked) -> test_the_builder_evaluates_each_node_at_each_altitude_the_way_the_criterion_says",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "                visibility=visibility,\n                altitude_m=altitude,\n                queries=[ALOFT_ZENITH_QUERY],",
+      "replace": "                visibility=visibility,\n                altitude_m=altitude + 50.0 * (altitude > 1000.0),\n                queries=[ALOFT_ZENITH_QUERY],"
+    },
+    {
+      "label": "X45 evaluate's own refusal of a reported altitude other than the one asked is dropped -> test_evaluate_refuses_a_reported_altitude_other_than_the_one_asked",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if not np.allclose(table[:, 2], altitude_m, atol=1e-6):",
+      "replace": "    if False:"
+    },
+    {
+      "label": "X46 the verdict does not require the four suns' crossings -> test_the_verdict_needs_the_four_suns_and_refuses_otherwise",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if set(g_stars) != set(DEPTH_SUNS_DEG):",
+      "replace": "    if False:"
+    },
+    {
+      "label": "X47 outcome_at looks the sun up in reverse order -> test_the_outcomes_are_looked_up_by_sun_in_the_criterion_order",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        return self.outcomes[DEPTH_SUNS_DEG.index(sun)]",
+      "replace": "        return self.outcomes[::-1][DEPTH_SUNS_DEG.index(sun)]"
+    },
+    {
+      "label": "X48 an evaluation that does not report its altitude is not refused (nan slips past the comparison) -> test_an_evaluation_that_does_not_say_its_altitude_is_refused",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "            if result.altitudes_m is None:",
+      "replace": "            if False:"
+    },
+    {
+      "label": "X49 a transmittance of infinity is accepted by the builder -> test_the_builder_refuses_a_transmittance_that_is_not_finite_and_above_zero",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "                if not (math.isfinite(t) and t > 0.0):",
+      "replace": "                if not (t > 0.0):"
+    },
+    {
+      "label": "X50 verify_dataset does not check the SHA-256 -> test_verify_dataset_refuses_a_missing_short_or_altered_file",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if sha256_of(path) != dataset.sha256:\n        raise PragueError(f\"{path} does not have its pinned SHA-256\")\n\n\ndef run(",
+      "replace": "    if False:\n        raise PragueError(f\"{path} does not have its pinned SHA-256\")\n\n\ndef run("
+    },
+    {
+      "label": "X54 format_significant switches to scientific notation one decade later (1e-5 printed fixed) -> test_numbers_are_printed_to_five_significant_figures_trailing_zeros_kept",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    if -4 <= exponent < digits:",
+      "replace": "    if -5 <= exponent < digits:"
+    },
+    {
+      "label": "X55 the aloft fixture's version is not checked -> test_the_aloft_fixture_must_be_the_registered_format_and_version",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    _require(data.get(\"version\") == ALOFT_VERSION, where, f\"version is not {ALOFT_VERSION}\")",
+      "replace": "    pass"
+    },
+    {
+      "label": "X56 a fixture that is not JSON escapes read_aloft_fixture as a ValueError instead of a refusal -> test_a_fixture_that_cannot_be_read_is_refused",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    except (OSError, ValueError) as error:\n        raise PragueError(f\"{_shown(path)} cannot be read as a fixture: {error}\") from error\n\n\n# --- step 1",
+      "replace": "    except OSError as error:\n        raise PragueError(f\"{_shown(path)} cannot be read as a fixture: {error}\") from error\n\n\n# --- step 1"
+    },
+    {
+      "label": "X57 aloft_spectra does not check the fixture's layout -> test_the_report_refuses_a_malformed_aloft_fixture",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    check_aloft_fixture(data)\n    return -np.log(",
+      "replace": "    return -np.log("
+    },
+    {
+      "label": "X58 the exact branch excludes eta = 0 (lower guard bound exclusive) -> test_eta_equal_to_zero_is_inside_the_guard_and_exact",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        if low <= eta <= high:",
+      "replace": "        if low < eta <= high:"
+    },
+    {
+      "label": "X59 the exact branch excludes eta = 3 (upper guard bound exclusive) -> test_the_guard_bounds_are_inclusive_at_both_ends",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "        if low <= eta <= high:",
+      "replace": "        if low <= eta < high:"
+    },
+    {
+      "label": "[control] C1 the wording of a bare string literal after the node tuple -> survives",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "\"\"\"The six visibility nodes of the dataset's axis, in km.\"\"\"",
+      "replace": "\"\"\"The six visibility nodes of the dataset's axis, in kilometres.\"\"\"",
+      "expect": "survived",
+      "why": "A bare string literal after an assignment is not a docstring of anything (module-level names have no __doc__), so it is evaluated and discarded: no value, name or output changes. No test reads the tool's source text. Scope: inert on every path the suite reaches; it would matter only to a test that greps this file's text, and none does."
+    },
+    {
+      "label": "F1 fixture --aloft --check never compares the 0.34 km half -> test_check_returns_1_when_only_the_340_m_evaluations_differ",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "    committed = json.loads(path.read_text())\n    problems: list[str] = []\n    _compare(committed, fresh, \"\", problems)\n    for problem in problems[:20]:\n        print(problem)\n    print(f\"{len(problems)} difference(s) between the committed fixture and a fresh evaluation\")\n    return 1 if problems else 0\n\n\ndef check_aloft_fixture",
+      "replace": "    committed = json.loads(path.read_text())\n    problems: list[str] = []\n    committed[\"transmittance\"][0] = fresh[\"transmittance\"][0]\n    _compare(committed, fresh, \"\", problems)\n    for problem in problems[:20]:\n        print(problem)\n    print(f\"{len(problems)} difference(s) between the committed fixture and a fresh evaluation\")\n    return 1 if problems else 0\n\n\ndef check_aloft_fixture"
+    },
+    {
+      "label": "F2 the fixture check accepts altitudes within 1 m of the registered ones -> test_the_fixture_check_allows_a_billionth_off_the_registered_axes_and_no_more",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "all(abs(v - r) <= 1e-9 for v, r in zip(altitudes, ALOFT_ALTITUDES_M, strict=True))",
+      "replace": "all(abs(v - r) <= 1.0 for v, r in zip(altitudes, ALOFT_ALTITUDES_M, strict=True))"
+    },
+    {
+      "label": "F3 the fixture check accepts channel centres within 1 nm of the registered ones -> test_the_fixture_check_allows_a_billionth_off_the_registered_axes_and_no_more",
+      "file": "../../tools/prague_reference.py",
+      "oracle": "real",
+      "find": "            abs(v - r) <= GAS_CENTRE_TOLERANCE_NM\n            for v, r in zip(centres, GAS_CHANNEL_CENTRES_NM, strict=True)",
+      "replace": "            abs(v - r) <= 1.0\n            for v, r in zip(centres, GAS_CHANNEL_CENTRES_NM, strict=True)"
+    }
+  ]
+}

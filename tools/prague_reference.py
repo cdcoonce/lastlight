@@ -13,6 +13,10 @@ Usage (fetch needs the network; build needs a C++17 compiler, `c++` on the path)
     uv run python tools/prague_reference.py fixture --sun 1  # the sun1.json fixture (#49)
     uv run python tools/prague_reference.py report --offset  # the offset rules, from all four
     uv run python tools/prague_reference.py report --depth   # the aerosol amount's evidence (#55)
+    uv run python tools/prague_reference.py fixture --aloft  # the aloft.json fixture (#57)
+    uv run python tools/prague_reference.py fixture --aloft --check
+    uv run python tools/prague_reference.py report --aloft   # the aerosol amount from Prague's
+                                                             # own ozone aloft (#57)
 
 Everything the model needs lives outside the repository, in `~/.cache/lastlight/prague/`
 (`--cache DIR` overrides it): the reference implementation of Wilkie et al. (2021) and Vevoda
@@ -63,7 +67,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -356,6 +360,14 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
+def verify_dataset(path: Path, dataset: Dataset) -> None:
+    """Refuse a dataset file that is missing, of another size or without its pinned SHA-256."""
+    if not path.exists() or path.stat().st_size != dataset.size:
+        raise PragueError(f"{path} is missing: run `prague_reference.py fetch`")
+    if sha256_of(path) != dataset.sha256:
+        raise PragueError(f"{path} does not have its pinned SHA-256")
+
+
 def run(command: Sequence[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(command, check=True, text=True, **kwargs)
 
@@ -481,6 +493,9 @@ class Evaluation:
     channels: np.ndarray  # (queries, channel count): radiance or transmittance per channel
     start_nm: float
     width_nm: float
+    altitudes_m: np.ndarray | None = None
+    """The viewpoint altitude the model reported for each query (`evaluate` has already refused
+    any that is not the one asked for); a stand-in that does not say leaves it None."""
 
 
 def evaluate(
@@ -532,7 +547,7 @@ def evaluate(
         raise PragueError(f"the model evaluated at altitude {table[:, 2]}, not {altitude_m} m")
     if not np.allclose(table[:, 3], sun_elevation_deg, atol=1e-9):
         raise PragueError(f"the model's sun elevation is {table[:, 3]}, not {sun_elevation_deg}")
-    return Evaluation(table[:, 5:], start, width)
+    return Evaluation(table[:, 5:], start, width, table[:, 2].copy())
 
 
 # --- the fixture ----------------------------------------------------------------------------------
@@ -696,10 +711,7 @@ def build_fixture(cache: Path, spec: FixtureSpec = SUN10) -> dict:
     fetch_model(cache)
     paths = {key: cache / "dl" / dataset.name for key, dataset in DATASETS.items()}
     for key, dataset in DATASETS.items():
-        if not paths[key].exists() or paths[key].stat().st_size != dataset.size:
-            raise PragueError(f"{paths[key]} is missing: run `prague_reference.py fetch`")
-        if sha256_of(paths[key]) != dataset.sha256:
-            raise PragueError(f"{paths[key]} does not have its pinned SHA-256")
+        verify_dataset(paths[key], dataset)
     axes = read_axes(paths["full"])
     ground_axes = read_axes(paths["ground"])
     sun = spec.sun_elevation_deg
@@ -4085,6 +4097,944 @@ def cmd_report_depth() -> None:
     sys.stdout.write(report_depth(read_offset_fixtures()))
 
 
+# --- #57: Prague's aerosol amount from Prague's own ozone aloft and the paper's Rayleigh ---------
+#
+# `docs/renderer/prague-gas-aloft-criterion.md` registers the rule, and `tools/issue57_power.py` is
+# its power check on synthetic truths. The code below carries the rule out exactly as the criterion
+# defines it: the aloft fixture (Prague's zenith transmittance at the six visibility nodes, at
+# 0.34 km and 15 km), the estimator of its steps 1 to 5 for the nine members, the verdict of its
+# step 6, and the report. `report --aloft` reads only fixtures, runs no Prague evaluation and
+# writes no file. The estimator must agree with the power check's `estimate` to 1e-6; the two are
+# kept apart on purpose (two implementations that agree are the check). Where this code and the
+# criterion disagree, the code is the defect.
+
+ALOFT_FIXTURE = FIXTURE_DIR / "aloft.json"
+ALOFT_FORMAT = "lastlight-prague-aloft"
+ALOFT_VERSION = 1
+ALOFT_COMMAND = "uv run python tools/prague_reference.py fixture --aloft"
+ALOFT_VISIBILITIES_KM = (20.0, 27.6, 40.0, 59.4, 90.0, 131.8)
+"""The six visibility nodes of the dataset's axis, in km."""
+ALOFT_ALTITUDES_M = (PAPER_ALTITUDE_M, 15000.0)
+"""The two observer altitudes, in metres: the paper's 0.34 km and Prague's highest, 15 km."""
+ALOFT_ZENITH_QUERY = (0.0, 90.0)
+"""(relative azimuth, view elevation) of the zenith."""
+ALOFT_AXIS_TOLERANCE = 1e-6
+"""An altitude above the dataset's highest, or a visibility outside its range, by more than this
+relative amount is refused."""
+ALOFT_ALTITUDE_TOLERANCE_M = 1e-6
+"""The model's reported viewpoint altitude is the one asked for to this many metres."""
+ALOFT_PRESSURE_HPA = 121.11
+"""The U.S. Standard Atmosphere's pressure at a geometric 15 km, truncated, hPa: the literal."""
+ALOFT_RAYLEIGH_FACTORS = (0.99, 1.00, 1.01)
+ALOFT_TAIL_MULTIPLIERS = (0.0, 1.0, 2.0)
+ALOFT_MEMBERS = tuple(itertools.product(ALOFT_RAYLEIGH_FACTORS, ALOFT_TAIL_MULTIPLIERS))
+"""The nine members (k, m): the Rayleigh factor varies slowest."""
+ALOFT_ETA_GUARD = (0.0, 3.0)
+ALOFT_RESIDUAL_FLOOR = 1e-12
+ALOFT_TAIL_TOLERANCE = 1e-15
+ALOFT_TAIL_MAX_PASSES = 200
+ALOFT_STEP = 1e-5
+"""The central differences' step, in -ln T."""
+ALOFT_NODES = len(ALOFT_VISIBILITIES_KM)
+ALOFT_CHANNELS = len(GAS_FIT_CENTRES_NM)
+ALOFT_VALUES = ALOFT_NODES * ALOFT_CHANNELS
+ALOFT_PARAMETERS = 1 + 3 * ALOFT_NODES
+ALOFT_FIT_DOF = ALOFT_VALUES - ALOFT_PARAMETERS
+"""41: the 60 values less the 19 parameters."""
+ALOFT_SCALE_DOF = ALOFT_VALUES - ALOFT_CHANNELS - 3 * (ALOFT_NODES - 1)
+"""35: 60 values, the ten channel means and the fifteen independent node coefficients."""
+ALOFT_START_ALPHA = GAS_START_ALPHA
+ALOFT_START_GAMMA = GAS_START_GAMMA
+ALOFT_START_FLOOR = GAS_START_FLOOR
+ALOFT_CENTRES = np.asarray(GAS_FIT_CENTRES_NM)
+ALOFT_I540 = GAS_FIT_CENTRES_NM.index(540.0)
+ALOFT_I580 = GAS_FIT_CENTRES_NM.index(580.0)
+ALOFT_W540, ALOFT_W580 = 0.75, 0.25
+"""Linear interpolation to 550 nm between the 540 and 580 nm channel centres."""
+ALOFT_X = np.log(ALOFT_CENTRES / REFERENCE_WAVELENGTH_NM)
+ALOFT_R_PAPER = float(rayleigh_optical_depth(REFERENCE_WAVELENGTH_NM, PAPER_PRESSURE_HPA))
+ALOFT_RHO = np.asarray(rayleigh_optical_depth(ALOFT_CENTRES, PAPER_PRESSURE_HPA)) / ALOFT_R_PAPER
+ALOFT_R15 = np.asarray(rayleigh_optical_depth(ALOFT_CENTRES, ALOFT_PRESSURE_HPA))
+_K460, _K500, _K550 = (float(ozone_absorption_per_atm_cm(w)) for w in (460.0, 500.0, 550.0))
+ALOFT_TAIL_RATIO_420 = _K460**2 / (_K500 * _K550)
+ALOFT_TAIL_RATIO_380 = _K460**3 / (_K500**2 * _K550)
+"""The ozone at 420 and 380 nm over the ozone at 550 nm: SPCTRL2's coefficients at 460 and 500 nm
+continued log-linearly (the channels are 40 nm apart): 0.014118 and 0.0028235, unrounded."""
+ALOFT_LOG_RATIO = math.log(420.0 / 380.0)
+
+
+def aloft_at_550(values: np.ndarray) -> np.ndarray:
+    """Interpolated linearly at 550 nm between the 540 and 580 nm channel centres (last axis)."""
+    return ALOFT_W540 * values[..., ALOFT_I540] + ALOFT_W580 * values[..., ALOFT_I580]
+
+
+ALOFT_RHO_BAR = float(aloft_at_550(ALOFT_RHO))
+"""The Rayleigh shape at 550 nm (1.00968)."""
+
+
+def aloft_label(k: float, m: float) -> str:
+    return f"member (k={k:g}, m={m:g})"
+
+
+def format_significant(value: float, digits: int = 5) -> str:
+    """`value` to `digits` significant figures, trailing zeros kept; 0 as 0, inf and nan as such.
+
+    Fixed notation from 1e-4 up to (not including) 10^digits, scientific outside it.
+    """
+    if not math.isfinite(value):
+        return str(float(value))
+    if value == 0.0:
+        return "0"
+    text = f"{value:.{digits - 1}e}"
+    exponent = int(text.split("e")[1])
+    if -4 <= exponent < digits:
+        return f"{float(text):.{digits - 1 - exponent}f}"
+    return text
+
+
+# --- the aloft fixture ----------------------------------------------------------------------------
+
+
+def check_aloft_axes(
+    axes: Axes,
+    visibilities: Sequence[float] = ALOFT_VISIBILITIES_KM,
+    altitudes: Sequence[float] = ALOFT_ALTITUDES_M,
+) -> None:
+    """Refuse an altitude above the dataset's highest or a visibility outside its range.
+
+    Both by more than `ALOFT_AXIS_TOLERANCE` relative. The model does not clamp the altitude at the
+    top, and clamps the visibility silently, so neither is left to the model. The dataset's radiance
+    axes stand for the transmittance's, which are private to the reference implementation.
+    """
+    top = max(axes.altitudes_m)
+    for altitude in altitudes:
+        if altitude > top * (1.0 + ALOFT_AXIS_TOLERANCE):
+            raise PragueError(
+                f"altitude {altitude:g} m is above the dataset's highest altitude, {top:g} m: "
+                "the aloft fixture is not made"
+            )
+    low, high = min(axes.visibilities_km), max(axes.visibilities_km)
+    for visibility in visibilities:
+        if visibility < low * (1.0 - ALOFT_AXIS_TOLERANCE) or visibility > high * (
+            1.0 + ALOFT_AXIS_TOLERANCE
+        ):
+            raise PragueError(
+                f"visibility {visibility:g} km is outside the dataset's visibility range, "
+                f"{low:g} to {high:g} km: the model would clamp it without a word, so the aloft "
+                "fixture is not made"
+            )
+
+
+def build_aloft_fixture(cache: Path) -> dict:
+    """Prague's zenith transmittance at each visibility node and at 0.34 km and 15 km: a dict.
+
+    Eleven channels at each of 6 nodes and 2 altitudes (132 values), from the full dataset with
+    `mode="transmittance"`, the zenith query, ground albedo 0.2 and sun elevation 10 degrees. The
+    axes are checked before anything is evaluated, and each evaluation's reported altitude is
+    checked and recorded.
+    """
+    fetch_model(cache)
+    full = DATASETS["full"]
+    path = cache / "dl" / full.name
+    verify_dataset(path, full)
+    axes = read_axes(path)
+    check_aloft_axes(axes)
+    centres = [
+        axes.channel_start_nm + (i + 0.5) * axes.channel_width_nm for i in range(axes.channels)
+    ]
+    transmittance: list[list[list[float]]] = []
+    evaluations: list[dict] = []
+    for altitude in ALOFT_ALTITUDES_M:
+        block: list[list[float]] = []
+        for visibility in ALOFT_VISIBILITIES_KM:
+            where = f"altitude {altitude:g} m, visibility {visibility:g} km"
+            result = evaluate(
+                cache,
+                full,
+                visibility=visibility,
+                altitude_m=altitude,
+                queries=[ALOFT_ZENITH_QUERY],
+                sun_elevation_deg=SUN_ELEVATION_DEG,
+                mode="transmittance",
+            )
+            if result.altitudes_m is None:
+                raise PragueError(f"{where}: the evaluation did not report its viewpoint altitude")
+            reported = [float(a) for a in np.asarray(result.altitudes_m, dtype=float).ravel()]
+            if len(reported) != 1 or abs(reported[0] - altitude) > ALOFT_ALTITUDE_TOLERANCE_M:
+                raise PragueError(
+                    f"{where}: the model evaluated at altitude {reported}, not {altitude:g} m"
+                )
+            if (
+                result.channels.shape != (1, axes.channels)
+                or abs(result.start_nm - axes.channel_start_nm) > GAS_CENTRE_TOLERANCE_NM
+                or abs(result.width_nm - axes.channel_width_nm) > GAS_CENTRE_TOLERANCE_NM
+            ):
+                raise PragueError(f"{where}: the evaluation's channels are not the dataset's")
+            row = [float(t) for t in result.channels[0]]
+            for channel, t in zip(centres, row, strict=True):
+                if not (math.isfinite(t) and t > 0.0):
+                    raise PragueError(
+                        f"Prague's transmittance {t!r} is not finite and above 0 at {where}, "
+                        f"channel {channel:g} nm"
+                    )
+            block.append([significant(t) for t in row])
+            evaluations.append(
+                {
+                    "altitude_m": altitude,
+                    "visibility_km": visibility,
+                    "reported_altitude_m": reported[0],
+                }
+            )
+        transmittance.append(block)
+    return {
+        "format": ALOFT_FORMAT,
+        "version": ALOFT_VERSION,
+        "sun_elevation_deg": SUN_ELEVATION_DEG,
+        "ground_albedo": GROUND_ALBEDO,
+        "zenith_query": {
+            "rel_azimuth_deg": ALOFT_ZENITH_QUERY[0],
+            "view_elevation_deg": ALOFT_ZENITH_QUERY[1],
+        },
+        "visibility_nodes_km": list(ALOFT_VISIBILITIES_KM),
+        "altitudes_m": list(ALOFT_ALTITUDES_M),
+        "channel_centres_nm": centres,
+        "transmittance_convention": (
+            "Prague's zenith transmittance T per channel (the channel value standing for its "
+            "centre), to nine significant figures, indexed [altitude][visibility node][channel]."
+        ),
+        "transmittance": transmittance,
+        "provenance": {
+            "model": {
+                "repository": MODEL_URL,
+                "commit": MODEL_COMMIT,
+                "licence": "Apache-2.0",
+                "copyright": "Copyright 2022 Charles University",
+            },
+            "dataset": {
+                "file": full.name,
+                "bytes": full.size,
+                "sha256": full.sha256,
+                "drive_id": full.drive_id,
+            },
+            "dataset_axes": {
+                "visibilities_km": list(axes.visibilities_km),
+                "albedos": [significant(a, 6) for a in axes.albedos],
+                "altitudes_m": [significant(a, 8) for a in axes.altitudes_m],
+                "elevations_deg": list(axes.elevations_deg),
+            },
+            "evaluations": evaluations,
+            "command": ALOFT_COMMAND,
+        },
+    }
+
+
+def cmd_fixture_aloft(cache: Path, path: Path = ALOFT_FIXTURE, *, check: bool) -> int:
+    if check and not path.exists():
+        raise PragueError(f"{path} does not exist: nothing to check")
+    fresh = build_aloft_fixture(cache)
+    if not check:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(dump(fresh))
+        print(f"wrote {_shown(path)} ({path.stat().st_size} bytes)")
+        return 0
+    committed = json.loads(path.read_text())
+    problems: list[str] = []
+    _compare(committed, fresh, "", problems)
+    for problem in problems[:20]:
+        print(problem)
+    print(f"{len(problems)} difference(s) between the committed fixture and a fresh evaluation")
+    return 1 if problems else 0
+
+
+def check_aloft_fixture(data: object) -> None:
+    """Refuse an aloft fixture that is not the registered layout, nodes, altitudes and channels."""
+    where = "aloft.json"
+    _require(isinstance(data, dict), where, "it is not an object")
+    assert isinstance(data, dict)
+    _require(data.get("format") == ALOFT_FORMAT, where, f"format is not {ALOFT_FORMAT!r}")
+    _require(data.get("version") == ALOFT_VERSION, where, f"version is not {ALOFT_VERSION}")
+    nodes = data.get("visibility_nodes_km")
+    _require(
+        isinstance(nodes, list)
+        and len(nodes) == ALOFT_NODES
+        and all(_is_number(v) for v in nodes)
+        and all(abs(v - r) <= 1e-9 for v, r in zip(nodes, ALOFT_VISIBILITIES_KM, strict=True)),
+        where,
+        f"the visibility nodes are {nodes!r} km, not the registered {list(ALOFT_VISIBILITIES_KM)}",
+    )
+    altitudes = data.get("altitudes_m")
+    _require(
+        isinstance(altitudes, list)
+        and len(altitudes) == len(ALOFT_ALTITUDES_M)
+        and all(_is_number(v) for v in altitudes)
+        and all(abs(v - r) <= 1e-9 for v, r in zip(altitudes, ALOFT_ALTITUDES_M, strict=True)),
+        where,
+        f"the altitudes are {altitudes!r} m, not the registered {list(ALOFT_ALTITUDES_M)}",
+    )
+    centres = data.get("channel_centres_nm")
+    _require(
+        isinstance(centres, list)
+        and len(centres) == len(GAS_CHANNEL_CENTRES_NM)
+        and all(_is_number(v) for v in centres)
+        and all(
+            abs(v - r) <= GAS_CENTRE_TOLERANCE_NM
+            for v, r in zip(centres, GAS_CHANNEL_CENTRES_NM, strict=True)
+        ),
+        where,
+        f"the channel centres are {centres!r} nm, not the registered eleven, 340 to 740 nm by 40",
+    )
+    table = data.get("transmittance")
+    _require(
+        isinstance(table, list)
+        and len(table) == len(ALOFT_ALTITUDES_M)
+        and all(isinstance(block, list) and len(block) == ALOFT_NODES for block in table)
+        and all(
+            isinstance(row, list) and len(row) == len(GAS_CHANNEL_CENTRES_NM)
+            for block in table
+            for row in block
+        ),
+        where,
+        "the transmittance is not [altitude][visibility node][channel] of 2 x 6 x 11",
+    )
+    for a, block in enumerate(table):
+        for n, row in enumerate(block):
+            for c, t in enumerate(row):
+                _require(
+                    _is_number(t) and t > 0.0,
+                    where,
+                    f"the transmittance {t!r} at altitude {ALOFT_ALTITUDES_M[a]:g} m, visibility "
+                    f"{ALOFT_VISIBILITIES_KM[n]:g} km, channel {GAS_CHANNEL_CENTRES_NM[c]:g} nm "
+                    "is not finite and above 0",
+                )
+
+
+def aloft_spectra(data: dict) -> np.ndarray:
+    """-ln T from the fixture: (altitude, visibility node, channel) = 2 x 6 x 11, all channels."""
+    check_aloft_fixture(data)
+    return -np.log(np.asarray(data["transmittance"], dtype=float))
+
+
+def aloft_inputs(data: dict) -> tuple[np.ndarray, np.ndarray]:
+    """(y_0.34, y_15), each 6 x 10: -ln T over the ten channels centred 380 to 740 nm.
+
+    The 340 nm channel is left out, as in #55: the paper's ozone absorbs in the Huggins band there.
+    """
+    spectra = aloft_spectra(data)
+    first = len(GAS_CHANNEL_CENTRES_NM) - ALOFT_CHANNELS
+    return spectra[0][:, first:], spectra[1][:, first:]
+
+
+def read_aloft_fixture(path: Path = ALOFT_FIXTURE) -> dict:
+    """The committed aloft fixture; one that cannot be read as JSON is refused."""
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError) as error:
+        raise PragueError(f"{_shown(path)} cannot be read as a fixture: {error}") from error
+
+
+# --- step 1: Prague's ozone aloft -----------------------------------------------------------------
+
+
+def aloft_power_law(z380: float, z420: float) -> tuple[float, float, str]:
+    """(beta, eta, regime): the aerosol aloft beta (lambda / 550 nm)^-eta from two residuals.
+
+    Exact through both points when both are positive and eta_2 = ln(z380 / z420) / ln(420 / 380)
+    lies in [0, 3]. Otherwise eta is that logarithm with each residual floored at 1e-12, clipped to
+    [0, 3], and beta is the least-squares amplitude on the two points, floored at 0 ("guard").
+    """
+    low, high = ALOFT_ETA_GUARD
+    if z380 > 0.0 and z420 > 0.0:
+        eta = (math.log(z380) - math.log(z420)) / ALOFT_LOG_RATIO
+        if low <= eta <= high:
+            return z380 * (ALOFT_CENTRES[0] / REFERENCE_WAVELENGTH_NM) ** eta, eta, "exact"
+    raw = (
+        math.log(max(z380, ALOFT_RESIDUAL_FLOOR)) - math.log(max(z420, ALOFT_RESIDUAL_FLOOR))
+    ) / ALOFT_LOG_RATIO
+    eta = min(max(raw, low), high)
+    w380 = (ALOFT_CENTRES[0] / REFERENCE_WAVELENGTH_NM) ** (-eta)
+    w420 = (ALOFT_CENTRES[1] / REFERENCE_WAVELENGTH_NM) ** (-eta)
+    beta = (w380 * z380 + w420 * z420) / (w380**2 + w420**2)
+    return float(max(beta, 0.0)), eta, "guard"
+
+
+@dataclass(frozen=True)
+class AloftOzone:
+    """Prague's ozone depth above 15 km by channel, under one member, and how it was found."""
+
+    o: np.ndarray  # O(c) over the ten fitted channels; O(380) and O(420) are the tail
+    regime: str  # "exact" or "guard": the last pass's
+    passes: int
+    t380: float
+    t420: float
+    eta: float
+    beta: float
+
+    @property
+    def o_bar(self) -> float:
+        return float(aloft_at_550(self.o))
+
+
+def aloft_ozone(
+    y15_mean: np.ndarray, k: float, m: float, *, where: str | None = None
+) -> AloftOzone:
+    """Prague's ozone aloft from the six-node mean of -ln T at 15 km, under member (k, m).
+
+    r(c) = Y(c) - k R15_c. Starting from no tail, each pass takes the power law from r(380) less
+    the tail at 380 nm and r(420) less the tail at 420 nm, sets O(c) = r(c) - beta (lambda_c /
+    550)^-eta from 460 nm up, takes O-bar, and from it the new tail m omega O-bar (0 where O-bar is
+    not positive). The passes stop at the first whose new tail values each differ from the old by
+    at most `ALOFT_TAIL_TOLERANCE`; that pass's O, with the tail at 380 and 420 nm, is the result.
+    A tail that has not settled in `ALOFT_TAIL_MAX_PASSES` passes is a refusal.
+    """
+    r = np.asarray(y15_mean, dtype=float) - k * ALOFT_R15
+    t380 = t420 = 0.0
+    for passes in range(1, ALOFT_TAIL_MAX_PASSES + 1):
+        beta, eta, regime = aloft_power_law(float(r[0]) - t380, float(r[1]) - t420)
+        o = r - beta * (ALOFT_CENTRES / REFERENCE_WAVELENGTH_NM) ** (-eta)
+        o_bar = float(aloft_at_550(o))
+        new380 = m * ALOFT_TAIL_RATIO_380 * o_bar if o_bar > 0.0 else 0.0
+        new420 = m * ALOFT_TAIL_RATIO_420 * o_bar if o_bar > 0.0 else 0.0
+        settled = (
+            abs(new380 - t380) <= ALOFT_TAIL_TOLERANCE
+            and abs(new420 - t420) <= ALOFT_TAIL_TOLERANCE
+        )
+        t380, t420 = new380, new420
+        if settled:
+            o[0], o[1] = t380, t420
+            return AloftOzone(o, regime, passes, t380, t420, eta, beta)
+    raise PragueError(
+        f"{where or aloft_label(k, m)}: the ozone tail at 380 and 420 nm did not settle in "
+        f"{ALOFT_TAIL_MAX_PASSES} passes"
+    )
+
+
+# --- step 2: the six-node fit ---------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class AloftFit:
+    """The six-node fit at 0.34 km under one member, and what it gives."""
+
+    x: np.ndarray  # a, then u_i, alpha_i and gamma_i for each node
+    status: int
+    a: float  # the ozone at 0.34 km as a multiple of the ozone above 15 km
+    gas: float  # G = k R_paper rho-bar + a O-bar
+    ssr: float
+    s: float  # sqrt(SSR / 41)
+    se: float  # SE_fit: infinite where it is not defined
+    jac: np.ndarray  # the analytic Jacobian (60 x 19) at the solution, unscaled
+
+    @property
+    def rms(self) -> float:
+        return math.sqrt(self.ssr / ALOFT_VALUES)
+
+    @property
+    def condition(self) -> float:
+        return float(np.linalg.cond(self.jac))
+
+
+def _aloft_aerosol(x: np.ndarray) -> np.ndarray:
+    """exp(u_i - alpha_i x_c + gamma_i x_c^2), one row per node, from the 19 parameters."""
+    u, alpha, gamma = x[1::3], x[2::3], x[3::3]
+    return np.exp(
+        u[:, None] - alpha[:, None] * ALOFT_X[None, :] + gamma[:, None] * ALOFT_X[None, :] ** 2
+    )
+
+
+def aloft_fit(
+    y0: np.ndarray,
+    o: np.ndarray,
+    k: float,
+    *,
+    start: np.ndarray | None = None,
+    where: str | None = None,
+) -> AloftFit:
+    """The six-node fit of y_0.34 (6 x 10) with the Rayleigh fixed at k R_paper rho and the ozone
+    shape `o`: f = k R_paper rho_c + a O(c) + exp(u_i - alpha_i x_c + gamma_i x_c^2), unweighted,
+    #55's `least_squares` settings and the analytic Jacobian.
+
+    The start is a = 1 and, at each node, u = ln max(ybar_i - (k R_paper rho-bar + O-bar), 0.001),
+    alpha = 1.3, gamma = 0, unless `start` gives one (the gradients start at the solution). A fit
+    with status <= 0 is a refusal. SE_fit = sqrt(q' C q), C = s^2 (J'J)^-1, q = O-bar for a.
+    """
+    label = where or "the six-node fit"
+    y0 = np.asarray(y0, dtype=float)
+    o = np.asarray(o, dtype=float)
+    target = y0 - k * ALOFT_R_PAPER * ALOFT_RHO[None, :]
+    o_bar = float(aloft_at_550(o))
+    if start is None:
+        total = k * ALOFT_R_PAPER * ALOFT_RHO_BAR + o_bar
+        start = np.empty(ALOFT_PARAMETERS)
+        start[0] = 1.0
+        start[1::3] = np.log(np.maximum(aloft_at_550(y0) - total, ALOFT_START_FLOOR))
+        start[2::3] = ALOFT_START_ALPHA
+        start[3::3] = ALOFT_START_GAMMA
+
+    def residuals(x: np.ndarray) -> np.ndarray:
+        return (x[0] * o[None, :] + _aloft_aerosol(x) - target).ravel()
+
+    def jacobian(x: np.ndarray) -> np.ndarray:
+        aerosol = _aloft_aerosol(x)
+        jac = np.zeros((ALOFT_VALUES, ALOFT_PARAMETERS))
+        for i in range(ALOFT_NODES):
+            rows = slice(i * ALOFT_CHANNELS, (i + 1) * ALOFT_CHANNELS)
+            jac[rows, 0] = o
+            jac[rows, 1 + 3 * i] = aerosol[i]
+            jac[rows, 2 + 3 * i] = -ALOFT_X * aerosol[i]
+            jac[rows, 3 + 3 * i] = ALOFT_X**2 * aerosol[i]
+        return jac
+
+    try:
+        result = least_squares(residuals, start, jac=jacobian, **GAS_FIT_SETTINGS)
+    except ValueError as error:
+        raise PragueError(f"{label}: the fit could not be run: {error}") from error
+    if result.status <= 0:
+        raise PragueError(
+            f"{label}: the six-node fit did not converge (status {result.status}, "
+            f"{getattr(result, 'message', 'no message')}): the report is not written"
+        )
+    x = np.asarray(result.x, dtype=float)
+    final = residuals(x)
+    ssr = float(final @ final)
+    jac = jacobian(x)
+    s2 = ssr / ALOFT_FIT_DOF
+    q = np.zeros(ALOFT_PARAMETERS)
+    q[0] = o_bar
+    return AloftFit(
+        x=x,
+        status=int(result.status),
+        a=float(x[0]),
+        gas=k * ALOFT_R_PAPER * ALOFT_RHO_BAR + float(x[0]) * o_bar,
+        ssr=ssr,
+        s=math.sqrt(s2),
+        se=standard_error(jac, q, s2),
+        jac=jac,
+    )
+
+
+# --- step 3: the node-to-node scale at 15 km ------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class AloftScale:
+    """s_15, and each node's fitted difference from the six-node mean at 15 km."""
+
+    s15: float
+    ssr: float  # SSR_15 over the 60 values
+    coefficients: np.ndarray  # (6, 3): the constant, x_c and x_c^2 coefficients of each node
+
+    @property
+    def d550(self) -> np.ndarray:
+        """Each node's fitted D at 550 nm: the constant coefficient."""
+        return self.coefficients[:, 0]
+
+
+def aloft_scale(y15: np.ndarray) -> AloftScale:
+    """D(c, V_i) = y_15(c, V_i) - Y(c) is fitted at each node by 1, x_c and x_c^2 (linear least
+    squares, `numpy.linalg.lstsq` with `rcond=None`); s_15 = sqrt(SSR_15 / 35)."""
+    y15 = np.asarray(y15, dtype=float)
+    d = y15 - y15.mean(axis=0)
+    basis = np.stack([np.ones(ALOFT_CHANNELS), ALOFT_X, ALOFT_X**2], axis=1)
+    coefficients, *_ = np.linalg.lstsq(basis, d.T, rcond=None)
+    residual = d.T - basis @ coefficients
+    ssr = float((residual**2).sum())
+    return AloftScale(math.sqrt(ssr / ALOFT_SCALE_DOF), ssr, coefficients.T)
+
+
+# --- steps 4 and 5: the errors and the envelope ---------------------------------------------------
+
+
+@dataclass(frozen=True)
+class AloftMember:
+    """One member (k, m): its ozone aloft, its six-node fit and its error."""
+
+    k: float
+    m: float
+    ozone: AloftOzone
+    fit: AloftFit
+    grad15: float  # |grad_k|: the Euclidean norm of dG/dY(c) over the ten channels
+    grad0: float  # |grad0_k|: the same for dG/dy_0.34(c, .)
+    se_ext: float
+    se_0: float
+    se: float  # SE_k
+    g: float  # g_k = ybar(V_p) - G_k - 0.1
+
+    @property
+    def label(self) -> str:
+        return aloft_label(self.k, self.m)
+
+    @property
+    def low(self) -> float:
+        return self.g - SE_MULTIPLE * self.se
+
+    @property
+    def high(self) -> float:
+        return self.g + SE_MULTIPLE * self.se
+
+
+def aloft_envelope(members: Iterable) -> tuple[float, float]:
+    """(g_lo, g_hi): the lowest g_k - 2 SE_k and the highest g_k + 2 SE_k over the members."""
+    members = list(members)
+    return (
+        min(m.g - SE_MULTIPLE * m.se for m in members),
+        max(m.g + SE_MULTIPLE * m.se for m in members),
+    )
+
+
+@dataclass(frozen=True)
+class AloftEstimate:
+    members: tuple[AloftMember, ...]
+    scale: AloftScale
+    ybar_p: float
+
+    @property
+    def g_lo(self) -> float:
+        return aloft_envelope(self.members)[0]
+
+    @property
+    def g_hi(self) -> float:
+        return aloft_envelope(self.members)[1]
+
+
+def _quadrature(*parts: float) -> float:
+    """sqrt of the sum of squares; an infinite part gives infinity and a NaN part gives NaN."""
+    with np.errstate(all="ignore"):
+        return float(np.sqrt(sum(np.float64(part) ** 2 for part in parts)))
+
+
+def _aloft_gradients(
+    y0: np.ndarray, y15_mean: np.ndarray, own: AloftFit, ozone: AloftOzone, k: float, m: float
+) -> tuple[float, float]:
+    """(|grad_k|, |grad0_k|) by central differences with step 1e-5, each perturbed fit starting at
+    the unperturbed solution.
+
+    grad_k(c) = dG/dY(c): steps 1 and 2 repeated (every pass, the tail from no tail) with the
+    six-node mean Y(c) raised and lowered. grad0_k(c) = dG/dy_0.34(c, .): y_0.34 raised and lowered
+    in channel c at all six nodes at once, with O held at its unperturbed value.
+    """
+    label = aloft_label(k, m)
+    grad15 = np.empty(ALOFT_CHANNELS)
+    grad0 = np.empty(ALOFT_CHANNELS)
+    for c in range(ALOFT_CHANNELS):
+        gas = []
+        for sign, word in ((1.0, "raised"), (-1.0, "lowered")):
+            step = np.zeros(ALOFT_CHANNELS)
+            step[c] = sign * ALOFT_STEP
+            where = (
+                f"{label}, perturbed fit (the 15 km mean {word} in channel "
+                f"{GAS_FIT_CENTRES_NM[c]:g} nm)"
+            )
+            shape = aloft_ozone(y15_mean + step, k, m, where=where).o
+            gas.append(aloft_fit(y0, shape, k, start=own.x, where=where).gas)
+        grad15[c] = (gas[0] - gas[1]) / (2.0 * ALOFT_STEP)
+    for c in range(ALOFT_CHANNELS):
+        gas = []
+        for sign, word in ((1.0, "raised"), (-1.0, "lowered")):
+            step = np.zeros(ALOFT_CHANNELS)
+            step[c] = sign * ALOFT_STEP
+            where = (
+                f"{label}, perturbed fit (the 0.34 km spectra {word} in channel "
+                f"{GAS_FIT_CENTRES_NM[c]:g} nm)"
+            )
+            gas.append(aloft_fit(y0 + step[None, :], ozone.o, k, start=own.x, where=where).gas)
+        grad0[c] = (gas[0] - gas[1]) / (2.0 * ALOFT_STEP)
+    return float(np.linalg.norm(grad15)), float(np.linalg.norm(grad0))
+
+
+def aloft_estimate(y0: np.ndarray, y15: np.ndarray, ybar_p: float) -> AloftEstimate:
+    """Steps 1 to 5 for the nine members, from -ln T at 0.34 km and 15 km (each 6 x 10).
+
+    SE_ext,k = |grad_k| sqrt(s_15^2 / 6 + s_k^2), SE_0,k = |grad0_k| s_k and SE_k = sqrt(SE_fit,k^2
+    + SE_ext,k^2 + SE_0,k^2); g_k = ybar(V_p) - G_k - 0.1. A fit or perturbed fit that fails, a tail
+    that does not settle, a non-finite g_k or a SE_k that is not a number is a refusal naming the
+    member; an infinite SE_k is not.
+    """
+    y0 = np.asarray(y0, dtype=float)
+    y15 = np.asarray(y15, dtype=float)
+    shape = (ALOFT_NODES, ALOFT_CHANNELS)
+    if y0.shape != shape or y15.shape != shape:
+        raise PragueError(
+            f"the spectra are {y0.shape} and {y15.shape}, not {ALOFT_NODES} nodes of "
+            f"{ALOFT_CHANNELS} channels"
+        )
+    if not (np.all(np.isfinite(y0)) and np.all(np.isfinite(y15))):
+        raise PragueError("the spectra hold a value that is not finite")
+    y15_mean = y15.mean(axis=0)
+    scale = aloft_scale(y15)
+    members = []
+    for k, m in ALOFT_MEMBERS:
+        label = aloft_label(k, m)
+        ozone = aloft_ozone(y15_mean, k, m)
+        fit = aloft_fit(y0, ozone.o, k, where=label)
+        g = ybar_p - fit.gas - DEPTH_LOADS[-1]
+        if not math.isfinite(g):
+            raise PragueError(f"{label}: the excess g_k is {g!r}, not a finite number")
+        grad15, grad0 = _aloft_gradients(y0, y15_mean, fit, ozone, k, m)
+        se_ext = grad15 * math.sqrt(scale.s15**2 / ALOFT_NODES + fit.s**2)
+        se_0 = grad0 * fit.s
+        se = _quadrature(fit.se, se_ext, se_0)
+        if math.isnan(se):
+            raise PragueError(f"{label}: the error SE_k is not a number")
+        members.append(AloftMember(k, m, ozone, fit, grad15, grad0, se_ext, se_0, se, g))
+    return AloftEstimate(tuple(members), scale, float(ybar_p))
+
+
+# --- step 6: the verdict --------------------------------------------------------------------------
+
+SPANS = "spans"
+MIXED = "mixed"
+
+
+def aloft_outcome(g_lo: float, g_hi: float, g_star: float) -> str:
+    """At one sun: contributes if g_lo > g*, not this if g_hi <= g*, spans otherwise."""
+    if g_lo > g_star:
+        return CONTRIBUTES
+    if g_hi <= g_star:
+        return NOT_THIS
+    return SPANS
+
+
+@dataclass(frozen=True)
+class AloftVerdict:
+    """The four suns' outcomes, in the order of `DEPTH_SUNS_DEG`, the verdict and its lines."""
+
+    outcomes: tuple[str, ...]
+    verdict: str
+    lines: tuple[str, ...]
+
+    def outcome_at(self, sun: float) -> str:
+        return self.outcomes[DEPTH_SUNS_DEG.index(sun)]
+
+
+def aloft_verdict(g_lo: float, g_hi: float, g_stars: Mapping[float, float]) -> AloftVerdict:
+    """`sun <s>: g* <g*_s>, <outcome>` for -1, 0, +1 and +10, then `verdict: <outcome>` if all four
+    agree and `verdict: mixed` otherwise. `g_stars` maps each sun to #55's unrounded crossing."""
+    if set(g_stars) != set(DEPTH_SUNS_DEG):
+        raise PragueError(
+            f"the verdict needs the crossings at suns {list(DEPTH_SUNS_DEG)}, not {list(g_stars)}"
+        )
+    outcomes = tuple(aloft_outcome(g_lo, g_hi, g_stars[sun]) for sun in DEPTH_SUNS_DEG)
+    verdict = outcomes[0] if len(set(outcomes)) == 1 else MIXED
+    lines = tuple(
+        f"sun {_sun_label(sun)}: g* {format_significant(g_stars[sun])}, {outcome}"
+        for sun, outcome in zip(DEPTH_SUNS_DEG, outcomes, strict=True)
+    ) + (f"verdict: {verdict}",)
+    return AloftVerdict(outcomes, verdict, lines)
+
+
+# --- the report -----------------------------------------------------------------------------------
+
+
+def _reciprocal(value: float) -> float:
+    return math.inf if value == 0.0 else 1.0 / value
+
+
+def _aloft_spectra_section(spectra: np.ndarray) -> list[str]:
+    lines: list[str] = []
+    out = lines.append
+    out("#### 1. Prague's -ln T, y_h(c, V_i), at the six nodes and two observer altitudes")
+    out("")
+    out(
+        "Prague's zenith transmittance T per channel, as `fixture --aloft` recorded it, shown as "
+        "y = -ln T to five decimals: one row per visibility node V_i (km), one column per channel "
+        "centre (nm). The fits use the ten channels from 380 nm up; the 340 nm channel is shown "
+        "and used for nothing."
+    )
+    out("")
+    header = "| V_i (km) | " + " | ".join(f"{c:g}" for c in GAS_CHANNEL_CENTRES_NM) + " |"
+    rule = "| --- |" + " --- |" * len(GAS_CHANNEL_CENTRES_NM)
+    for altitude, block in zip(ALOFT_ALTITUDES_M, spectra, strict=True):
+        out(f"Observer altitude {altitude:g} m:")
+        out("")
+        out(header)
+        out(rule)
+        for node, row in zip(ALOFT_VISIBILITIES_KM, block, strict=True):
+            out(f"| {node:g} | " + " | ".join(f"{y:.5f}" for y in row) + " |")
+        out("")
+    return lines
+
+
+def _aloft_ozone_section(estimate: AloftEstimate) -> list[str]:
+    lines: list[str] = []
+    out = lines.append
+    out("#### 2. Prague's ozone above 15 km, by member (k, m)")
+    out("")
+    out(
+        "k is the Rayleigh factor and m the ozone-tail multiplier. Y(c), the mean over the six "
+        "nodes of y_15(c, V_i), less k R15_c, is the residual r(c). The aerosol aloft beta "
+        "(lambda / 550 nm)^-eta is taken from r(380) and r(420) less the tail t_380 = m omega_380 "
+        "O-bar and t_420 = m omega_420 O-bar, passes until neither tail value moves by more than "
+        "1e-15. The regime is the last pass's, `exact` through both points or `guard`."
+    )
+    out("")
+    out("| k | m | passes | regime | t_380 | t_420 | eta | beta | O-bar |")
+    out("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+    for member in estimate.members:
+        z = member.ozone
+        out(
+            f"| {member.k:g} | {member.m:g} | {z.passes} | {z.regime} "
+            f"| {format_significant(z.t380)} | {format_significant(z.t420)} "
+            f"| {format_significant(z.eta)} | {format_significant(z.beta)} "
+            f"| {format_significant(z.o_bar)} |"
+        )
+    out("")
+    out("O(c), the ozone depth above 15 km by channel (O(380) and O(420) are the tail):")
+    out("")
+    out("| k | m | " + " | ".join(f"O({c:g})" for c in GAS_FIT_CENTRES_NM) + " |")
+    out("| --- | --- |" + " --- |" * ALOFT_CHANNELS)
+    for member in estimate.members:
+        out(
+            f"| {member.k:g} | {member.m:g} | "
+            + " | ".join(format_significant(float(v)) for v in member.ozone.o)
+            + " |"
+        )
+    out("")
+    return lines
+
+
+def _aloft_scale_section(scale: AloftScale) -> list[str]:
+    lines: list[str] = []
+    out = lines.append
+    out("#### 3. The node-to-node scale at 15 km")
+    out("")
+    out(
+        f"s_15 = {format_significant(scale.s15)}: the residual scale of the six aloft spectra "
+        "after each node's difference from their mean is fitted by 1, x_c and x_c^2 "
+        f"(SSR_15 over the 60 values, {ALOFT_SCALE_DOF} degrees of freedom). Each node's fitted D "
+        "at 550 nm, the constant coefficient, is how much Prague's aerosol aloft changes with "
+        "visibility: a diagnostic that rules nothing."
+    )
+    out("")
+    out("| V_i (km) | D at 550 nm |")
+    out("| --- | --- |")
+    for node, d in zip(ALOFT_VISIBILITIES_KM, scale.d550, strict=True):
+        out(f"| {node:g} | {format_significant(float(d))} |")
+    out("")
+    return lines
+
+
+def _aloft_fit_section(estimate: AloftEstimate) -> list[str]:
+    lines: list[str] = []
+    out = lines.append
+    out("#### 4. The six-node fit and its error, by member (k, m)")
+    out("")
+    out(
+        "a is the ozone at 0.34 km as a multiple of the ozone above 15 km; G_k = k R_paper rho-bar "
+        "+ a O-bar the gas depth at 550 nm; s_k = sqrt(SSR / 41); the residual rms is "
+        "sqrt(SSR / 60); the condition number is that of the unscaled analytic Jacobian at the "
+        "solution. SE_fit is the fit's own error; SE_ext = |grad_k| sqrt(s_15^2 / 6 + s_k^2) and "
+        "SE_0 = |grad0_k| s_k carry the extraction and the error shared by the nodes; SE_k is "
+        "their quadrature. g_k = ybar(V_p) - G_k - 0.1."
+    )
+    out("")
+    out("| k | m | a | 1 / a | G_k | s_k | residual rms | condition number | SE_fit |")
+    out("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+    for member in estimate.members:
+        fit = member.fit
+        out(
+            f"| {member.k:g} | {member.m:g} | {format_significant(fit.a)} "
+            f"| {format_significant(_reciprocal(fit.a))} | {format_significant(fit.gas)} "
+            f"| {format_significant(fit.s)} | {format_significant(fit.rms)} "
+            f"| {format_significant(fit.condition)} | {format_significant(fit.se)} |"
+        )
+    out("")
+    out(
+        "| k | m | abs(grad_k) | SE_ext | abs(grad0_k) | SE_0 | SE_k | g_k | g_k - 2 SE_k "
+        "| g_k + 2 SE_k |"
+    )
+    out("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+    for member in estimate.members:
+        out(
+            f"| {member.k:g} | {member.m:g} | {format_significant(member.grad15)} "
+            f"| {format_significant(member.se_ext)} | {format_significant(member.grad0)} "
+            f"| {format_significant(member.se_0)} | {format_significant(member.se)} "
+            f"| {format_significant(member.g)} | {format_significant(member.low)} "
+            f"| {format_significant(member.high)} |"
+        )
+    out("")
+    return lines
+
+
+def _aloft_envelope_section(estimate: AloftEstimate, g_seg: float) -> list[str]:
+    lines: list[str] = []
+    out = lines.append
+    out("#### 5. The envelope of the excess")
+    out("")
+    out(
+        "g_lo and g_hi are the lowest g_k - 2 SE_k and the highest g_k + 2 SE_k over the nine "
+        "members. g_seg = ybar(V_p) - ybar_0.34(59.4 km), with ybar_0.34(59.4 km) the 59.4 km "
+        "node's y_0.34 at 550 nm: up to g_seg, Delta_M is nearly linear in the excess (Prague "
+        "interpolates linearly in visibility between 40 and 59.4 km); past it the linear scaling "
+        "is an assumption."
+    )
+    out("")
+    out(f"g_lo = {format_significant(estimate.g_lo)}")
+    out(f"g_hi = {format_significant(estimate.g_hi)}")
+    out(f"g_seg = {format_significant(g_seg)}")
+    out("")
+    return lines
+
+
+def _aloft_verdict_section(verdict: AloftVerdict) -> list[str]:
+    lines: list[str] = []
+    out = lines.append
+    out("#### 6. The verdict")
+    out("")
+    out(
+        "At each sun: contributes if g_lo > g*, not this if g_hi <= g*, spans otherwise; g* is "
+        "#55's crossing (`report --depth`), unrounded. The verdict is the common outcome, or "
+        "mixed."
+    )
+    out("")
+    lines.extend(verdict.lines)
+    out("")
+    return lines
+
+
+def format_aloft(
+    spectra: np.ndarray, estimate: AloftEstimate, verdict: AloftVerdict, g_seg: float
+) -> str:
+    lines = [
+        "### #57: Prague's aerosol amount from Prague's own ozone aloft and the paper's Rayleigh "
+        "(pre-registered)",
+        "",
+        "The criterion (`docs/renderer/prague-gas-aloft-criterion.md`) registers the rule. This "
+        "report prints its items 1 to 6 from `aloft.json` and the four committed fixtures; it "
+        "runs no Prague evaluation and writes no file. Numbers are to five significant figures "
+        "unless stated, computed from unrounded values.",
+        "",
+    ]
+    lines.extend(_aloft_spectra_section(spectra))
+    lines.extend(_aloft_ozone_section(estimate))
+    lines.extend(_aloft_scale_section(estimate.scale))
+    lines.extend(_aloft_fit_section(estimate))
+    lines.extend(_aloft_envelope_section(estimate, g_seg))
+    lines.extend(_aloft_verdict_section(verdict))
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def report_aloft(fixtures: dict[float, dict], aloft: dict) -> str:
+    """The #57 report on the four committed fixtures and the aloft fixture; refuses before output.
+
+    The fixtures are checked as `report --depth` checks them (the four must hold identical spectra
+    and the registered visibilities); ȳ(V_p) and the unrounded crossings g*_s are #55's.
+    """
+    spectra = aloft_spectra(aloft)
+    pilot = depth_pilot(fixtures)
+    y0, y15 = aloft_inputs(aloft)
+    estimate = aloft_estimate(y0, y15, pilot.y_bar_p)
+    verdict = aloft_verdict(
+        estimate.g_lo, estimate.g_hi, {row.sun: row.g_star for row in pilot.suns}
+    )
+    g_seg = pilot.y_bar_p - float(aloft_at_550(y0[ALOFT_VISIBILITIES_KM.index(59.4)]))
+    return format_aloft(spectra, estimate, verdict, g_seg)
+
+
+def cmd_report_aloft() -> None:
+    """Print the aloft report; the text is complete before anything is written to stdout."""
+    sys.stdout.write(report_aloft(read_offset_fixtures(), read_aloft_fixture()))
+
+
 def cmd_report(spec: FixtureSpec = SUN10) -> None:
     if spec.sun_elevation_deg not in (SUN_ELEVATION_DEG, 0.0):
         raise PragueError(
@@ -4127,6 +5077,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="report: the evidence for #55 (the aerosol amount, no test), from all four fixtures "
         "(--sun is not used)",
     )
+    parser.add_argument(
+        "--aloft",
+        action="store_true",
+        help="fixture, report: Prague's transmittance at the six nodes and at 15 km (#57) and its "
+        "report, from aloft.json and the four fixtures (--sun is not used)",
+    )
     return parser
 
 
@@ -4139,6 +5095,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--depth is an option of `report`")
     if args.depth and args.offset:
         parser.error("--depth and --offset are different reports: give one")
+    if args.aloft and not {"fixture", "report"} & set(args.command):
+        parser.error("--aloft is an option of `fixture` and `report`")
+    if args.aloft and (args.depth or args.offset):
+        parser.error("--aloft is a different report from --depth and --offset: give one")
     status = 0
     for command in args.command:
         try:
@@ -4146,9 +5106,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 cmd_fetch(args.cache)
             elif command == "build":
                 cmd_build(args.cache)
+            elif command == "fixture" and args.aloft:
+                path = args.output if args.output is not None else ALOFT_FIXTURE
+                status = max(status, cmd_fixture_aloft(args.cache, path, check=args.check))
             elif command == "fixture":
                 spec = fixture_spec(args.sun, args.output)
                 status = max(status, cmd_fixture(args.cache, spec, check=args.check))
+            elif args.aloft:
+                cmd_report_aloft()
             elif args.depth:
                 cmd_report_depth()
             elif args.offset:
